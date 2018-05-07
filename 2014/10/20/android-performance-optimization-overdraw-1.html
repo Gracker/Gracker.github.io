@@ -1,0 +1,214 @@
+<html>
+<head>
+<script async src="//pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+<script>
+  (adsbygoogle = window.adsbygoogle || []).push({
+    google_ad_client: "ca-pub-6592910800642606",
+    enable_page_level_ads: true
+  });
+</script>
+	
+	<title>Android性能优化之过渡绘制(一)</title>
+	<meta name="keywords" content="Android , Performance" />
+
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+
+    
+	   <link href="/css/main.css?v=3" rel="stylesheet" type="text/css" />
+    
+        <script src="/js/util.js"></script>
+        <script>
+            if(isMobile()) {
+                loadjscssfile('../css/mobile.css', 'css');
+            } else {
+                loadjscssfile('../css/desktop.css', 'css');
+            }
+        </script> 
+    
+
+    <link rel="alternate" type="application/atom+xml" href="/atom.xml" title="Atom feed">
+
+    
+	<link rel="shortcut icon" type="image/x-icon" href="/favicon.png?v=3"/>
+    
+    
+<!-- Google Analytics -->
+<script type="text/javascript">
+(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+})(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+ga('create', 'UA-50993302-2', 'auto');
+ga('send', 'pageview');
+
+</script>
+<!-- End Google Analytics -->
+
+
+</head>
+
+<body>
+
+
+<h2 class="title">Android性能优化之过渡绘制(一)</h2>
+<!---
+<div style="text-align:center;margin-top: -10px;">
+<div class="article-category">
+发表于2014年10月20日
+
+
+    <a class="article-category-link" href="/categories/Android/">Android</a>
+
+
+
+ </div>
+--->
+</div>
+
+<ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#过渡绘制概念"><span class="toc-text">过渡绘制概念</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#过渡绘制的原因"><span class="toc-text">过渡绘制的原因</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#过渡绘制和不合理的xml布局的影响"><span class="toc-text">过渡绘制和不合理的xml布局的影响</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#过渡绘制的一些基本概念"><span class="toc-text">过渡绘制的一些基本概念:</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#优化工具介绍"><span class="toc-text">优化工具介绍</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#布局优化建议"><span class="toc-text">布局优化建议</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#源码相关"><span class="toc-text">源码相关</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#参考文章"><span class="toc-text">参考文章</span></a></li></ol>
+<p>博客有一段时间没有更新了，到了新公司后，一直比较忙，博客也更新地不那么频繁了，倒是利用这个VPS搭建的VPN每天都在用，速度也蛮不错的。最近一直在看Android上和性能相关的部分，也就是所谓的Android性能优化，才发现Android性能这一块，自己懂得还是太少了，所以从上层开始看，也算是一点一点入门吧。这个系列将讲解学习过程中总结的和性能相关的内容。</p>
+<p>首先将讲解一下GPU过渡绘制，也是开发者最直接接触的部分吧，这个内容将分为两个部分来将讲，第一部分初步讲解一下gpu过渡绘制的原理，和一些优化建议，第二部分将用实际例子来讲解优化GPU过渡绘制的一般步骤。</p>
+<h2 id="过渡绘制概念"><a href="#过渡绘制概念" class="headerlink" title="过渡绘制概念"></a>过渡绘制概念</h2><p>GPU过渡绘制的概念：GPU过度绘制指的是在屏幕一个像素上绘制多次(超过一次),比如一个TextView后有背景，那么显示文本的像素至少绘了两次，一次是背景，一次是文本。GPU过度绘制或多或少对性能有些影响,设备的内存带宽是有限的，当过度绘制导致应用需要更多的带宽(超过了可用带宽)的时候性能就会降低。带宽的限制每个设备都可能是不一样的。</p>
+<a id="more"></a>
+<h2 id="过渡绘制的原因"><a href="#过渡绘制的原因" class="headerlink" title="过渡绘制的原因"></a>过渡绘制的原因</h2><ol>
+<li>太多的View叠加</li>
+<li>复杂的层级叠加</li>
+<li>更长的inflation时间</li>
+</ol>
+<h2 id="过渡绘制和不合理的xml布局的影响"><a href="#过渡绘制和不合理的xml布局的影响" class="headerlink" title="过渡绘制和不合理的xml布局的影响"></a>过渡绘制和不合理的xml布局的影响</h2><ol>
+<li>布局文件是一个xml文件，inflate布局文件其实就是解析xml，根据标签信息创建相应的布局对象并做关联。xml中的标签和属性设置越多，节点树的深度越深，在解析时要执行的判断逻辑、函数的嵌套和递归就越多，所以时间消耗越多；</li>
+<li>inflate操作只是布局影响的第一个环节，一个界面要显示出来，在requestLayout后还要执行一系列的measure、layout、draw的操作，每一步的执行时间都会受到布局本身的影响。而界面的最终显示是所有这些操作完成后才实现的，所以如果布局质量差，会增加每一步操作的时间成本，最终显示时间就会比较长。</li>
+</ol>
+<h2 id="过渡绘制的一些基本概念"><a href="#过渡绘制的一些基本概念" class="headerlink" title="过渡绘制的一些基本概念:"></a>过渡绘制的一些基本概念:</h2><p>Android提供了三个工具来帮助辨别和解决重绘问题：Hierachy Viewer，Tracer for OpenGL和Show GPU overdraw。前两个可以在ADT工具或者独立的monitor工具中找到，最后一个是在开发者选项的一部分.</p>
+<ol>
+<li>GPU过渡绘制测试:对于过度绘制的测试主要通过人工进行测试，也是发现应用过渡绘制的首选途径 .通过打开开发者选项中的 显示GPU过度绘制(魅族手机:设置—辅助功能–开发人员工具–硬件加速渲染—调试GPU过渡绘制— 显示过渡绘制区域. (魅族手机需要打开开发者模式：需要在电话界面输入: <em>#</em>#6961#<em>#</em> )) 来进行测试（PS：只有android4.2及以上的版本才具备此功能)</li>
+<li>颜色标识: GPU过渡绘制从好到差:蓝-绿-淡红-红<ul>
+<li>蓝色1x过度绘制</li>
+<li>绿色2x过度绘制</li>
+<li>淡红色3x过度绘制</li>
+<li>红色超过4x过度绘制</li>
+</ul>
+</li>
+<li>验收标准:<ul>
+<li>控制过度绘制为2x</li>
+<li>不允许存在4x过度绘制</li>
+<li>不允许存在面积超过屏幕1/4区域的3x过度绘制（淡红色区域）</li>
+</ul>
+</li>
+</ol>
+<h2 id="优化工具介绍"><a href="#优化工具介绍" class="headerlink" title="优化工具介绍"></a>优化工具介绍</h2><ol>
+<li>Lint工具:<ul>
+<li>Eclipse中,点击即可,下面的窗口中会出现提示,根据提示和具体解决办法消除.</li>
+<li>Android Studio自带Lint工具,不合理或者需要优化和注意的地方,会用黄色标记出来.</li>
+<li>Lint工具不仅对布局有很好的优化建议,对代码中不合理的活着存在潜在风险的模块也会提出优化建议,所以一个好的建议是:多使用Lint工具检查自己的应用,尽量消除所有的建议.</li>
+<li>Lint工具可以用命令行来运行,具体使用可以参考:<a href="tools.android.com">tools.android.com</a><br><img src="/images/overdraw-1/lint.png" alt="Lint"></li>
+</ul>
+</li>
+<li><p>Lint工具的提升例子(摘自官方文档):</p>
+<ul>
+<li>Use compound drawables(使用compound drawables) - A LinearLayout which contains an ImageView and a TextView can be more efficiently handled as a compound drawable.</li>
+<li>Merge root frame(使用Merge根框架) - If a FrameLayout is the root of a layout and does not provide background or padding etc, it can be replaced with a merge tag which is slightly more efficient.</li>
+<li>Useless leaf(去除无用的分支) - A layout that has no children or no background can often be removed (since it is invisible) for a flatter and more efficient layout hierarchy.</li>
+<li>Useless parent (去除无用的父控件)- A layout with children that has no siblings, is not a ScrollView or a root layout, and does not have a background, can be removed and have its children moved directly into the parent for a flatter and more efficient layout hierarchy.</li>
+<li>Deep layouts (注意Layout的深度) - Layouts with too much nesting are bad for performance. Consider using flatter layouts such as RelativeLayout or GridLayout to improve performance. The default maximum depth is</li>
+</ul>
+</li>
+<li><p>Hierarchy Viewer:此工具是一个ADT工具（或者monitor,最新版本的SDK建议不使用独立的HV工具,而是直接在monitor中进行操作.）的一部分，可以被用作对视图层级进行快速解读。在处理布局问题时特别有用，对于性能问题也很适用。Hierarchy Viewer默认只能在非加密设备使用，例如工程机，工程平板或者模拟器。为了能够在任何手机上使用Hierarchy Viewer，你得在你的应用中添加ViewServer，这是一个开源库,使用方法可以参考这里。连接上设备，打开Hierarchy Viewer(定位到tools/目录下，直接执行hierarchyviewer的命令，选定需要查看的Process，再点击Load View Hierarchy会显示出当前界面的布局Tree。在每个模块的Traffic light上有三个灯，分别代表了Measure, Layout and Draw三个步骤的性能。</p>
+</li>
+</ol>
+<h2 id="布局优化建议"><a href="#布局优化建议" class="headerlink" title="布局优化建议"></a>布局优化建议</h2><p>在Android UI布局过程中，通过遵守一些惯用、有效的布局原则，我们可以制作出高效且复用性高的UI，概括来说包括如下几点：</p>
+<ul>
+<li><p>尽量多使用RelativeLayout和LinearLayout, 不要使用绝对布局AbsoluteLayout，</p>
+<ul>
+<li>在布局层次一样的情况下， 建议使用LinearLayout代替RelativeLayout, 因为LinearLayout性能要稍高一点.</li>
+<li>在完成相对较复杂的布局时,建议使用RelativeLayout,RelativeLayout可以简单实现LinearLayout嵌套才能实现的布局.</li>
+</ul>
+</li>
+<li><p>将可复用的组件抽取出来并通过include标签使用；</p>
+</li>
+<li>使用ViewStub标签来加载一些不常用的布局；</li>
+<li>动态地inflation view性能要比SetVisiblity性能要好.当然用VIewStub是最好的选择.</li>
+<li>使用merge标签减少布局的嵌套层次</li>
+<li><p>去掉多余的背景颜色(查看背景颜色是否多余,可以将HierarchyView中的图导出为psd文件,然后用Photoshop查看.具体可以参考这个<a href="https://www.youtube.com/watch?v=URyoiAt8098" target="_blank" rel="noopener">视频</a>)</p>
+<ul>
+<li>对于有多层背景颜色的Layout来说,留最上面一层的颜色即可,其他底层的颜色都可以去掉</li>
+<li>对于使用Selector当背景的Layout(比如ListView的Item,会使用Selector来标记点击,选择等不同的状态),可以将normal状态的color设置为\”@android:color/transparent”,来解决对应的问题</li>
+</ul>
+</li>
+<li><p>内嵌使用包含layout_weight属性的LinearLayout会在绘制时花费昂贵的系统资源，因为每一个子组件都需要被测量两次。在使用ListView与GridView的时候，这个问题显的尤其重要，因为子组件会重复被创建.所以要尽量避免使用Layout_weight</p>
+</li>
+<li>使得Layout宽而浅，而不是窄而深（在Hierarchy Viewer的Tree视图里面体现）</li>
+</ul>
+<h2 id="源码相关"><a href="#源码相关" class="headerlink" title="源码相关"></a>源码相关</h2><p>另外有能力看源码的同学，下面是绘制OverDraw的源码位置：/frameworks/base/libs/hwui/OpenGLRenderer.cpp,有兴趣的可以去研究研究。</p>
+<figure class="highlight dts"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br></pre></td><td class="code"><pre><span class="line">void <span class="symbol">OpenGLRenderer::</span>renderOverdraw() &#123;</span><br><span class="line">    if (mCaches.debugOverdraw <span class="variable">&amp;amp</span>;<span class="variable">&amp;amp</span>; getTargetFbo() == <span class="number">0</span>) &#123;</span><br><span class="line">        const Rect* clip = <span class="variable">&amp;amp</span>;mTilingClip;</span><br><span class="line"></span><br><span class="line">        mCaches.enableScissor();</span><br><span class="line">        mCaches.setScissor(clip-<span class="variable">&amp;gt</span>;left, mFirstSnapshot-<span class="variable">&amp;gt</span>;height - clip-<span class="variable">&amp;gt</span>;bottom,</span><br><span class="line">                clip-<span class="variable">&amp;gt</span>;right - clip-<span class="variable">&amp;gt</span>;left, clip-<span class="variable">&amp;gt</span>;bottom - clip-<span class="variable">&amp;gt</span>;top);</span><br><span class="line"></span><br><span class="line">        <span class="comment">// 1x overdraw</span></span><br><span class="line">        mCaches.stencil.enableDebugTest(<span class="number">2</span>);</span><br><span class="line">        drawColor(mCaches.getOverdrawColor(<span class="number">1</span>), <span class="symbol">SkXfermode::</span>kSrcOver_Mode);</span><br><span class="line"></span><br><span class="line">        <span class="comment">// 2x overdraw</span></span><br><span class="line">        mCaches.stencil.enableDebugTest(<span class="number">3</span>);</span><br><span class="line">        drawColor(mCaches.getOverdrawColor(<span class="number">2</span>), <span class="symbol">SkXfermode::</span>kSrcOver_Mode);</span><br><span class="line"></span><br><span class="line">        <span class="comment">// 3x overdraw</span></span><br><span class="line">        mCaches.stencil.enableDebugTest(<span class="number">4</span>);</span><br><span class="line">        drawColor(mCaches.getOverdrawColor(<span class="number">3</span>), <span class="symbol">SkXfermode::</span>kSrcOver_Mode);</span><br><span class="line"></span><br><span class="line">        <span class="comment">// 4x overdraw and higher</span></span><br><span class="line">        mCaches.stencil.enableDebugTest(<span class="number">4</span>, true);</span><br><span class="line">        drawColor(mCaches.getOverdrawColor(<span class="number">4</span>), <span class="symbol">SkXfermode::</span>kSrcOver_Mode);</span><br><span class="line"></span><br><span class="line">        mCaches.stencil.disable();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">void <span class="symbol">OpenGLRenderer::</span>countOverdraw() &#123;</span><br><span class="line">    size_t count = mWidth * mHeight;</span><br><span class="line">    uint32_t* buffer = new uint32_t[count];</span><br><span class="line">    glReadPixels(<span class="number">0</span>, <span class="number">0</span>, mWidth, mHeight, GL_RGBA, GL_UNSIGNED_BYTE, <span class="variable">&amp;amp</span>;buffer[<span class="number">0</span>]);</span><br><span class="line"></span><br><span class="line">    size_t total = <span class="number">0</span>;</span><br><span class="line">    for (size_t i = <span class="number">0</span>; i <span class="variable">&amp;lt</span>; count; i++) &#123;</span><br><span class="line">        total += buffer[i] <span class="variable">&amp;amp</span>; <span class="number">0xff</span>;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    mOverdraw = total / float(count);</span><br><span class="line"></span><br><span class="line">    delete[] buffer;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>还有QA可能用得到的一个指标：OverDraw数值，这个的源码位置在Framework/base/core/java/android/view/HardwareRender.java中(5.0中去掉了这个数值的显示)</p>
+<figure class="highlight nix"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br></pre></td><td class="code"><pre><span class="line">private void debugOverdraw(View.AttachInfo attachInfo, Rect dirty,</span><br><span class="line">                HardwareCanvas canvas, DisplayList displayList) &#123;</span><br><span class="line"></span><br><span class="line">            <span class="keyword">if</span> (<span class="attr">mDebugOverdraw</span> == OVERDRAW_TYPE_COUNT) &#123;</span><br><span class="line">                <span class="keyword">if</span> (<span class="attr">mDebugOverdrawLayer</span> == <span class="literal">null</span>) &#123;</span><br><span class="line">                    <span class="attr">mDebugOverdrawLayer</span> = createHardwareLayer(mWidth, mHeight, <span class="literal">true</span>);</span><br><span class="line">                &#125; <span class="keyword">else</span> <span class="keyword">if</span> (mDebugOverdrawLayer.getWidth() != mWidth ||</span><br><span class="line">                        mDebugOverdrawLayer.getHeight() != mHeight) &#123;</span><br><span class="line">                    mDebugOverdrawLayer.resize(mWidth, mHeight);</span><br><span class="line">                &#125;</span><br><span class="line"></span><br><span class="line">                <span class="keyword">if</span> (!mDebugOverdrawLayer.isValid()) &#123;</span><br><span class="line">                    <span class="attr">mDebugOverdraw</span> = -<span class="number">1</span>;</span><br><span class="line">                    return;</span><br><span class="line">                &#125;</span><br><span class="line"></span><br><span class="line">                HardwareCanvas <span class="attr">layerCanvas</span> = mDebugOverdrawLayer.start(canvas, dirty);</span><br><span class="line">                countOverdraw(layerCanvas);</span><br><span class="line">                final int <span class="attr">restoreCount</span> = layerCanvas.save();</span><br><span class="line">                layerCanvas.drawDisplayList(displayList, <span class="literal">null</span>, DisplayList.FLAG_CLIP_CHILDREN);</span><br><span class="line">                layerCanvas.restoreToCount(restoreCount);</span><br><span class="line">                mDebugOverdrawLayer.end(canvas);</span><br><span class="line"></span><br><span class="line">                float <span class="attr">overdraw</span> = getOverdraw(layerCanvas);</span><br><span class="line">                DisplayMetrics <span class="attr">metrics</span> = attachInfo.mRootView.getResources().getDisplayMetrics();</span><br><span class="line"></span><br><span class="line">                drawOverdrawCounter(canvas, overdraw, metrics.density);</span><br><span class="line">            &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">private void drawOverdrawCounter(HardwareCanvas canvas, float overdraw, float density) &#123;</span><br><span class="line">            final String <span class="attr">text</span> = String.format(\<span class="string">"%.2fx\"</span>, overdraw);</span><br><span class="line">            final Paint <span class="attr">paint</span> = setupPaint(density);</span><br><span class="line">            // HSBtoColor will clamp the values <span class="keyword">in</span> the <span class="number">0</span>..<span class="number">1</span> range</span><br><span class="line">            paint.setColor(Color.HSBtoColor(<span class="number">0.28</span>f - <span class="number">0.28</span>f * overdraw / <span class="number">3.5</span>f, <span class="number">0.8</span>f, <span class="number">1.0</span>f));</span><br><span class="line"></span><br><span class="line">            canvas.drawText(text, density * <span class="number">4.0</span>f, mHeight - paint.getFontMetrics().bottom, paint);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h2 id="参考文章"><a href="#参考文章" class="headerlink" title="参考文章"></a>参考文章</h2><ol>
+<li><a href="http://www.curious-creature.org/2012/12/01/android-performance-case-study/" target="_blank" rel="noopener">优化过程</a></li>
+<li><a href="http://blog.csdn.net/yihongyuelan/article/details/12169647" target="_blank" rel="noopener">反编译并添加gpu显示</a></li>
+<li><a href="http://developer.android.com/training/improving-layouts/optimizing-layout.html#Inspect" target="_blank" rel="noopener">http://developer.android.com/training/improving-layouts/optimizing-layout.html#Inspect</a></li>
+<li><a href="http://developer.android.com/training/improving-layouts/reusing-layouts.html" target="_blank" rel="noopener">http://developer.android.com/training/improving-layouts/reusing-layouts.html </a></li>
+<li><a href="http://developer.android.com/training/improving-layouts/loading-ondemand.html" target="_blank" rel="noopener">http://developer.android.com/training/improving-layouts/loading-ondemand.html</a></li>
+<li><a href="http://developer.android.com/training/improving-layouts/smooth-scrolling.html" target="_blank" rel="noopener">http://developer.android.com/training/improving-layouts/smooth-scrolling.html </a></li>
+<li><a href="http://developer.android.com/tools/help/hierarchy-viewer.html" target="_blank" rel="noopener">http://developer.android.com/tools/help/hierarchy-viewer.html</a></li>
+<li><a href="http://tools.android.com/tips/lint" target="_blank" rel="noopener">http://tools.android.com/tips/lint</a></li>
+</ol>
+<hr>
+<blockquote>
+<p>作者：<a href="http://weibo.com/1315612820/profile?topnav=1&amp;wvr=6" target="_blank" rel="noopener">Gracker</a></p>
+<p>出处：<a href="http://androidperformance.com/2014/10/20/android-performance-optimization-overdraw-1/">androidperformance.com</a></p>
+<p>本文版权归作者所有，欢迎转载，但未经作者同意必须保留此段声明，且在文章页面明显位置给出原文连接，否则保留追究法律责任的权利。</p>
+<p>打赏一下： <a href="http://weibo.com/p/1001603801588257955883?from=page_100505_profile&amp;wvr=6&amp;mod=wenzhangmod" target="_blank" rel="noopener">微博打赏</a></p>
+</blockquote>
+
+
+<!--<a href="http://androidperformance.com/2014/10/20/android-performance-optimization-overdraw-1.html#disqus_thread" class="article-comment-link">Comments</a>
+<div id="disqus_thread"></div>
+<script type="text/javascript">
+    /* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+    var disqus_shortname = 'undefined'; // required: replace example with your forum shortname
+
+    /* * * DON'T EDIT BELOW THIS LINE * * */
+    (function() {
+        var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+        dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+        (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+    })();
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+-->
+<div style="display:none">
+<script src="http://s4.cnzz.com/stat.php?id=undefined&web_id=undefined" language="JavaScript"></script>script>
+</div>
+
+
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = http://www.androidperformance.com/;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://gracker.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                            
+
+
+
+
+</body>
+</html>

@@ -211,6 +211,7 @@
         ga('send', 'pageview');
     </script>
     
+<link rel="alternate" href="/atom.xml" title="Android Performance" type="application/atom+xml">
 </head>
 
     
@@ -277,13 +278,13 @@ height:50vh;
                 
                     <div class= post-intro-tags >
     
-        <a class="post-tag" href="javascript:void(0);" data-tags = "Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" target="_blank" rel="noopener" data-tags = "Android">Android</a>
     
-        <a class="post-tag" href="javascript:void(0);" data-tags = "hwui">hwui</a>
+        <a class="post-tag" href="javascript:void(0);" target="_blank" rel="noopener" data-tags = "hwui">hwui</a>
     
-        <a class="post-tag" href="javascript:void(0);" data-tags = "RenderThread">RenderThread</a>
+        <a class="post-tag" href="javascript:void(0);" target="_blank" rel="noopener" data-tags = "RenderThread">RenderThread</a>
     
-        <a class="post-tag" href="javascript:void(0);" data-tags = "Menory">Menory</a>
+        <a class="post-tag" href="javascript:void(0);" target="_blank" rel="noopener" data-tags = "Menory">Menory</a>
     
 </div>
                 
@@ -421,28 +422,36 @@ height:50vh;
         <h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本篇文章是自己的一个学习笔记，记录了 Android 5.0 中 hwui 中的 RenderThread 的简单工作流程。由于是学习笔记，所以其中一些细节不会太详细，我只是将大概的流程走一遍，将其工作流标注出来，下次遇到问题的时候就可以知道去哪里查。</p>
 <p>下图是我用 Systrace 抓取的一个应用启动的时候 RenderThread 的第一次 Draw 的 Trace 图，从这里面的顺序来看 RenderThread 的流程。熟悉应用启动流程的话应该知道，只有当第一次 DrawFrame 完成之后，整个应用的界面才会显示在手机上，在这之前，用户看到的是应用的 StartingWindow 的界面。</p>
 <a id="more"></a>
+
 <p><img src="/images/hwui/renderthread/1.png" alt="RenderThread Draw first frame"></p>
 <h2 id="从Java层说起"><a href="#从Java层说起" class="headerlink" title="从Java层说起"></a>从Java层说起</h2><p>应用程序的每一帧是从接收到 VSYNC 信号开始进行计算和绘制的,这要从 Choreographer 这个类说起了，不过由于篇幅原因，我们直接看一帧的绘制调用关系链即可：</p>
 <p><img src="/images/hwui/renderthread/2.png" alt="绘制关系链"></p>
 <p>Choreographer 的 drawFrame 会调用到 ViewRootImpl 的 performTraversals 方法，而 performTraversals 方法最终会调用到performDraw() 方法， performDraw 又会调用到 draw(boolean fullRedrawNeeded) 方法，这个 draw 方法是 ViewRootImpl 的私有方法，和我们熟知的那个draw并不是同一个方法</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (mAttachInfo.mHardwareRenderer != <span class="keyword">null</span> &amp;&amp; mAttachInfo.mHardwareRenderer.isEnabled()) &#123;</span><br><span class="line">                mIsAnimating = <span class="keyword">false</span>;</span><br><span class="line">                <span class="keyword">boolean</span> invalidateRoot = <span class="keyword">false</span>;</span><br><span class="line">                <span class="keyword">if</span> (mHardwareYOffset != yOffset || mHardwareXOffset != xOffset) &#123;</span><br><span class="line">                    mHardwareYOffset = yOffset;</span><br><span class="line">                    mHardwareXOffset = xOffset;</span><br><span class="line">                    mAttachInfo.mHardwareRenderer.invalidateRoot();</span><br><span class="line">                &#125;</span><br><span class="line">                mResizeAlpha = resizeAlpha;</span><br><span class="line"></span><br><span class="line">                dirty.setEmpty();</span><br><span class="line"></span><br><span class="line">                mBlockResizeBuffer = <span class="keyword">false</span>;</span><br><span class="line">                mAttachInfo.mHardwareRenderer.draw(mView, mAttachInfo, <span class="keyword">this</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <p>如果是走硬件绘制路线的话，则会走这一条先，之后就会调用 mHardwareRenderer 的 draw 方法,这里的 mHardwareRenderer 指的是 ThreadedRenderer ，其 Draw 函数如下：</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@Override</span></span><br><span class="line"><span class="function"><span class="keyword">void</span> <span class="title">draw</span><span class="params">(View view, AttachInfo attachInfo, HardwareDrawCallbacks callbacks)</span> </span>&#123;</span><br><span class="line">    attachInfo.mIgnoreDirtyState = <span class="keyword">true</span>;</span><br><span class="line">    <span class="keyword">long</span> frameTimeNanos = mChoreographer.getFrameTimeNanos();</span><br><span class="line">    attachInfo.mDrawingTime = frameTimeNanos / TimeUtils.NANOS_PER_MS;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">long</span> recordDuration = <span class="number">0</span>;</span><br><span class="line">    <span class="keyword">if</span> (mProfilingEnabled) &#123;</span><br><span class="line">        recordDuration = System.nanoTime();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    updateRootDisplayList(view, callbacks);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (mProfilingEnabled) &#123;</span><br><span class="line">        recordDuration = System.nanoTime() - recordDuration;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    attachInfo.mIgnoreDirtyState = <span class="keyword">false</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// register animating rendernodes which started animating prior to renderer</span></span><br><span class="line">    <span class="comment">// creation, which is typical for animators started prior to first draw</span></span><br><span class="line">    <span class="keyword">if</span> (attachInfo.mPendingAnimatingRenderNodes != <span class="keyword">null</span>) &#123;</span><br><span class="line">        <span class="keyword">final</span> <span class="keyword">int</span> count = attachInfo.mPendingAnimatingRenderNodes.size();</span><br><span class="line">        <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; count; i++) &#123;</span><br><span class="line">            registerAnimatingRenderNode(</span><br><span class="line">                    attachInfo.mPendingAnimatingRenderNodes.get(i));</span><br><span class="line">        &#125;</span><br><span class="line">        attachInfo.mPendingAnimatingRenderNodes.clear();</span><br><span class="line">        <span class="comment">// We don't need this anymore as subsequent calls to</span></span><br><span class="line">        <span class="comment">// ViewRootImpl#attachRenderNodeAnimator will go directly to us.</span></span><br><span class="line">        attachInfo.mPendingAnimatingRenderNodes = <span class="keyword">null</span>;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">int</span> syncResult = nSyncAndDrawFrame(mNativeProxy, frameTimeNanos,</span><br><span class="line">            recordDuration, view.getResources().getDisplayMetrics().density);</span><br><span class="line">    <span class="keyword">if</span> ((syncResult &amp; SYNC_INVALIDATE_REQUIRED) != <span class="number">0</span>) &#123;</span><br><span class="line">        attachInfo.mViewRootImpl.invalidate();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <p>这个函数里面的 updateRootDisplayList(view, callbacks) ;即 getDisplayList 操作。接下来就是比较重要的一个操作：</p>
 <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">int syncResult = nSyncAndDrawFrame(mNativeProxy, frameTimeNanos,</span><br><span class="line">        recordDuration, view.getResources().getDisplayMetrics().density);</span><br></pre></td></tr></table></figure>
+
 <p>可以看出这是一个阻塞操作，等Native层完成后，拿到返回值后才会进行下一步的操作。</p>
 <h2 id="Native层"><a href="#Native层" class="headerlink" title="Native层"></a>Native层</h2><p>其Native代码在android_view_ThreadedRenderer.cpp中，对应的实现代码如下：</p>
 <figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">static</span> <span class="keyword">int</span> <span class="title">android_view_ThreadedRenderer_syncAndDrawFrame</span><span class="params">(JNIEnv* env, jobject clazz,</span></span></span><br><span class="line"><span class="function"><span class="params">        jlong proxyPtr, jlong frameTimeNanos, jlong recordDuration, jfloat density)</span> </span>&#123;</span><br><span class="line">    RenderProxy* proxy = <span class="keyword">reinterpret_cast</span>&lt;RenderProxy*&gt;(proxyPtr);</span><br><span class="line">    <span class="keyword">return</span> proxy-&gt;syncAndDrawFrame(frameTimeNanos, recordDuration, density);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>RenderProxy的路径位于frameworks/base/libs/hwui/renderthread/RenderProxy.cpp</p>
 <figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">int</span> RenderProxy::syncAndDrawFrame(<span class="keyword">nsecs_t</span> frameTimeNanos, <span class="keyword">nsecs_t</span> recordDurationNanos,</span><br><span class="line">        <span class="keyword">float</span> density) &#123;</span><br><span class="line">    mDrawFrameTask.setDensity(density);</span><br><span class="line">    <span class="keyword">return</span> mDrawFrameTask.drawFrame(frameTimeNanos, recordDurationNanos);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <p>其中 mDrawFrameTask 是一个 DrawFrameTask 对象，其路径位于frameworks/base/libs/hwui/renderthread/DrawFrameTask.cpp，其中drawFrame代码：</p>
 <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">int DrawFrameTask::drawFrame(nsecs_t frameTimeNanos, nsecs_t recordDurationNanos) &#123;</span><br><span class="line">    mSyncResult = kSync_OK;</span><br><span class="line">    mFrameTimeNanos = frameTimeNanos;</span><br><span class="line">    mRecordDurationNanos = recordDurationNanos;</span><br><span class="line">    postAndWait();</span><br><span class="line"></span><br><span class="line">    // Reset the single-frame data</span><br><span class="line">    mFrameTimeNanos = 0;</span><br><span class="line">    mRecordDurationNanos = 0;</span><br><span class="line"></span><br><span class="line">    return mSyncResult;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <p>其中 postAndWait() 的实现如下：</p>
 <figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> DrawFrameTask::postAndWait() &#123;</span><br><span class="line">    AutoMutex _lock(mLock);</span><br><span class="line">    mRenderThread-&gt;<span class="built_in">queue</span>(<span class="keyword">this</span>);</span><br><span class="line">    mSignal.wait(mLock);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>就是将一个 DrawFrameTask 放入到了 mRenderThread 中,其中 queue 方法实现如下：</p>
 <figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> RenderThread::<span class="built_in">queue</span>(RenderTask* task) &#123;</span><br><span class="line">    AutoMutex _lock(mLock);</span><br><span class="line">    mQueue.<span class="built_in">queue</span>(task);</span><br><span class="line">    <span class="keyword">if</span> (mNextWakeup &amp;&amp; task-&gt;mRunAt &lt; mNextWakeup) &#123;</span><br><span class="line">        mNextWakeup = <span class="number">0</span>;</span><br><span class="line">        mLooper-&gt;wake();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <p>其中 mQueue 是一个 TaskQueue 对象，其</p>
 <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br></pre></td><td class="code"><pre><span class="line">void TaskQueue::queue(RenderTask* task) &#123;</span><br><span class="line">    // Since the RenderTask itself forms the linked list it is not allowed</span><br><span class="line">    // to have the same task queued twice</span><br><span class="line">    LOG_ALWAYS_FATAL_IF(task-&gt;mNext || mTail == task, &quot;Task is already in the queue!&quot;);</span><br><span class="line">    if (mTail) &#123;</span><br><span class="line">        // Fast path if we can just append</span><br><span class="line">        if (mTail-&gt;mRunAt &lt;= task-&gt;mRunAt) &#123;</span><br><span class="line">            mTail-&gt;mNext = task;</span><br><span class="line">            mTail = task;</span><br><span class="line">        &#125; else &#123;</span><br><span class="line">            // Need to find the proper insertion point</span><br><span class="line">            RenderTask* previous = 0;</span><br><span class="line">            RenderTask* next = mHead;</span><br><span class="line">            while (next &amp;&amp; next-&gt;mRunAt &lt;= task-&gt;mRunAt) &#123;</span><br><span class="line">                previous = next;</span><br><span class="line">                next = next-&gt;mNext;</span><br><span class="line">            &#125;</span><br><span class="line">            if (!previous) &#123;</span><br><span class="line">                task-&gt;mNext = mHead;</span><br><span class="line">                mHead = task;</span><br><span class="line">            &#125; else &#123;</span><br><span class="line">                previous-&gt;mNext = task;</span><br><span class="line">                if (next) &#123;</span><br><span class="line">                    task-&gt;mNext = next;</span><br><span class="line">                &#125; else &#123;</span><br><span class="line">                    mTail = task;</span><br><span class="line">                &#125;</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125; else &#123;</span><br><span class="line">        mTail = mHead = task;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <p>接着看 RenderThread 之前的 queue 方法，</p>
 <figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> Looper::wake() &#123;</span><br><span class="line">    <span class="keyword">ssize_t</span> nWrite;</span><br><span class="line">    <span class="keyword">do</span> &#123;</span><br><span class="line">        nWrite = write(mWakeWritePipeFd, <span class="string">"W"</span>, <span class="number">1</span>);</span><br><span class="line">    &#125; <span class="keyword">while</span> (nWrite == <span class="number">-1</span> &amp;&amp; errno == EINTR);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (nWrite != <span class="number">1</span>) &#123;</span><br><span class="line">        <span class="keyword">if</span> (errno != EAGAIN) &#123;</span><br><span class="line">            ALOGW(<span class="string">"Could not write wake signal, errno=%d"</span>, errno);</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>wake 函数则更为简单，仅仅向管道的写端写入一个字符“W”，这样管道的读端就会因为有数据可读而从等待状态中醒来。</p>
@@ -452,10 +461,13 @@ height:50vh;
 <figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// Start the thread in threadLoop() which needs to be implemented.</span></span><br><span class="line"><span class="function"><span class="keyword">virtual</span> status_t    <span class="title">run</span><span class="params">(    <span class="keyword">const</span> <span class="keyword">char</span>* name = <span class="number">0</span>,</span></span></span><br><span class="line"><span class="function"><span class="params">                            <span class="keyword">int32_t</span> priority = PRIORITY_DEFAULT,</span></span></span><br><span class="line"><span class="function"><span class="params">                            <span class="keyword">size_t</span> <span class="built_in">stack</span> = <span class="number">0</span>)</span></span>;</span><br></pre></td></tr></table></figure>
 <p>即启动 threadLoop 函数，我们来看 RenderThread 的 threadLoop 函数，这个函数比较重要：</p>
 <figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">bool</span> RenderThread::threadLoop() &#123;</span><br><span class="line"><span class="meta">#<span class="meta-keyword">if</span> defined(HAVE_PTHREADS)</span></span><br><span class="line">    setpriority(PRIO_PROCESS, <span class="number">0</span>, PRIORITY_DISPLAY);</span><br><span class="line"><span class="meta">#<span class="meta-keyword">endif</span></span></span><br><span class="line">    initThreadLocals();</span><br><span class="line"></span><br><span class="line">    <span class="keyword">int</span> timeoutMillis = <span class="number">-1</span>;</span><br><span class="line">    <span class="keyword">for</span> (;;) &#123;</span><br><span class="line">        <span class="keyword">int</span> result = mLooper-&gt;pollOnce(timeoutMillis);</span><br><span class="line">        LOG_ALWAYS_FATAL_IF(result == Looper::POLL_ERROR,</span><br><span class="line">                <span class="string">"RenderThread Looper POLL_ERROR!"</span>);</span><br><span class="line"></span><br><span class="line">        <span class="keyword">nsecs_t</span> nextWakeup;</span><br><span class="line">        <span class="comment">// Process our queue, if we have anything</span></span><br><span class="line">        <span class="keyword">while</span> (RenderTask* task = nextTask(&amp;nextWakeup)) &#123;</span><br><span class="line">            task-&gt;run();</span><br><span class="line">            <span class="comment">// task may have deleted itself, do not reference it again</span></span><br><span class="line">        &#125;</span><br><span class="line">        <span class="keyword">if</span> (nextWakeup == LLONG_MAX) &#123;</span><br><span class="line">            timeoutMillis = <span class="number">-1</span>;</span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            <span class="keyword">nsecs_t</span> timeoutNanos = nextWakeup - systemTime(SYSTEM_TIME_MONOTONIC);</span><br><span class="line">            timeoutMillis = nanoseconds_to_milliseconds(timeoutNanos);</span><br><span class="line">            <span class="keyword">if</span> (timeoutMillis &lt; <span class="number">0</span>) &#123;</span><br><span class="line">                timeoutMillis = <span class="number">0</span>;</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line">        <span class="keyword">if</span> (mPendingRegistrationFrameCallbacks.size() &amp;&amp; !mFrameCallbackTaskPending) &#123;</span><br><span class="line">            drainDisplayEventQueue(<span class="literal">true</span>);</span><br><span class="line">            mFrameCallbacks.insert(</span><br><span class="line">                    mPendingRegistrationFrameCallbacks.begin(), mPendingRegistrationFrameCallbacks.end());</span><br><span class="line">            mPendingRegistrationFrameCallbacks.clear();</span><br><span class="line">            requestVsync();</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> <span class="literal">false</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <p>可以看到，一个 for 循环是一个无限循环，而其中 pollOnce 是一个阻塞函数，直到我们上面调用了 mLooper-&gt;wake() 之后，会继续往下走，走到 while 循环中：</p>
 <figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">while</span> (RenderTask* task = nextTask(&amp;nextWakeup)) &#123;</span><br><span class="line">            task-&gt;run();</span><br><span class="line">            <span class="comment">// task may have deleted itself, do not reference it again</span></span><br><span class="line">        &#125;</span><br></pre></td></tr></table></figure>
+
 <p>会将 RenderTask 取出来执行其 run 方法，经过前面的流程我们知道这个 RenderTask 是一个 DrawFrameTask ，其run方法如下：</p>
-<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> DrawFrameTask::run() &#123;</span><br><span class="line">    ATRACE_NAME(<span class="string">"DrawFrame"</span>);</span><br><span class="line"></span><br><span class="line">    mContext-&gt;profiler().setDensity(mDensity);</span><br><span class="line">    mContext-&gt;profiler().startFrame(mRecordDurationNanos);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">bool</span> canUnblockUiThread;</span><br><span class="line">    <span class="keyword">bool</span> canDrawThisFrame;</span><br><span class="line">    &#123;</span><br><span class="line">        TreeInfo info(TreeInfo::MODE_FULL, mRenderThread-&gt;renderState());</span><br><span class="line">        canUnblockUiThread = syncFrameState(info);</span><br><span class="line">        canDrawThisFrame = info.out.canDrawThisFrame;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// Grab a copy of everything we need</span></span><br><span class="line">    CanvasContext* context = mContext;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// From this point on anything in "this" is *UNSAFE TO ACCESS*</span></span><br><span class="line">    <span class="keyword">if</span> (canUnblockUiThread) &#123;</span><br><span class="line">        unblockUiThread();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (CC_LIKELY(canDrawThisFrame)) &#123;</span><br><span class="line">        context-&gt;draw();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (!canUnblockUiThread) &#123;</span><br><span class="line">        unblockUiThread();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> DrawFrameTask::run() &#123;</span><br><span class="line">    ATRACE_NAME(<span class="string">"DrawFrame"</span>);</span><br><span class="line"></span><br><span class="line">    mContext-&gt;profiler().setDensity(mDensity);</span><br><span class="line">    mContext-&gt;profiler().startFrame(mRecordDurationNanos);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">bool</span> canUnblockUiThread;</span><br><span class="line">    <span class="keyword">bool</span> canDrawThisFrame;</span><br><span class="line">    &#123;</span><br><span class="line">        <span class="function">TreeInfo <span class="title">info</span><span class="params">(TreeInfo::MODE_FULL, mRenderThread-&gt;renderState())</span></span>;</span><br><span class="line">        canUnblockUiThread = syncFrameState(info);</span><br><span class="line">        canDrawThisFrame = info.out.canDrawThisFrame;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// Grab a copy of everything we need</span></span><br><span class="line">    CanvasContext* context = mContext;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// From this point on anything in "this" is *UNSAFE TO ACCESS*</span></span><br><span class="line">    <span class="keyword">if</span> (canUnblockUiThread) &#123;</span><br><span class="line">        unblockUiThread();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (CC_LIKELY(canDrawThisFrame)) &#123;</span><br><span class="line">        context-&gt;draw();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (!canUnblockUiThread) &#123;</span><br><span class="line">        unblockUiThread();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <h2 id="RenderThread-DrawFrame"><a href="#RenderThread-DrawFrame" class="headerlink" title="RenderThread.DrawFrame"></a>RenderThread.DrawFrame</h2><p>上面说到了 DrawFrameTask 的 run 方法，这里 run 方法中的执行的方法即我们在最前面那张图中所示的部分（即文章最前面那张图），下面的流程就是那张图中的函数调用，我们结合代码和图，一部分一部分来走整个 DrawFrame 的流程：</p>
 <h3 id="1-syncFrameState"><a href="#1-syncFrameState" class="headerlink" title="1. syncFrameState"></a>1. syncFrameState</h3><p>第一个比较重要的函数是 syncFrameState ，从函数名就可以知道， syncFrameState 的作用就是同步 frame 信息，将 Java 层维护的 frame 信息同步到 RenderThread中。</p>
 <blockquote>
@@ -464,38 +476,50 @@ height:50vh;
 <p>所以查看代码就可以知道有两个 RenderNode，一个在 hwui 中，一个在 View 中。简单来说，同步信息就是将 Java 层的 RenderNode 中的信息同步到 hwui 中的 RenderNode 中。 注意syncFrameState的返回值赋给了 canUnblockUiThread ，从名字可以看出这个 canUnblockUiThread 的作用是判断是否唤醒 Main Thread ，也就是说如果返回为 true 的话，会提前唤醒主线程来执行其他的事情，而不用等到 draw 完成后再去唤醒 Main Thread。 这也是 Android 5.0 和 Android 4.x 最大的区别了。</p>
 <p><img src="/images/hwui/renderthread/3.png" alt="syncFrameState"></p>
 <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br></pre></td><td class="code"><pre><span class="line">bool DrawFrameTask::syncFrameState(TreeInfo&amp; info) &#123;</span><br><span class="line">    mRenderThread-&gt;timeLord().vsyncReceived(mFrameTimeNanos);</span><br><span class="line">    mContext-&gt;makeCurrent();</span><br><span class="line">    Caches::getInstance().textureCache.resetMarkInUse();</span><br><span class="line"></span><br><span class="line">    for (size_t i = 0; i &lt; mLayers.size(); i++) &#123;</span><br><span class="line">        mContext-&gt;processLayerUpdate(mLayers[i].get());</span><br><span class="line">    &#125;</span><br><span class="line">    mLayers.clear();</span><br><span class="line">    mContext-&gt;prepareTree(info);</span><br><span class="line"></span><br><span class="line">    if (info.out.hasAnimations) &#123;</span><br><span class="line">        if (info.out.requiresUiRedraw) &#123;</span><br><span class="line">            mSyncResult |= kSync_UIRedrawRequired;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    // If prepareTextures is false, we ran out of texture cache space</span><br><span class="line">    return info.prepareTextures;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <p>首先是makeCurrent，这里的mContext是一个CanvasContext对象，其makeCurrent实现如下：</p>
 <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">void CanvasContext::makeCurrent() &#123;</span><br><span class="line">    // In the meantime this matches the behavior of GLRenderer, so it is not a regression</span><br><span class="line">    mHaveNewSurface |= mEglManager.makeCurrent(mEglSurface);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <p>mEglManager是一个EglManager对象，其实现为：</p>
 <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br></pre></td><td class="code"><pre><span class="line">bool EglManager::makeCurrent(EGLSurface surface) &#123;</span><br><span class="line">    if (isCurrent(surface)) return false;</span><br><span class="line"></span><br><span class="line">    if (surface == EGL_NO_SURFACE) &#123;</span><br><span class="line">        // If we are setting EGL_NO_SURFACE we don&apos;t care about any of the potential</span><br><span class="line">        // return errors, which would only happen if mEglDisplay had already been</span><br><span class="line">        // destroyed in which case the current context is already NO_CONTEXT</span><br><span class="line">        TIME_LOG(&quot;eglMakeCurrent&quot;, eglMakeCurrent(mEglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT));</span><br><span class="line">    &#125; else &#123;</span><br><span class="line">        EGLBoolean success;</span><br><span class="line">        TIME_LOG(&quot;eglMakeCurrent&quot;, success = eglMakeCurrent(mEglDisplay, surface, surface, mEglContext));</span><br><span class="line">        if (!success) &#123;</span><br><span class="line">            LOG_ALWAYS_FATAL(&quot;Failed to make current on surface %p, error=%s&quot;,</span><br><span class="line">                (void*)surface, egl_error_str());</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    mCurrentSurface = surface;</span><br><span class="line">    return true;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>这里会判断mCurrentSurface == surface，如果成立，则不用再初始化操作，如果是另外一个surface。，则会执行eglMakeCurrent，来重新创建上下文。</p>
 <p>makeCurrent之后，会调用mContext-&gt;prepareTree(info)，其实现如下：</p>
 <figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> CanvasContext::prepareTree(TreeInfo&amp; info) &#123;</span><br><span class="line">    mRenderThread.removeFrameCallback(<span class="keyword">this</span>);</span><br><span class="line"></span><br><span class="line">    info.damageAccumulator = &amp;mDamageAccumulator;</span><br><span class="line">    info.renderer = mCanvas;</span><br><span class="line">    <span class="keyword">if</span> (mPrefetechedLayers.size() &amp;&amp; info.mode == TreeInfo::MODE_FULL) &#123;</span><br><span class="line">        info.canvasContext = <span class="keyword">this</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    mAnimationContext-&gt;startFrame(info.mode);</span><br><span class="line">    mRootRenderNode-&gt;prepareTree(info);</span><br><span class="line">    mAnimationContext-&gt;runRemainingAnimations(info);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (info.canvasContext) &#123;</span><br><span class="line">        freePrefetechedLayers();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">int</span> runningBehind = <span class="number">0</span>;</span><br><span class="line">    <span class="comment">// <span class="doctag">TODO:</span> This query is moderately expensive, investigate adding some sort</span></span><br><span class="line">    <span class="comment">// of fast-path based off when we last called eglSwapBuffers() as well as</span></span><br><span class="line">    <span class="comment">// last vsync time. Or something.</span></span><br><span class="line">    TIME_LOG(<span class="string">"nativeWindowQuery"</span>, mNativeWindow-&gt;query(mNativeWindow.get(),</span><br><span class="line">            NATIVE_WINDOW_CONSUMER_RUNNING_BEHIND, &amp;runningBehind));</span><br><span class="line">    info.out.canDrawThisFrame = !runningBehind;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (info.out.hasAnimations || !info.out.canDrawThisFrame) &#123;</span><br><span class="line">        <span class="keyword">if</span> (!info.out.requiresUiRedraw) &#123;</span><br><span class="line">            <span class="comment">// If animationsNeedsRedraw is set don't bother posting for an RT anim</span></span><br><span class="line">            <span class="comment">// as we will just end up fighting the UI thread.</span></span><br><span class="line">            mRenderThread.postFrameCallback(<span class="keyword">this</span>);</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <p>其中 mRootRenderNode-&gt;prepareTree(info) 又是最重要的。回到Java层，我们知道 ThreadedRenderer 在初始化时，初始化了一个指针</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">long</span> rootNodePtr = nCreateRootRenderNode();</span><br></pre></td></tr></table></figure>
+
 <p>这个RootRenderNode也就是一个根Node，</p>
 <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">mRootNode = RenderNode.adopt(rootNodePtr);</span><br></pre></td></tr></table></figure>
+
 <p>然后会创建一个 mNativeProxy 指针，在 Native 层初始化一个 RenderProxy 对象，将 rootNodePtr 传给 RenderProxy 对象，这样在 RenderProxy 我们就可以得到这个对象的指针了。其中 CanvasContext 也是在 RenderProxy 对象初始化的时候被初始化的，初始化的时候将 rootNodePtr 传给了 CanvasContext 对象。</p>
-<p>我们之前提到 ThreadedRenderer 的 draw 方法中首先会调用updateRootDisplayList，即我们熟悉的 getDisplayList 。这个方法中，其实也分为两个步骤，第一个步骤是 updateViewTreeDisplayList，第二个步骤是将根 Node 加入到 DrawOp 中：<br><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">canvas.insertReorderBarrier();</span><br><span class="line">canvas.drawRenderNode(view.getDisplayList());</span><br><span class="line">canvas.insertInorderBarrier();</span><br></pre></td></tr></table></figure></p>
+<p>我们之前提到 ThreadedRenderer 的 draw 方法中首先会调用updateRootDisplayList，即我们熟悉的 getDisplayList 。这个方法中，其实也分为两个步骤，第一个步骤是 updateViewTreeDisplayList，第二个步骤是将根 Node 加入到 DrawOp 中：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">canvas.insertReorderBarrier();</span><br><span class="line">canvas.drawRenderNode(view.getDisplayList());</span><br><span class="line">canvas.insertInorderBarrier();</span><br></pre></td></tr></table></figure>
 <p>其最终实现在</p>
 <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">status_t DisplayListRenderer::drawRenderNode(RenderNode* renderNode, Rect&amp; dirty, int32_t flags) &#123;</span><br><span class="line">    LOG_ALWAYS_FATAL_IF(!renderNode, &quot;missing rendernode&quot;);</span><br><span class="line"></span><br><span class="line">    // dirty is an out parameter and should not be recorded,</span><br><span class="line">    // it matters only when replaying the display list</span><br><span class="line">    DrawRenderNodeOp* op = new (alloc()) DrawRenderNodeOp(renderNode, flags, *currentTransform());</span><br><span class="line">    addRenderNodeOp(op);</span><br><span class="line"></span><br><span class="line">    return DrawGlInfo::kStatusDone;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <p>再回到我们之前的 CanvasContext.prepareTree 中提到的 mRootRenderNode-&gt;prepareTree(info)，这时候这里的 mRootRenderNode 就是 CanvasContext 初始化是传进来的。</p>
-<p>其实现在 RenderNode.cpp 中：<br><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line">void RenderNode::prepareTree(TreeInfo&amp; info) &#123;</span><br><span class="line">    prepareTreeImpl(info);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">void RenderNode::prepareTreeImpl(TreeInfo&amp; info) &#123;</span><br><span class="line">    TT_START_MARK(getName());</span><br><span class="line">    info.damageAccumulator-&gt;pushTransform(this);</span><br><span class="line"></span><br><span class="line">    if (info.mode == TreeInfo::MODE_FULL) &#123;</span><br><span class="line">        pushStagingPropertiesChanges(info); //同步当前正在处理的Render Node的Property</span><br><span class="line">    &#125;</span><br><span class="line">    uint32_t animatorDirtyMask = 0;</span><br><span class="line">    if (CC_LIKELY(info.runAnimations)) &#123;</span><br><span class="line">        animatorDirtyMask = mAnimatorManager.animate(info);//执行动画相关的操作</span><br><span class="line">    &#125;</span><br><span class="line">    prepareLayer(info, animatorDirtyMask);</span><br><span class="line">    if (info.mode == TreeInfo::MODE_FULL) &#123;</span><br><span class="line">        pushStagingDisplayListChanges(info);  //同步当前正在处理的Render Node的Display List</span><br><span class="line">    &#125;</span><br><span class="line">    prepareSubTree(info, mDisplayListData); //同步当前正在处理的Render Node的Display List引用的Bitmap，以及当前正在处理的Render Node的子Render Node的Display List等信息</span><br><span class="line">    pushLayerUpdate(info); //检查当前正在处理的Render Node是否设置了Layer。如果设置了的话，就对这些Layer进行处理</span><br><span class="line"></span><br><span class="line">    info.damageAccumulator-&gt;popTransform();</span><br><span class="line">    TT_END_MARK();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<p>其实现在 RenderNode.cpp 中：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line">void RenderNode::prepareTree(TreeInfo&amp; info) &#123;</span><br><span class="line">    prepareTreeImpl(info);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">void RenderNode::prepareTreeImpl(TreeInfo&amp; info) &#123;</span><br><span class="line">    TT_START_MARK(getName());</span><br><span class="line">    info.damageAccumulator-&gt;pushTransform(this);</span><br><span class="line"></span><br><span class="line">    if (info.mode == TreeInfo::MODE_FULL) &#123;</span><br><span class="line">        pushStagingPropertiesChanges(info); //同步当前正在处理的Render Node的Property</span><br><span class="line">    &#125;</span><br><span class="line">    uint32_t animatorDirtyMask = 0;</span><br><span class="line">    if (CC_LIKELY(info.runAnimations)) &#123;</span><br><span class="line">        animatorDirtyMask = mAnimatorManager.animate(info);//执行动画相关的操作</span><br><span class="line">    &#125;</span><br><span class="line">    prepareLayer(info, animatorDirtyMask);</span><br><span class="line">    if (info.mode == TreeInfo::MODE_FULL) &#123;</span><br><span class="line">        pushStagingDisplayListChanges(info);  //同步当前正在处理的Render Node的Display List</span><br><span class="line">    &#125;</span><br><span class="line">    prepareSubTree(info, mDisplayListData); //同步当前正在处理的Render Node的Display List引用的Bitmap，以及当前正在处理的Render Node的子Render Node的Display List等信息</span><br><span class="line">    pushLayerUpdate(info); //检查当前正在处理的Render Node是否设置了Layer。如果设置了的话，就对这些Layer进行处理</span><br><span class="line"></span><br><span class="line">    info.damageAccumulator-&gt;popTransform();</span><br><span class="line">    TT_END_MARK();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>这里所涉及到的进一步的具体操作大家可以自行去看代码。</p>
 <h2 id="2-draw"><a href="#2-draw" class="headerlink" title="2. draw"></a>2. draw</h2><p><img src="/images/hwui/renderthread/4.png" alt="Draw"></p>
 <p>执行完syncFrameState之后，接下来就是执行draw</p>
 <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">if (CC_LIKELY(canDrawThisFrame)) &#123;</span><br><span class="line">    context-&gt;draw();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <p>CanvasContext的draw函数是一个核心函数，其位置在 frameworks/base/libs/hwui/OpenGLRenderer.cpp ，其实现如下：</p>
 <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br></pre></td><td class="code"><pre><span class="line">void CanvasContext::draw() &#123;</span><br><span class="line">    profiler().markPlaybackStart();</span><br><span class="line"></span><br><span class="line">    SkRect dirty;</span><br><span class="line">    mDamageAccumulator.finish(&amp;dirty);</span><br><span class="line"></span><br><span class="line">    ......</span><br><span class="line"></span><br><span class="line">    status_t status;</span><br><span class="line">    if (!dirty.isEmpty()) &#123;</span><br><span class="line">        status = mCanvas-&gt;prepareDirty(dirty.fLeft, dirty.fTop,</span><br><span class="line">                dirty.fRight, dirty.fBottom, mOpaque);</span><br><span class="line">    &#125; else &#123;</span><br><span class="line">        status = mCanvas-&gt;prepare(mOpaque);</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    Rect outBounds;</span><br><span class="line">    status |= mCanvas-&gt;drawRenderNode(mRootRenderNode.get(), outBounds);</span><br><span class="line"></span><br><span class="line">    profiler().draw(mCanvas);</span><br><span class="line"></span><br><span class="line">    mCanvas-&gt;finish();</span><br><span class="line"></span><br><span class="line">    profiler().markPlaybackEnd();</span><br><span class="line"></span><br><span class="line">    if (status &amp; DrawGlInfo::kStatusDrew) &#123;</span><br><span class="line">        swapBuffers();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    profiler().finishFrame();</span><br><span class="line"></span><br><span class="line">    /// M: enable to get overdraw count</span><br><span class="line">    if (CC_UNLIKELY(g_HWUI_debug_overdraw)) &#123;</span><br><span class="line">        if (!mDebugOverdrawLayer) &#123;</span><br><span class="line">            mDebugOverdrawLayer = LayerRenderer::createRenderLayer(mRenderThread.renderState(),</span><br><span class="line">                mCanvas-&gt;getWidth(), mCanvas-&gt;getHeight());</span><br><span class="line">        &#125; else if (mDebugOverdrawLayer-&gt;layer.getWidth() != mCanvas-&gt;getWidth() ||</span><br><span class="line">                   mDebugOverdrawLayer-&gt;layer.getHeight() != mCanvas-&gt;getHeight()) &#123;</span><br><span class="line">            if (!LayerRenderer::resizeLayer(mDebugOverdrawLayer, mCanvas-&gt;getWidth(), mCanvas-&gt;getHeight())) &#123;</span><br><span class="line">                LayerRenderer::destroyLayer(mDebugOverdrawLayer);</span><br><span class="line">                mDebugOverdrawLayer = NULL;</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line">    ......</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <h4 id="2-1-eglBeginFrame"><a href="#2-1-eglBeginFrame" class="headerlink" title="2.1 eglBeginFrame"></a>2.1 eglBeginFrame</h4><p>首先来看eglBeginFrame的实现</p>
 <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">void EglManager::beginFrame(EGLSurface surface, EGLint* width, EGLint* height) &#123;</span><br><span class="line">    makeCurrent(surface);</span><br><span class="line">    if (width) &#123;</span><br><span class="line">        eglQuerySurface(mEglDisplay, surface, EGL_WIDTH, width);</span><br><span class="line">    &#125;</span><br><span class="line">    if (height) &#123;</span><br><span class="line">        eglQuerySurface(mEglDisplay, surface, EGL_HEIGHT, height);</span><br><span class="line">    &#125;</span><br><span class="line">    eglBeginFrame(mEglDisplay, surface);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>makeCurrent是用来管理上下文，eglBeginFrame主要是校验参数的合法性。</p>
 <h4 id="2-2-prepareDirty"><a href="#2-2-prepareDirty" class="headerlink" title="2.2 prepareDirty"></a>2.2 prepareDirty</h4><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">status_t status;</span><br><span class="line">if (!dirty.isEmpty()) &#123;</span><br><span class="line">    status = mCanvas-&gt;prepareDirty(dirty.fLeft, dirty.fTop,</span><br><span class="line">            dirty.fRight, dirty.fBottom, mOpaque);</span><br><span class="line">&#125; else &#123;</span><br><span class="line">    status = mCanvas-&gt;prepare(mOpaque);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>这里的mCanvas是一个OpenGLRenderer对象，其prepareDirty实现</p>
 <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line">//TODO:增加函数功能描述</span><br><span class="line">status_t OpenGLRenderer::prepareDirty(float left, float top,</span><br><span class="line">        float right, float bottom, bool opaque) &#123;</span><br><span class="line">    setupFrameState(left, top, right, bottom, opaque);</span><br><span class="line"></span><br><span class="line">    // Layer renderers will start the frame immediately</span><br><span class="line">    // The framebuffer renderer will first defer the display list</span><br><span class="line">    // for each layer and wait until the first drawing command</span><br><span class="line">    // to start the frame</span><br><span class="line">    if (currentSnapshot()-&gt;fbo == 0) &#123;</span><br><span class="line">        syncState();</span><br><span class="line">        updateLayers();</span><br><span class="line">    &#125; else &#123;</span><br><span class="line">        return startFrame();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    return DrawGlInfo::kStatusDone;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <h4 id="2-3-drawRenderNode"><a href="#2-3-drawRenderNode" class="headerlink" title="2.3 drawRenderNode"></a>2.3 drawRenderNode</h4><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Rect outBounds;</span><br><span class="line">status |= mCanvas-&gt;drawRenderNode(mRootRenderNode.get(), outBounds);</span><br></pre></td></tr></table></figure>
 <p>接下来就是调用OpenGLRenderer的drawRenderNode方法进行绘制</p>
 <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br></pre></td><td class="code"><pre><span class="line">status_t OpenGLRenderer::drawRenderNode(RenderNode* renderNode, Rect&amp; dirty, int32_t replayFlags) &#123;</span><br><span class="line">    status_t status;</span><br><span class="line">    // All the usual checks and setup operations (quickReject, setupDraw, etc.)</span><br><span class="line">    // will be performed by the display list itself</span><br><span class="line">    if (renderNode &amp;&amp; renderNode-&gt;isRenderable()) &#123;</span><br><span class="line">        // compute 3d ordering</span><br><span class="line">        renderNode-&gt;computeOrdering();</span><br><span class="line">        if (CC_UNLIKELY(mCaches.drawDeferDisabled)) &#123; //判断是否不重排序</span><br><span class="line">            status = startFrame();</span><br><span class="line">            ReplayStateStruct replayStruct(*this, dirty, replayFlags);</span><br><span class="line">            renderNode-&gt;replay(replayStruct, 0);</span><br><span class="line">            return status | replayStruct.mDrawGlStatus;</span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line">        // 需要重新排序</span><br><span class="line">        bool avoidOverdraw = !mCaches.debugOverdraw &amp;&amp; !mCountOverdraw; // shh, don&apos;t tell devs!</span><br><span class="line">        DeferredDisplayList deferredList(*currentClipRect(), avoidOverdraw);</span><br><span class="line">        DeferStateStruct deferStruct(deferredList, *this, replayFlags);</span><br><span class="line">        renderNode-&gt;defer(deferStruct, 0); //递归进行重排操作</span><br><span class="line"></span><br><span class="line">        flushLayers(); // 首先执行设置了 Layer 的子 Render Node 的绘制命令，以便得到一个对应的FBO</span><br><span class="line">        status = startFrame(); //执行一些诸如清理颜色绘冲区等基本操作</span><br><span class="line">        status = deferredList.flush(*this, dirty) | status;</span><br><span class="line">        return status;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    // Even if there is no drawing command(Ex: invisible),</span><br><span class="line">    // it still needs startFrame to clear buffer and start tiling.</span><br><span class="line">    return startFrame();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <p>这里的 renderNode 是一个 Root Render Node，</p>
 <p>可以看到，到了这里虽然只是开始，但是其实已经结束了，这个函数里面最重要的几步:</p>
 <figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">renderNode-&gt;defer(deferStruct, 0); //进行重排序</span><br><span class="line"></span><br><span class="line">flushLayers(); 首先执行设置了 Layer 的子 Render Node 的绘制命令，以便得到一个对应的FBO</span><br><span class="line"></span><br><span class="line">status = deferredList.flush(*this, dirty) | status;   //对deferredList中的绘制命令进行真正的绘制操作</span><br></pre></td></tr></table></figure>
@@ -540,7 +564,7 @@ height:50vh;
             <p>原文链接：<a href="https://androidperformance.com/2015/08/12/AndroidL-hwui-RenderThread-workflow/">https://androidperformance.com/2015/08/12/AndroidL-hwui-RenderThread-workflow/</a>
             <p>发表日期：<a href="https://androidperformance.com/2015/08/12/AndroidL-hwui-RenderThread-workflow/">August 12th 2015, 10:38:01 pm</a>
             <p>更新日期：<a href="https://androidperformance.com/2015/08/12/AndroidL-hwui-RenderThread-workflow/">October 22nd 2019, 7:11:58 pm</a>
-            <p>版权声明：本文采用<a rel="license" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
+            <p>版权声明：本文采用<a rel="license noopener" href="http://creativecommons.org/licenses/by-nc/4.0/" target="_blank">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     
     <!-- paginator  -->
@@ -604,7 +628,7 @@ height:50vh;
     
         
             
-                <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title=email ></a>
+                <a href="mailto:Dreamtale.jg@gmail.com" target="_blank" rel="noopener" class="iconfont-archer email" title=email ></a>
             
         
     
@@ -717,206 +741,6 @@ top:50vh;
     <div class="sidebar-content sidebar-content-show-archive">
           <div class="sidebar-panel-archives">
     <!-- 在ejs中将archive按照时间排序 -->
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
     
     
     
@@ -2193,7 +2017,7 @@ top:50vh;
     
     
         <li class="archive-post-item">
-            <span class="archive-post-date">01/06</span><a class="archive-post-title" href= "/2018/01/06/2017年度最推荐/" >2017 年度最推荐 - 给辛勤工作的自己一点奖励</a>
+            <span class="archive-post-date">01/06</span><a class="archive-post-title" href= "/2018/01/06/2017%E5%B9%B4%E5%BA%A6%E6%9C%80%E6%8E%A8%E8%8D%90/" >2017 年度最推荐 - 给辛勤工作的自己一点奖励</a>
         </li>
     
     
@@ -2245,7 +2069,7 @@ top:50vh;
     
     
         <li class="archive-post-item">
-            <span class="archive-post-date">12/29</span><a class="archive-post-title" href= "/2015/12/29/Android应用启动优化-一种DelayLoad的实现和原理-下篇/" >Android 应用启动优化:一种 DelayLoad 的实现和原理(下篇)</a>
+            <span class="archive-post-date">12/29</span><a class="archive-post-title" href= "/2015/12/29/Android%E5%BA%94%E7%94%A8%E5%90%AF%E5%8A%A8%E4%BC%98%E5%8C%96-%E4%B8%80%E7%A7%8DDelayLoad%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%92%8C%E5%8E%9F%E7%90%86-%E4%B8%8B%E7%AF%87/" >Android 应用启动优化:一种 DelayLoad 的实现和原理(下篇)</a>
         </li>
     
     
@@ -2270,7 +2094,7 @@ top:50vh;
     
     
         <li class="archive-post-item">
-            <span class="archive-post-date">07/20</span><a class="archive-post-title" href= "/2015/07/20/Android-Performance-Memory-Java/" >Android 代码内存优化建议-Java 官方篇</a>
+            <span class="archive-post-date">07/20</span><a class="archive-post-title" href= "/2015/07/20/Android-Performance-Memory-AndroidResource/" >Android 代码内存优化建议-Android 资源篇</a>
         </li>
     
     
@@ -2280,7 +2104,7 @@ top:50vh;
     
     
         <li class="archive-post-item">
-            <span class="archive-post-date">07/20</span><a class="archive-post-title" href= "/2015/07/20/Android-Performance-Memory-AndroidResource/" >Android 代码内存优化建议-Android 资源篇</a>
+            <span class="archive-post-date">07/20</span><a class="archive-post-title" href= "/2015/07/20/Android-Performance-Memory-Java/" >Android 代码内存优化建议-Java 官方篇</a>
         </li>
     
     
@@ -2295,22 +2119,7 @@ top:50vh;
     
     
         <li class="archive-post-item">
-            <span class="archive-post-date">04/19</span><a class="archive-post-title" href= "/2015/04/19/Android-Performance-Patterns-4/" >Android性能优化典范之Profile GPU Rendering</a>
-        </li>
-    
-    
-        <li class="archive-post-item">
             <span class="archive-post-date">04/19</span><a class="archive-post-title" href= "/2015/04/19/Android-Performance-Patterns-1/" >Android性能优化典范之Render Performance</a>
-        </li>
-    
-    
-        <li class="archive-post-item">
-            <span class="archive-post-date">04/19</span><a class="archive-post-title" href= "/2015/04/19/Android-Performance-Patterns/" >Android性能优化典范综述</a>
-        </li>
-    
-    
-        <li class="archive-post-item">
-            <span class="archive-post-date">04/19</span><a class="archive-post-title" href= "/2015/04/19/Android-Performance-Patterns-3/" >Android性能优化典范之Understanding VSYNC</a>
         </li>
     
     
@@ -2320,12 +2129,27 @@ top:50vh;
     
     
         <li class="archive-post-item">
-            <span class="archive-post-date">04/11</span><a class="archive-post-title" href= "/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/" >Android内存优化之二：MAT使用进阶</a>
+            <span class="archive-post-date">04/19</span><a class="archive-post-title" href= "/2015/04/19/Android-Performance-Patterns-3/" >Android性能优化典范之Understanding VSYNC</a>
+        </li>
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span><a class="archive-post-title" href= "/2015/04/19/Android-Performance-Patterns-4/" >Android性能优化典范之Profile GPU Rendering</a>
+        </li>
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span><a class="archive-post-title" href= "/2015/04/19/Android-Performance-Patterns/" >Android性能优化典范综述</a>
         </li>
     
     
         <li class="archive-post-item">
             <span class="archive-post-date">04/11</span><a class="archive-post-title" href= "/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/" >Android内存优化之三：打开MAT中的Bitmap原图</a>
+        </li>
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span><a class="archive-post-title" href= "/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/" >Android内存优化之二：MAT使用进阶</a>
         </li>
     
     
@@ -2345,12 +2169,12 @@ top:50vh;
     
     
         <li class="archive-post-item">
-            <span class="archive-post-date">03/15</span><a class="archive-post-title" href= "/2015/03/15/android-tips-round-up-3/" >[译]Android小技巧(3)</a>
+            <span class="archive-post-date">03/15</span><a class="archive-post-title" href= "/2015/03/15/android-tips-round-up-4/" >[译]Android小技巧(4)</a>
         </li>
     
     
         <li class="archive-post-item">
-            <span class="archive-post-date">03/15</span><a class="archive-post-title" href= "/2015/03/15/android-tips-round-up-4/" >[译]Android小技巧(4)</a>
+            <span class="archive-post-date">03/15</span><a class="archive-post-title" href= "/2015/03/15/android-tips-round-up-3/" >[译]Android小技巧(3)</a>
         </li>
     
     
@@ -2427,19 +2251,11 @@ top:50vh;
         <div class="sidebar-panel-tags">
     <div class="sidebar-tags-name">
     
+        <span class="sidebar-tag-name" data-tags="年度推荐"><span class="iconfont-archer">&#xe606;</span>年度推荐</span>
+    
         <span class="sidebar-tag-name" data-tags="流畅度"><span class="iconfont-archer">&#xe606;</span>流畅度</span>
     
-        <span class="sidebar-tag-name" data-tags="随笔"><span class="iconfont-archer">&#xe606;</span>随笔</span>
-    
         <span class="sidebar-tag-name" data-tags="Android"><span class="iconfont-archer">&#xe606;</span>Android</span>
-    
-        <span class="sidebar-tag-name" data-tags="Framework"><span class="iconfont-archer">&#xe606;</span>Framework</span>
-    
-        <span class="sidebar-tag-name" data-tags="MAT"><span class="iconfont-archer">&#xe606;</span>MAT</span>
-    
-        <span class="sidebar-tag-name" data-tags="Performance"><span class="iconfont-archer">&#xe606;</span>Performance</span>
-    
-        <span class="sidebar-tag-name" data-tags="Memory"><span class="iconfont-archer">&#xe606;</span>Memory</span>
     
         <span class="sidebar-tag-name" data-tags="Peroformance"><span class="iconfont-archer">&#xe606;</span>Peroformance</span>
     
@@ -2447,9 +2263,47 @@ top:50vh;
     
         <span class="sidebar-tag-name" data-tags="Systrace"><span class="iconfont-archer">&#xe606;</span>Systrace</span>
     
+        <span class="sidebar-tag-name" data-tags="随笔"><span class="iconfont-archer">&#xe606;</span>随笔</span>
+    
+        <span class="sidebar-tag-name" data-tags="Framework"><span class="iconfont-archer">&#xe606;</span>Framework</span>
+    
+        <span class="sidebar-tag-name" data-tags="MethodTrace"><span class="iconfont-archer">&#xe606;</span>MethodTrace</span>
+    
+        <span class="sidebar-tag-name" data-tags="MAT"><span class="iconfont-archer">&#xe606;</span>MAT</span>
+    
+        <span class="sidebar-tag-name" data-tags="Performance"><span class="iconfont-archer">&#xe606;</span>Performance</span>
+    
+        <span class="sidebar-tag-name" data-tags="Memory"><span class="iconfont-archer">&#xe606;</span>Memory</span>
+    
+        <span class="sidebar-tag-name" data-tags="启动优化"><span class="iconfont-archer">&#xe606;</span>启动优化</span>
+    
+        <span class="sidebar-tag-name" data-tags="DelayLoad"><span class="iconfont-archer">&#xe606;</span>DelayLoad</span>
+    
+        <span class="sidebar-tag-name" data-tags="hwui"><span class="iconfont-archer">&#xe606;</span>hwui</span>
+    
+        <span class="sidebar-tag-name" data-tags="RenderThread"><span class="iconfont-archer">&#xe606;</span>RenderThread</span>
+    
+        <span class="sidebar-tag-name" data-tags="Menory"><span class="iconfont-archer">&#xe606;</span>Menory</span>
+    
+        <span class="sidebar-tag-name" data-tags="Java"><span class="iconfont-archer">&#xe606;</span>Java</span>
+    
+        <span class="sidebar-tag-name" data-tags="HashMap"><span class="iconfont-archer">&#xe606;</span>HashMap</span>
+    
+        <span class="sidebar-tag-name" data-tags="程序员"><span class="iconfont-archer">&#xe606;</span>程序员</span>
+    
+        <span class="sidebar-tag-name" data-tags="流畅性"><span class="iconfont-archer">&#xe606;</span>流畅性</span>
+    
+        <span class="sidebar-tag-name" data-tags="个人感悟"><span class="iconfont-archer">&#xe606;</span>个人感悟</span>
+    
+        <span class="sidebar-tag-name" data-tags="Singleton"><span class="iconfont-archer">&#xe606;</span>Singleton</span>
+    
         <span class="sidebar-tag-name" data-tags="Nexus"><span class="iconfont-archer">&#xe606;</span>Nexus</span>
     
         <span class="sidebar-tag-name" data-tags="设计规范"><span class="iconfont-archer">&#xe606;</span>设计规范</span>
+    
+        <span class="sidebar-tag-name" data-tags="Process"><span class="iconfont-archer">&#xe606;</span>Process</span>
+    
+        <span class="sidebar-tag-name" data-tags="卡顿"><span class="iconfont-archer">&#xe606;</span>卡顿</span>
     
         <span class="sidebar-tag-name" data-tags="AndroidProcess"><span class="iconfont-archer">&#xe606;</span>AndroidProcess</span>
     
@@ -2457,9 +2311,15 @@ top:50vh;
     
         <span class="sidebar-tag-name" data-tags="Ubuntu"><span class="iconfont-archer">&#xe606;</span>Ubuntu</span>
     
+        <span class="sidebar-tag-name" data-tags="读书笔记"><span class="iconfont-archer">&#xe606;</span>读书笔记</span>
+    
         <span class="sidebar-tag-name" data-tags="程序员的修炼"><span class="iconfont-archer">&#xe606;</span>程序员的修炼</span>
     
+        <span class="sidebar-tag-name" data-tags="设计原则"><span class="iconfont-archer">&#xe606;</span>设计原则</span>
+    
         <span class="sidebar-tag-name" data-tags="测试"><span class="iconfont-archer">&#xe606;</span>测试</span>
+    
+        <span class="sidebar-tag-name" data-tags="了解你的用户"><span class="iconfont-archer">&#xe606;</span>了解你的用户</span>
     
         <span class="sidebar-tag-name" data-tags="游戏与编程"><span class="iconfont-archer">&#xe606;</span>游戏与编程</span>
     
@@ -2469,47 +2329,11 @@ top:50vh;
     
         <span class="sidebar-tag-name" data-tags="利器"><span class="iconfont-archer">&#xe606;</span>利器</span>
     
-        <span class="sidebar-tag-name" data-tags="MethodTrace"><span class="iconfont-archer">&#xe606;</span>MethodTrace</span>
-    
-        <span class="sidebar-tag-name" data-tags="启动优化"><span class="iconfont-archer">&#xe606;</span>启动优化</span>
-    
-        <span class="sidebar-tag-name" data-tags="DelayLoad"><span class="iconfont-archer">&#xe606;</span>DelayLoad</span>
-    
-        <span class="sidebar-tag-name" data-tags="程序员"><span class="iconfont-archer">&#xe606;</span>程序员</span>
-    
-        <span class="sidebar-tag-name" data-tags="Java"><span class="iconfont-archer">&#xe606;</span>Java</span>
-    
-        <span class="sidebar-tag-name" data-tags="Singleton"><span class="iconfont-archer">&#xe606;</span>Singleton</span>
-    
-        <span class="sidebar-tag-name" data-tags="流畅性"><span class="iconfont-archer">&#xe606;</span>流畅性</span>
-    
-        <span class="sidebar-tag-name" data-tags="个人感悟"><span class="iconfont-archer">&#xe606;</span>个人感悟</span>
-    
-        <span class="sidebar-tag-name" data-tags="Process"><span class="iconfont-archer">&#xe606;</span>Process</span>
-    
-        <span class="sidebar-tag-name" data-tags="卡顿"><span class="iconfont-archer">&#xe606;</span>卡顿</span>
-    
-        <span class="sidebar-tag-name" data-tags="设计原则"><span class="iconfont-archer">&#xe606;</span>设计原则</span>
-    
-        <span class="sidebar-tag-name" data-tags="读书笔记"><span class="iconfont-archer">&#xe606;</span>读书笔记</span>
-    
-        <span class="sidebar-tag-name" data-tags="了解你的用户"><span class="iconfont-archer">&#xe606;</span>了解你的用户</span>
-    
-        <span class="sidebar-tag-name" data-tags="年度推荐"><span class="iconfont-archer">&#xe606;</span>年度推荐</span>
-    
         <span class="sidebar-tag-name" data-tags="用户体验"><span class="iconfont-archer">&#xe606;</span>用户体验</span>
     
         <span class="sidebar-tag-name" data-tags="知乎"><span class="iconfont-archer">&#xe606;</span>知乎</span>
     
         <span class="sidebar-tag-name" data-tags="StartingWindow"><span class="iconfont-archer">&#xe606;</span>StartingWindow</span>
-    
-        <span class="sidebar-tag-name" data-tags="HashMap"><span class="iconfont-archer">&#xe606;</span>HashMap</span>
-    
-        <span class="sidebar-tag-name" data-tags="hwui"><span class="iconfont-archer">&#xe606;</span>hwui</span>
-    
-        <span class="sidebar-tag-name" data-tags="RenderThread"><span class="iconfont-archer">&#xe606;</span>RenderThread</span>
-    
-        <span class="sidebar-tag-name" data-tags="Menory"><span class="iconfont-archer">&#xe606;</span>Menory</span>
     
     </div>
     <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
@@ -2550,9 +2374,13 @@ jsonContent:
     
         <span class="sidebar-category-name" data-categories="Memory"><span class="iconfont-archer">&#xe60a;</span>Memory</span>
     
-        <span class="sidebar-category-name" data-categories="Performance"><span class="iconfont-archer">&#xe60a;</span>Performance</span>
+        <span class="sidebar-category-name" data-categories="Android/Memory"><span class="iconfont-archer">&#xe60a;</span>Android/Memory</span>
     
         <span class="sidebar-category-name" data-categories="Memory/Android"><span class="iconfont-archer">&#xe60a;</span>Memory/Android</span>
+    
+        <span class="sidebar-category-name" data-categories="Performance"><span class="iconfont-archer">&#xe60a;</span>Performance</span>
+    
+        <span class="sidebar-category-name" data-categories="Java"><span class="iconfont-archer">&#xe60a;</span>Java</span>
     
         <span class="sidebar-category-name" data-categories="Performance/Android"><span class="iconfont-archer">&#xe60a;</span>Performance/Android</span>
     
@@ -2560,13 +2388,9 @@ jsonContent:
     
         <span class="sidebar-category-name" data-categories="Framework"><span class="iconfont-archer">&#xe60a;</span>Framework</span>
     
-        <span class="sidebar-category-name" data-categories="读书笔记"><span class="iconfont-archer">&#xe60a;</span>读书笔记</span>
-    
         <span class="sidebar-category-name" data-categories="Framework/Android"><span class="iconfont-archer">&#xe60a;</span>Framework/Android</span>
     
-        <span class="sidebar-category-name" data-categories="Android/Memory"><span class="iconfont-archer">&#xe60a;</span>Android/Memory</span>
-    
-        <span class="sidebar-category-name" data-categories="Java"><span class="iconfont-archer">&#xe60a;</span>Java</span>
+        <span class="sidebar-category-name" data-categories="读书笔记"><span class="iconfont-archer">&#xe60a;</span>读书笔记</span>
     
     </div>
     <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>

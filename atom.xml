@@ -6,7 +6,7 @@
   <link href="/atom.xml" rel="self"/>
   
   <link href="https://androidperformance.com/"/>
-  <updated>2020-04-26T15:47:46.622Z</updated>
+  <updated>2020-05-07T15:21:52.462Z</updated>
   <id>https://androidperformance.com/</id>
   
   <author>
@@ -15,6 +15,31 @@
   </author>
   
   <generator uri="https://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title>Android App 链式唤醒分析</title>
+    <link href="https://androidperformance.com/2020/05/07/Android-App-Chain-Wakeup/"/>
+    <id>https://androidperformance.com/2020/05/07/Android-App-Chain-Wakeup/</id>
+    <published>2020-05-07T15:16:20.000Z</published>
+    <updated>2020-05-07T15:21:52.462Z</updated>
+    
+    <content type="html"><![CDATA[<h1 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h1><p>MIUI 12 的发布, 将之前一直是应用开发者和 Rom 开发者斗争最激烈的部分展示给了普通消费者, 让普通消费者也知道了这场斗争的细节, 正所谓 “魔高一尺道高一丈” , Rom 开发者由于有更高的代码修改权限, 始终占据着上风 ; App 开发者当然也不甘示弱, 各种保活拉起黑科技层出不穷,甚至 Google 都参与到了这部分斗争中, 居中调和, 制定各种规则来规范双方. 当然斗争对双方来说都算是好事, 毕竟任何一方完全的胜利都会导致 “狡兔死走狗烹,飞鸟尽良弓藏”</p><p>不过双方斗争的受害者无疑还是使用手机的消费者 , App 如果斗争成功, 那么手机上各种后台进程乱跑, 杀不掉, 占用 CPU 和内存 , 这不是消费者想看到的 ; 如果 Rom 开发者斗争成功 , App 的体验必定会大打折扣 , 各位 App 开发者应该深有体会. </p><p>从文章最后一段可以看到, 其实各个手机厂商对付这一套都有自己的策略, 基本上都可以搞定自启动和关联启动. 至于隐私 , 李彦宏曾经说过 “<strong>中国人对隐私问题的态度更加开放，也相对来说没那么敏感。如果他们可以用隐私换取便利、安全或者效率。在很多情况下，他们就愿意这么做</strong>“ . 大家想想在微信里面复制一段话打开到淘宝就可以自动跳转到这个物品, 方不方便? 好不好用? 还想不想用? 剪贴板再借我看一看?</p><a id="more"></a><p>希望大家在隐私问题上不要打哈哈, 技术是把双刃剑, 如果隐私落到别有用心的人手上, 后果是很严重的, 就算不是为了自己, 为了下一代. 欧盟为什么要搞《通用数据保护条例》（General Data Protection Regulation，简称 GDPR）, 就是为了隐私. 举个例子 , 国内很多厂商的产品现在要区分是否在欧盟买, 如果是在欧盟卖的话, 就得把里面那些收集用户数据的功能都关掉 , 否则抓住了就能罚你罚到吐血 . 至于中国和印度, 随便收集.</p><p>本篇文章不涉及到隐私部分, 我是对隐私保护无条件支持的 . 这里只从技术的角度 , 来讲一下 MIUI 12 爆出来的应用自启动和关联唤醒的问题.</p><p>PS: <strong>大家在自己的手机上可能看不到我列的一些例子, 是因为我是用的 Android 10 的 AOSP 代码, 大部分的国产 Rom 都已经阻断了应用的这些行为.</strong></p><h1 id="技术名词解释"><a href="#技术名词解释" class="headerlink" title="技术名词解释"></a>技术名词解释</h1><p>首先解释几个技术名词, 方便大家对号入座</p><h2 id="进程启动"><a href="#进程启动" class="headerlink" title="进程启动"></a>进程启动</h2><p>在 Android 中 , 一个 App 包含六部分, 进程(必选) + Activity (可选) + BroadcastReceiver (可选)+Service (可选)+ContentProvider (可选) + 子进程(可选)</p><p>一个必选项加五个可选项, 组成了一个 App , 其中 Activity(可选) + BroadcastReceiver(可选)+Service(可选)+ContentProvider(可选) 这四个又称为 Android 的四大组件, 之所以这四兄弟这么特殊, 是因为这四个组件都可以单独启动,</p><p>但是这四兄弟启动之前, 系统都会检查对应的进程是否存在, 如果进程不存在 , 那么就需要先启动进程, 再启动这个组件. 我们在桌面上点击一个应用图标, 其实启动的就是他的 Activity , 系统会先创建进程, 然后再启动 Activity , 我们才可以看到对应的界面</p><p>一般自启动和关联启动, 一般不会直接启动 Activity , 因为 Activity 是用户可感知的 , 你在后台莫名其妙起了一个界面到前台, 用户分分钟卸了你 . 所以一般自启动和关联启动都是在 BroadcastReceiver (可选) + Service (可选) + ContentProvider (可选) 三个上面做文章. </p><h2 id="自启动"><a href="#自启动" class="headerlink" title="自启动"></a>自启动</h2><p>自启动指的是不借助其他的应用, 通过监听系统的一些事件, 或者文件变化, 通过系统的机制, 把自己的进程拉起来处理事情.</p><h2 id="关联启动"><a href="#关联启动" class="headerlink" title="关联启动"></a>关联启动</h2><p>关联启动指的是借助其他应用来启动自己, 比如大家列出来的起点读书启动作家助手\电信营业厅\百词斩这种.</p><h2 id="启动阻断"><a href="#启动阻断" class="headerlink" title="启动阻断"></a>启动阻断</h2><p>启动阻断也叫切断唤醒, Rom 开发人员在四大组件启动的地方加入逻辑判断, 符合条件的组件才能拉起自己的进程 , 不符合条件的组件直接返回 , 这样就达到了启动阻断的目的.</p><p>当然这里面还有很多工作要做, 比如工作状态判断, 拉起合理性判断 , 一旦错误的阻断必然会引起用户的使用逻辑的断裂, 比如用户在一个 App 里面要拉起支付宝进行支付 , 结果启动支付宝的支付组件的时候被你给阻断了, 可以想象用户的愤怒</p><p>有了上面几个简单的概念, 下面我们就简单说一下自启动和关联启动的技术分析 .</p><h1 id="分析手段"><a href="#分析手段" class="headerlink" title="分析手段"></a>分析手段</h1><h2 id="Monkey"><a href="#Monkey" class="headerlink" title="Monkey"></a>Monkey</h2><p>要分析应用启动，首先需要安装大量应用，然后执行 Monkey，让大部分进程都跑起来。我使用的 Monkey 命令如下，跑完就自己去睡觉了</p><figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">adb shell monkey --kill-process-after-error --ignore-security-exceptions --ignore-crashes --pct-appswitch 90 --pct-touch 10 --throttle 10000 --ignore-timeouts --ignore-native-crashes 100000000</span><br></pre></td></tr></table></figure><h2 id="EventLog"><a href="#EventLog" class="headerlink" title="EventLog"></a>EventLog</h2><p>首先可以用 EventLog 来查看进程的启动信息，EventLog 会如实记录每个进程的启动、死亡信息。我使用下面的命令来进行进程启动和死亡的过滤</p><figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">adb logcat -b events | egrep "am_proc_died|am_proc_start"</span><br></pre></td></tr></table></figure><h2 id="Dumpsys"><a href="#Dumpsys" class="headerlink" title="Dumpsys"></a>Dumpsys</h2><p>这里主要是使用了 Dumpsys activity ，主要是用来分析进程的各个组件的信息</p><figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">adb shell dumpsys activity</span><br></pre></td></tr></table></figure><h1 id="自启动的技术分析"><a href="#自启动的技术分析" class="headerlink" title="自启动的技术分析"></a>自启动的技术分析</h1><p>自启动指的是不借助其他的应用, 通过监听系统的一些事件, 或者文件变化, 通过系统的机制, 把自己的进程拉起来处理事情. 这些系统的事件就包括开机广播 / 网络变化 / 媒体库扫描等(这里只列了一部分) .</p><h2 id="开机广播"><a href="#开机广播" class="headerlink" title="开机广播"></a>开机广播</h2><p>用户重启手机后, 系统会向注册了开机广播的应用发广播, 收到广播的应用就可以把自己拉起来, 开始处理对应的逻辑(拉起更多的进程) , 对应的广播如下:</p><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">android.intent.action.BOOT_COMPLETED</span><br></pre></td></tr></table></figure><p>应用可以监听这个广播, 在用户重启手机后, 将自己唤醒, 处理自己的逻辑 , 比如说继续图片备份/  继续同步联系人 / 检查是否有固件更新 / 推送最新的新闻等操作</p><p><strong>当然监听这个广播也是应用自启动的一个手段</strong></p><h3 id="案例-腾讯新闻监听开机广播拉起后台进程"><a href="#案例-腾讯新闻监听开机广播拉起后台进程" class="headerlink" title="案例: 腾讯新闻监听开机广播拉起后台进程"></a>案例: 腾讯新闻监听开机广播拉起后台进程</h3><p>典型的广播接受处理记录 : com.tencent.news 的 com.tencent.news.system.BootBroadcastReceiver 组件接收了 android.intent.action.BOOT_COMPLETED 广播 ,处理了 7s ,至于怎么处理, 当然是先把 com.tencent.news 这个进程拉起来, 然后执行 BootBroadcastReceiver  的 onReceive 方法 . 这是一个典型的自启动的例子</p><p><img src="/images/15888647034327.jpg" alt=""></p><h2 id="网络变化"><a href="#网络变化" class="headerlink" title="网络变化"></a>网络变化</h2><p>网络变化包括网络连接 / 断开 / wifi 移动网络切换等操作 , 一旦发生这些事件, 系统会向对应注册了这个事件的应用发送广播 . 对应的广播如下: </p><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">android.net.conn.CONNECTIVITY_CHANGE</span><br></pre></td></tr></table></figure><p>应用就可以监听这个广播来执行对应的逻辑 , 比如你在看直播 ,突然 wifi 断了切换成了 4G 网络, 应用就可以提醒用户是否使用移动网络继续观看, 毕竟网络直播还是很耗流量的.</p><p><strong>当然监听这个广播也是应用自启动的一个手段</strong></p><h3 id="案例"><a href="#案例" class="headerlink" title="案例"></a>案例</h3><p>下图可以看到五个监听了网络变大的广播接收器 (只显示了五个 , 其实有 200 多个) , 监听到网络变化后拉起自身</p><ol><li>包名: com.alibaba.android.rimet(钉钉)<ol><li>接收器 : com.xiaomi.push.service.receivers.NetworkStatusReceiver</li></ol></li><li>包名: cn.xuexi.android<ol><li>接收器: com.xiaomi.push.service.receivers.NetworkStatusReceiver</li></ol></li><li>包名: com.sina.weibo<ol><li>接收器: com.xiaomi.push.service.receivers.NetworkStatusReceiver</li></ol></li><li>包名: com.sdu.didi.psnger<ol><li>接收器 : com.didi.sdk.push.PushNetReceiver</li></ol></li><li>包名: com.meelive.ingkee<ol><li>接收器 : com.network_optimization.NetWorkStateReceiver</li></ol></li></ol><p>图中 packageName 就是对于的应用的包名, name 是启动的组件</p><p><img src="/images/15888647135669.jpg" alt=""></p><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">android.net.wifi.STATE_CHANGE</span><br></pre></td></tr></table></figure><p><img src="/images/15888647201101.jpg" alt=""></p><h2 id="媒体库扫描"><a href="#媒体库扫描" class="headerlink" title="媒体库扫描"></a>媒体库扫描</h2><p>系统监听到文件变化或者存储盘变化也会发通知给各个应用 , 比如说增加了一个图片或者文档 , 其对于的广播如下</p><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">android.intent.action.MEDIA_SCANNER_STARTED</span><br><span class="line">android.intent.action.MEDIA_SCANNER_FINISHED</span><br><span class="line">android.intent.action.MEDIA_EJECT</span><br></pre></td></tr></table></figure><p><strong>当然监听这个广播也是应用自启动的一个手段</strong></p><h3 id="案例-jd-监听-MEDIA-SCANNER-STARTED-广播自启"><a href="#案例-jd-监听-MEDIA-SCANNER-STARTED-广播自启" class="headerlink" title="案例: jd 监听 MEDIA_SCANNER_STARTED 广播自启"></a>案例: jd 监听 MEDIA_SCANNER_STARTED 广播自启</h3><p>下面是一个典型的监听媒体库扫描广播进行自启动的案例:</p><p>com.jd.jrapp 的广播接收器 com.jd.jrapp.library.longconnection.receiver.BootReceiver 监听到 android.intent.action.MEDIA_SCANNER_STARTED 广播后, 启动自己进程开始处理</p><p><img src="/images/15888647284822.jpg" alt=""></p><h2 id="三方-SDK-个推"><a href="#三方-SDK-个推" class="headerlink" title="三方 SDK - 个推"></a>三方 SDK - 个推</h2><p>个推是各个应用接入的一个三方 SDK , 用于消息推送 , 但其实个推也集成了上面说的哪几种自启动的方式 , 包括 BOOT_COMPLETED,CONNECTIVITY_CHANGE,USER_PRESENT 这些</p><p>关于个推,由于可定制型比较强, 比如 在项目源码中添加一个继承自 com.igexin.sdk.PushService 的自定义 Service 就可以 , 所以从 EventLog 和 Dumpsys 没法直接看出来哪个用了个推来保活或者相互唤醒, 不过其对于的子进程得设置为 :pushservice , 可以根据这个做判断(有可能不准)</p><p>所以我们直接看个推的配置文档</p><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br></pre></td><td class="code"><pre><span class="line">&lt;service</span><br><span class="line">    android:name=&quot;com.igexin.sdk.PushService&quot;</span><br><span class="line">    android:permission=&quot;android.permission.BIND_JOB_SERVICE&quot;</span><br><span class="line">    android:exported=&quot;false&quot;</span><br><span class="line">    android:label=&quot;NotificationCenter&quot;</span><br><span class="line">    android:process=&quot;:pushservice&quot;/&gt;</span><br><span class="line">&lt;receiver android:name=&quot;com.igexin.sdk.PushReceiver&quot; &gt;</span><br><span class="line">    &lt;intent-filter&gt;</span><br><span class="line">        &lt;action android:name=&quot;android.intent.action.BOOT_COMPLETED&quot; /&gt;</span><br><span class="line">        &lt;action android:name=&quot;android.net.conn.CONNECTIVITY_CHANGE&quot; /&gt;</span><br><span class="line">        &lt;action android:name=&quot;android.intent.action.USER_PRESENT&quot; /&gt;</span><br><span class="line">        &lt;!-- 以下三项为可选的 action 声明，有助于提高 service 存活率 --&gt;</span><br><span class="line">        &lt;action android:name=&quot;android.intent.action.MEDIA_MOUNTED&quot; /&gt;</span><br><span class="line">        &lt;action android:name=&quot;android.intent.action.ACTION_POWER_CONNECTED&quot; /&gt;</span><br><span class="line">        &lt;action android:name=&quot;android.intent.action.ACTION_POWER_DISCONNECTED&quot; /&gt;</span><br><span class="line">    &lt;/intent-filter&gt;</span><br><span class="line">&lt;/receiver&gt;</span><br><span class="line">&lt;activity</span><br><span class="line">    android:name=&quot;com.igexin.sdk.PushActivity&quot;</span><br><span class="line">    android:excludeFromRecents=&quot;true&quot;</span><br><span class="line">    android:exported=&quot;false&quot;</span><br><span class="line">    android:process=&quot;:pushservice&quot;</span><br><span class="line">    android:taskAffinity=&quot;com.igexin.sdk.PushActivityTask&quot;</span><br><span class="line">    android:theme=&quot;@android:style/Theme.Translucent.NoTitleBar&quot; &gt;</span><br><span class="line">&lt;/activity&gt;</span><br><span class="line">&lt;activity</span><br><span class="line">     android:name=&quot;com.igexin.sdk.GActivity&quot;</span><br><span class="line">     android:excludeFromRecents=&quot;true&quot;</span><br><span class="line">     android:exported=&quot;true&quot;</span><br><span class="line">     android:process=&quot;:pushservice&quot;</span><br><span class="line">     android:taskAffinity=&quot;com.igexin.sdk.PushActivityTask&quot;</span><br><span class="line">     android:theme=&quot;@android:style/Theme.Translucent.NoTitleBar&quot;/&gt;</span><br></pre></td></tr></table></figure><p>像最前面同提到的 BootComplete , com.ss.android.ugc.aweme:pushservice 可能就是接入了个推</p><p><img src="/images/15888647377742.jpg" alt=""></p><h1 id="关联启动的技术分析"><a href="#关联启动的技术分析" class="headerlink" title="关联启动的技术分析"></a>关联启动的技术分析</h1><p>关联启动指的是借助其他应用来启动自己 , 比如说很多 App 接入了同一个 SDK , 那么一旦你启动了接入这个 SDK 的应用 ,那么这个 SDK 就可以启动同样接入了这个 SDK 的其他应用, 达到关联唤醒的目的</p><p>这个 SDK 可以是 BAT 集团内部自研的通用 SDK , 也可以是三方提供的 SDK , 根据我自己的调试来看 , 大家提到的 xxx 启动了 xxx , 大部分都是通过三方 SDK 来实现的 , 大部分是用了极光推送.</p><p>下面就以一个案例来看极光推送是怎么利用一个已经启动的 App 来启动另外一个没有启动的 App 的.</p><p>首先我们看 EventLog 可以看到进程的启动信息 , 包括进程名, 进程 pid , 启动的组件, 启动的组件类型.</p><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">[0,19428,10195,com.qq.reader,service,&#123;com.qq.reader/cn.jpush.android.service.DaemonService&#125;]</span><br></pre></td></tr></table></figure><p>上面这条 Log 解释一下就是 </p><ol><li>启动进程 : com.qq.reader(QQ 阅读) </li><li>启动 pid :19428 </li><li>启动组件: cn.jpush.android.service.DaemonService </li><li>组件类型: service</li></ol><h3 id="案例-起点-App-通过极光推送拉起-QQ-阅读"><a href="#案例-起点-App-通过极光推送拉起-QQ-阅读" class="headerlink" title="案例:起点 App 通过极光推送拉起 QQ 阅读"></a>案例:起点 App 通过极光推送拉起 QQ 阅读</h3><p>执行 adb shell am force-stop com.qq.reader  , 强制杀掉 QQ 阅读 , 观察 EventLog, 从下面的可以看到 , QQ 阅读的进程被拉起, 拉起的是 Service 这个组件, 其具体的内容是 com.qq.reader/cn.jpush.android.service.DaemonService</p><p><img src="/images/15888647497735.jpg" alt=""></p><p>当然从 Event Log 里面我们看不出来是谁拉起了这个 Service ,这时候就需要 dumpsys activity 的帮助了, 由于是 Service 组件被拉起, 那么我们可以看 com.qq.reader 的 ServiceRecord , 其内容如下, 可以看到其 Connections 一栏, 是被 com.qidian.QDReader:pushcore 这个进程拉起的</p><p><img src="/images/15888647596688.jpg" alt=""></p><p>那么对应的 , 在小米的 MIUI 12 关联启动界面就会显示 : 起点读书 在 8:48 分拉起了 QQ 阅读(由于没有小米手机, 所以没法截图, 大家自己看高票答案 <a href="https://www.zhihu.com/question/391494145" target="_blank" rel="noopener">https://www.zhihu.com/question/391494145</a> 自己脑补一下就可以了)</p><p>极光推送的官方文档其实也说的很清楚, 提供了被拉起和拉起别人的功能, 看你自己怎么用.</p><h3 id="极光官方文档唤醒配置"><a href="#极光官方文档唤醒配置" class="headerlink" title="极光官方文档唤醒配置"></a>极光官方文档唤醒配置</h3><p><img src="/images/15888647676816.jpg" alt=""></p><h3 id="极光关联启动文档"><a href="#极光关联启动文档" class="headerlink" title="极光关联启动文档"></a>极光关联启动文档</h3><p><img src="/images/15888647754201.jpg" alt=""></p><p><img src="/images/15888647806293.jpg" alt=""></p><h1 id="手机厂商应对"><a href="#手机厂商应对" class="headerlink" title="手机厂商应对"></a>手机厂商应对</h1><p>最前面的有说到, 进程管理是应用开发者和 Rom 开发者斗争最激烈的部分 , MIUI 选择了将斗争的过程展示给了普通消费者, 让普通消费者也知道了这场斗争的细节 . 其他的厂商也做了相同的事情 , 否则整个系统基本上是没法用的 , 就像我手上现在这台测试用的 pixel , 不断有进程因为整机内存太小被 LMK 杀掉, 然后马上被各种手段重新启动 , 耗电极快, 卡的连娘都不认识了.</p><p>我们从极光和个推的官方文档就可以看到各个手机厂商的应对方法和开关的界面, 这里列出来是方便大家进去看一下, 因为各个手机厂商的白名单配置不一样, 或者有时候用户自己改过但是忘记了 , 都可以进去重新设置一下 , 对于那些你退出了就不想让他继续活动的应用 ,果断去掉白名单.</p><h2 id="极光推送白名单配置"><a href="#极光推送白名单配置" class="headerlink" title="极光推送白名单配置"></a>极光推送白名单配置</h2><p><img src="/images/15888647965330.jpg" alt=""></p><h2 id="个推白名单配置"><a href="#个推白名单配置" class="headerlink" title="个推白名单配置"></a>个推白名单配置</h2><h3 id="EMUI-OS（华为）"><a href="#EMUI-OS（华为）" class="headerlink" title="EMUI OS（华为）"></a>EMUI OS（华为）</h3><ul><li><p>自启动管理：需要把应用加到【自启动管理】列表，否则杀进程或重新开机后进程不会开启，只能手动开启应用</p></li><li><p>后台应用保护：需要手动把应用加到此列表，否则设备进入睡眠后会自动杀掉应用进程，只有手动开启应用才能恢复运行</p></li><li><p>通知管理：应用状态有三种：提示、允许、禁止。禁止应用则通知栏不会有任何提醒</p><h3 id="Flyme-OS（魅族）"><a href="#Flyme-OS（魅族）" class="headerlink" title="Flyme OS（魅族）"></a>Flyme OS（魅族）</h3></li><li><p>自启动管理：需要把应用加到【自启动管理】列表，否则杀进程或重新开机后进程无法开启</p></li><li><p>通知栏推送：关闭应用通知则收到消息不会有任何展示</p><h3 id="Funtouch-OS（VIVO）"><a href="#Funtouch-OS（VIVO）" class="headerlink" title="Funtouch OS（VIVO）"></a>Funtouch OS（VIVO）</h3></li><li><p>自启动管理：需要将应用加入“i 管家”中的【自启动管理】列表，否则重启手机后进程不会自启。但强制手动杀进程，即使加了这个列表中，后续进程也无法自启动。</p><h3 id="Color-OS（OPPO）"><a href="#Color-OS（OPPO）" class="headerlink" title="Color OS（OPPO）"></a>Color OS（OPPO）</h3></li><li><p>冻结应用管理：需要将应用加入纯净后台，否则锁屏状态下无法及时收到消息</p></li><li><p>自启动管理：将应用加入【自启动管理】列表的同时，还需要到设置-应用程序-正在运行里锁定应用进程，否则杀进程或者开机后进程不会开启，只能手动开启应用</p><h3 id="MIUI-OS-小米"><a href="#MIUI-OS-小米" class="headerlink" title="MIUI OS (小米)"></a>MIUI OS (小米)</h3></li><li><p>自启动管理：需要把应用加到【自启动管理】列表，否则杀进程或重新开机后进程无法开启</p></li><li><p>省电策略：需要禁用应用省电策略，否则后台几分钟后会被系统限制联网</p></li><li><p>MIUI 7 神隐模式： 允许用户设置后台联网应用，开启后应用即可在后台保持联网，否则应用进入后台时，应用无法正常接收消息。【设置】-&gt;【电量和性能】-&gt;【神隐模式】</p></li></ul><h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><ol><li><a href="https://www.androidperformance.com/about/" target="_blank" rel="noopener">关于我</a> , 非常希望和大家一起交流 , 共同进步 .</li><li><a href="https://androidperformance.com/2019/12/01/BlogMap/">博客内容导航</a></li><li><a href="https://androidperformance.com/2018/05/07/Android-performance-optimization-skills-and-tools/">优秀博客文章记录 - Android 性能优化必知必会</a></li></ol><p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p>]]></content>
+    
+    <summary type="html">
+    
+      &lt;h1 id=&quot;背景&quot;&gt;&lt;a href=&quot;#背景&quot; class=&quot;headerlink&quot; title=&quot;背景&quot;&gt;&lt;/a&gt;背景&lt;/h1&gt;&lt;p&gt;MIUI 12 的发布, 将之前一直是应用开发者和 Rom 开发者斗争最激烈的部分展示给了普通消费者, 让普通消费者也知道了这场斗争的细节, 正所谓 “魔高一尺道高一丈” , Rom 开发者由于有更高的代码修改权限, 始终占据着上风 ; App 开发者当然也不甘示弱, 各种保活拉起黑科技层出不穷,甚至 Google 都参与到了这部分斗争中, 居中调和, 制定各种规则来规范双方. 当然斗争对双方来说都算是好事, 毕竟任何一方完全的胜利都会导致 “狡兔死走狗烹,飞鸟尽良弓藏”&lt;/p&gt;
+&lt;p&gt;不过双方斗争的受害者无疑还是使用手机的消费者 , App 如果斗争成功, 那么手机上各种后台进程乱跑, 杀不掉, 占用 CPU 和内存 , 这不是消费者想看到的 ; 如果 Rom 开发者斗争成功 , App 的体验必定会大打折扣 , 各位 App 开发者应该深有体会. &lt;/p&gt;
+&lt;p&gt;从文章最后一段可以看到, 其实各个手机厂商对付这一套都有自己的策略, 基本上都可以搞定自启动和关联启动. 至于隐私 , 李彦宏曾经说过 “&lt;strong&gt;中国人对隐私问题的态度更加开放，也相对来说没那么敏感。如果他们可以用隐私换取便利、安全或者效率。在很多情况下，他们就愿意这么做&lt;/strong&gt;“ . 大家想想在微信里面复制一段话打开到淘宝就可以自动跳转到这个物品, 方不方便? 好不好用? 还想不想用? 剪贴板再借我看一看?&lt;/p&gt;
+    
+    </summary>
+    
+    
+      <category term="Android" scheme="https://androidperformance.com/categories/Android/"/>
+    
+    
+      <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
+    
+  </entry>
   
   <entry>
     <title>Android Systrace 基础知识 - SurfaceFlinger 解读</title>
@@ -38,11 +63,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -116,11 +141,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -146,11 +171,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -176,11 +201,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -226,11 +251,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -256,9 +281,9 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
-      <category term="Lunch" scheme="https://androidperformance.com/tags/Lunch/"/>
-    
       <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
+      <category term="Lunch" scheme="https://androidperformance.com/tags/Lunch/"/>
     
   </entry>
   
@@ -284,11 +309,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -314,11 +339,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -380,7 +405,7 @@
     <link href="https://androidperformance.com/2019/09/18/Android-Jank-Due-To-Low-Memory/"/>
     <id>https://androidperformance.com/2019/09/18/Android-Jank-Due-To-Low-Memory/</id>
     <published>2019-09-18T15:21:26.000Z</published>
-    <updated>2019-11-04T14:42:02.099Z</updated>
+    <updated>2020-04-17T23:57:09.922Z</updated>
     
     <content type="html"><![CDATA[<p>在<a href="https://www.androidperformance.com/2019/09/05/Android-Jank-Due-To-System/" target="_blank" rel="noopener">Android 中的卡顿丢帧原因概述 - 系统篇</a> 这篇文章中 , 实际案例这里我们有列举一些由于系统低内存导致的卡顿 , 由于 Android 低内存对整机性能影响比较大 , 所以单独些一篇文章 , 来概述系统低内存对整机性能的影响 .</p><p>随着 Android 系统版本的更迭 , 以及 App 的代码膨胀 , Android 系统对内存的需求越来越大 , 但是目前市面上还存在着大量的 4G 内存以下的机器 , 这部分用户就很容易遇到整机低内存的情况 , 尤其是在系统大版本更新和 App 越装越多的情况下 . </p><p>Android 低内存会导致性能问题 , 具体表现就是响应慢和卡顿 . 比如启动一个应用要花比平时更长的时间 ; 滑动列表会掉更多帧 ; 后台的进程减少导致冷启动变多 ; 手机很容易发热发烫等 , 下面我会概述发生这些性能问题的原因 . Debug 的方法 , 以及可能的优化措施 . </p><a id="more"></a><h1 id="低内存的数据特征和行为特征"><a href="#低内存的数据特征和行为特征" class="headerlink" title="低内存的数据特征和行为特征"></a>低内存的数据特征和行为特征</h1><h2 id="Meminfo-信息"><a href="#Meminfo-信息" class="headerlink" title="Meminfo 信息"></a>Meminfo 信息</h2><p>最简单的方法是使用 Android 系统自带的 Dumpsys meminfo 工具</p><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">adb shell dumpsys meminfo</span><br><span class="line">......</span><br><span class="line">Total RAM: 7,658,060K (status moderate)</span><br><span class="line"> Free RAM:   550,200K (   78,760K cached pss +   156,ba480K cached kernel +   314,960K free)</span><br><span class="line"> Used RAM: 7,718,091K (6,118,703K used pss + 1,599,388K kernel)</span><br><span class="line"> Lost RAM:  -319,863K</span><br><span class="line">     ZRAM:     2,608K physical used for   301,256K in swap (4,247,544K total swap)</span><br><span class="line">   Tuning: 256 (large 512), oom   322,560K, restore limit   107,520K (high-end-gfx)</span><br></pre></td></tr></table></figure><p>如果系统处于低内存的话 , 会有如下特征:</p><ol><li>FreeRam 的值非常少 , Used RAM 的值非常大</li><li>ZRAM 使用率非常高（如果开了 Zram 的话）</li></ol><h2 id="LMK-amp-amp-kswapd-线程活跃"><a href="#LMK-amp-amp-kswapd-线程活跃" class="headerlink" title="LMK &amp;&amp; kswapd 线程活跃"></a>LMK &amp;&amp; kswapd 线程活跃</h2><p>低内存的时候， LKMD 会非常活跃， 在 Kernel Log 里面可以看到 LMK 杀进程的信息:</p><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">[kswapd0] lowmemorykiller: Killing &apos;u.mzsyncservice&apos; (15609) (tgid 15609), adj 906,</span><br><span class="line">to free 28864kB on behalf of &apos;kswapd0&apos; (91) because</span><br><span class="line">cache 258652kB is below limit 261272kB for oom score 906</span><br><span class="line">Free memory is -5540kB above reserved.</span><br><span class="line">Free CMA is 3172kB</span><br><span class="line">Total reserve is 227288kB</span><br><span class="line">Total free pages is 271748kB</span><br><span class="line">Total file cache is 345384kB</span><br><span class="line">GFP mask is 0x14000c0</span><br></pre></td></tr></table></figure><p>上面这段 Log 的意思是说， 由于 mem 低于我们设定的 900 的水位线 （261272kB），所以把 pid 为 15609 的 mzsyncservice 这个进程杀掉（这个进程的 adj 是 906 ）</p><h2 id="proc-meminfo"><a href="#proc-meminfo" class="headerlink" title="proc/meminfo"></a>proc/meminfo</h2><p>这里是 Linux Kernel 展示 meminfo 的地方 , 关于 meminfo 的解读，可以参考这篇文章：<a href="http://linuxperf.com/?p=142" target="_blank" rel="noopener">/PROC/MEMINFO之谜</a></p><p>从结果来 , 当系统处于低内存的情况时候 , MemFree 和 MemAvailable 的值都很小</p><figure class="highlight plain"><figcaption><span>shell cat proc/meminfo</span></figcaption><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br></pre></td><td class="code"><pre><span class="line">MemTotal:        5630104 kB</span><br><span class="line">MemFree:          148928 kB</span><br><span class="line">MemAvailable:     864172 kB</span><br><span class="line">Buffers:           28464 kB</span><br><span class="line">Cached:          1003144 kB</span><br><span class="line">SwapCached:        19844 kB</span><br><span class="line">Active:          1607512 kB</span><br><span class="line">Inactive:         969208 kB</span><br><span class="line">Active(anon):    1187828 kB</span><br><span class="line">Inactive(anon):   426192 kB</span><br><span class="line">Active(file):     419684 kB</span><br><span class="line">Inactive(file):   543016 kB</span><br><span class="line">Unevictable:       62152 kB</span><br><span class="line">Mlocked:           62152 kB</span><br><span class="line">SwapTotal:       2097148 kB</span><br><span class="line">SwapFree:          42576 kB</span><br><span class="line">Dirty:              3604 kB</span><br><span class="line">Writeback:             0 kB</span><br><span class="line">AnonPages:       1602928 kB</span><br><span class="line">Mapped:           996768 kB</span><br><span class="line">Shmem:              7284 kB</span><br><span class="line">Slab:             306440 kB</span><br><span class="line">SReclaimable:      72320 kB</span><br><span class="line">SUnreclaim:       234120 kB</span><br><span class="line">KernelStack:       89776 kB</span><br><span class="line">PageTables:       107572 kB</span><br><span class="line">NFS_Unstable:          0 kB</span><br><span class="line">Bounce:                0 kB</span><br><span class="line">WritebackTmp:          0 kB</span><br><span class="line">CommitLimit:     4912200 kB</span><br><span class="line">Committed_AS:   118487976 kB</span><br><span class="line">VmallocTotal:   263061440 kB</span><br><span class="line">VmallocUsed:           0 kB</span><br><span class="line">VmallocChunk:          0 kB</span><br><span class="line">CmaTotal:         303104 kB</span><br><span class="line">CmaFree:            3924 kB</span><br></pre></td></tr></table></figure><h2 id="整机卡顿-amp-amp-响应慢"><a href="#整机卡顿-amp-amp-响应慢" class="headerlink" title="整机卡顿 &amp;&amp; 响应慢"></a>整机卡顿 &amp;&amp; 响应慢</h2><p>低内存的时候，整机使用的时候要比非低内存的时候要卡很多，点击应用或者启动 App 都会有不顺畅或者响应慢的感觉</p><h1 id="低内存对性能的具体影响"><a href="#低内存对性能的具体影响" class="headerlink" title="低内存对性能的具体影响"></a>低内存对性能的具体影响</h1><h2 id="影响主线程-IO-操作"><a href="#影响主线程-IO-操作" class="headerlink" title="影响主线程 IO 操作"></a>影响主线程 IO 操作</h2><p>主线程出现大量的 IO 相关的问题 ， </p><ol><li>反馈到 Trace 上就是有大量的黄色 Trace State 出现 , 例如 : Uninterruptible Sleep | WakeKill - Block I/O .</li><li>查看其 Block 信息 （kernel callsite when blocked:: “wait_on_page_bit_killable+0x78/0x88）</li></ol><p><strong>Linux 系统的 page cache 链表中有时会出现一些还没准备好的 page ( 即还没把磁盘中的内容完全地读出来 ) , 而正好此时用户在访问这个 page 时就会出现 wait_on_page_locked_killable 阻塞了. 只有系统当 io 操作很繁忙时, 每笔的 io 操作都需要等待排队时, 极其容易出现且阻塞的时间往往会比较长.</strong></p><p><strong>当出现大量的 IO 操作的时候，应用主线程的 Uninterruptible Sleep 也会变多，此时涉及到 io 操作（比如  view ，读文件，读配置文件、读 odex 文件），都会触发 Uninterruptible Sleep ， 导致整个操作的时间变长</strong></p><p><img src="/images//15688217911224.jpg" alt=""></p><p><img src="/images//15688217985878.jpg" alt=""></p><h2 id="出现-CPU-竞争"><a href="#出现-CPU-竞争" class="headerlink" title="出现 CPU 竞争"></a>出现 CPU 竞争</h2><p>低内存会触发 Low Memory Killer  进程频繁进行扫描和杀进程，kswapd0 是一个内核工作线程，内存不足时会被唤醒，做内存回收的工作。 当内存频繁在低水位的时候，kswapd0 会被频繁唤醒，占用 cpu ，造成卡顿和耗电。</p><p>比如下面这个情况， kswapd0 占用了 855 的超大核 cpu7 ，而且是满频在跑，耗电可想而知，如果此时前台应用的主线程跑到了 cpu7 上，很大可能会出现 cpu 竞争，导致调度不到而丢帧。 </p><p>HeapTaskDaemon 通常也会在低内存的时候跑的很高 </p><p><img src="/images//15688218269079.jpg" alt="">, 来做内存相关的操作</p><h2 id="进程频繁查杀和重启"><a href="#进程频繁查杀和重启" class="headerlink" title="进程频繁查杀和重启"></a>进程频繁查杀和重启</h2><p>对 AMS 的影响主要集中在进程的查杀上面 , 由于 LMK 的介入 , 处于 Cache 状态的进程很容易被杀掉 , 然后又被他们的父进程或者其他的应用所拉起来 , 导致陷入了一种死循环 . 对系统 CPU \ Memory \ IO 等资源的影响非常大.</p><p>比如下面就是一次 Monkey 之后的结果 , QQ 在短时间内频繁被杀和重启 .</p><figure class="highlight plain"><figcaption><span>14:32:16.932  1435  1510 I am_proc_start: [0,30387,10145,com.tencent.mobileqq,restart,com.tencent.mobileqq]</span></figcaption><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br></pre></td><td class="code"><pre><span class="line">07-23 14:32:16.969  1435  3420 I am_proc_bound: [0,30387,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:16.979  1435  3420 I am_kill : [0,30387,com.tencent.mobileqq,901,empty #3]</span><br><span class="line">07-23 14:32:16.996  1435  3420 I am_proc_died: [0,30387,com.tencent.mobileqq,901,18]</span><br><span class="line">07-23 14:32:17.028  1435  1510 I am_proc_start: [0,30400,10145,com.tencent.mobileqq,restart,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:17.054  1435  3420 I am_proc_bound: [0,30400,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:17.064  1435  3420 I am_kill : [0,30400,com.tencent.mobileqq,901,empty #3]</span><br><span class="line">07-23 14:32:17.082  1435  3420 I am_proc_died: [0,30400,com.tencent.mobileqq,901,18]</span><br><span class="line">07-23 14:32:17.114  1435  1510 I am_proc_start: [0,30413,10145,com.tencent.mobileqq,restart,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:17.139  1435  3420 I am_proc_bound: [0,30413,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:17.149  1435  3420 I am_kill : [0,30413,com.tencent.mobileqq,901,empty #3]</span><br><span class="line">07-23 14:32:17.166  1435  3420 I am_proc_died: [0,30413,com.tencent.mobileqq,901,18]</span><br><span class="line">07-23 14:32:17.202  1435  1510 I am_proc_start: [0,30427,10145,com.tencent.mobileqq,restart,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:17.216  1435  3420 I am_proc_bound: [0,30427,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:17.226  1435  3420 I am_kill : [0,30427,com.tencent.mobileqq,901,empty #3]</span><br><span class="line">07-23 14:32:17.249  1435  3420 I am_proc_died: [0,30427,com.tencent.mobileqq,901,18]</span><br><span class="line">07-23 14:32:17.278  1435  1510 I am_proc_start: [0,30440,10145,com.tencent.mobileqq,restart,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:17.299  1435  3420 I am_proc_bound: [0,30440,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:17.309  1435  3420 I am_kill : [0,30440,com.tencent.mobileqq,901,empty #3]</span><br><span class="line">07-23 14:32:17.329  1435  2116 I am_proc_died: [0,30440,com.tencent.mobileqq,901,18]</span><br><span class="line">07-23 14:32:17.362  1435  1510 I am_proc_start: [0,30453,10145,com.tencent.mobileqq,restart,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:17.387  1435  2116 I am_proc_bound: [0,30453,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:17.398  1435  2116 I am_kill : [0,30453,com.tencent.mobileqq,901,empty #3]</span><br><span class="line">07-23 14:32:17.420  1435  2116 I am_proc_died: [0,30453,com.tencent.mobileqq,901,18]</span><br><span class="line">07-23 14:32:17.447  1435  1510 I am_proc_start: [0,30466,10145,com.tencent.mobileqq,restart,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:17.474  1435  2116 I am_proc_bound: [0,30466,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:17.484  1435  2116 I am_kill : [0,30466,com.tencent.mobileqq,901,empty #3]</span><br><span class="line">07-23 14:32:17.507  1435  2116 I am_proc_died: [0,30466,com.tencent.mobileqq,901,18]</span><br><span class="line">07-23 14:32:17.533  1435  1510 I am_proc_start: [0,30479,10145,com.tencent.mobileqq,restart,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:17.556  1435  2116 I am_proc_bound: [0,30479,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:17.566  1435  2116 I am_kill : [0,30479,com.tencent.mobileqq,901,empty #3]</span><br><span class="line">07-23 14:32:17.587  1435  2116 I am_proc_died: [0,30479,com.tencent.mobileqq,901,18]</span><br><span class="line">07-23 14:32:17.613  1435  1510 I am_proc_start: [0,30492,10145,com.tencent.mobileqq,restart,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:17.636  1435  2116 I am_proc_bound: [0,30492,com.tencent.mobileqq]</span><br><span class="line">07-23 14:32:17.646  1435  2116 I am_kill : [0,30492,com.tencent.mobileqq,901,empty #3]</span><br><span class="line">07-23 14:32:17.667  1435  2116 I am_proc_died: [0,30492,com.tencent.mobileqq,901,18]</span><br></pre></td></tr></table></figure><p>其对应的 Systrace - SystemServer 中可以看到 AM 在频繁杀 QQ 和起 QQ<br><img src="/images//15688220198874.jpg" alt=""></p><p>此 Trace 对应的 Kernel 部分也可以看到繁忙的 cpu<br><img src="/images//15688220915505.jpg" alt=""></p><h2 id="影响内存分配和触发-IO"><a href="#影响内存分配和触发-IO" class="headerlink" title="影响内存分配和触发 IO"></a>影响内存分配和触发 IO</h2><p>手机经过长时间老化使用整机卡顿一下 , 或者整体比刚刚开机的时候操作要慢 , 可能是因为触发了内存回收或者 block io , 而这两者又经常有关联 . 内存回收可能触发了 fast path  回收 \ kswapd 回收 \ direct reclaim 回收 \ LMK杀进程回收等。（fast path 回收不进行回写）</p><p>回收的内容是匿名页 swapout 或者 file-backed 页写回和清空。（假设手机都是 swap file 都是内存，不是 disk）, 涉及到 file 的，都可能操作 io，增加 block io 的概率。</p><p>还有更常见的是打开之前打开过的应用，没有第一次打开的快，需要加载或者卡一段时间 . 可能发生了 do_page_fault，这条路径经常见到 block io 在 wait_on_page_bit_killable()，如果是 swapout 内存，就要 swapin 了。如果是普通文件，就要 read out in pagecache/disk.</p><p>do_page_fault —&gt; lock_page_or_retry -&gt; wait_on_page_bit_killable 里面会判断 page 是否置位 PG_locked, 如果置位就一直阻塞, 直到 PG_locked 被清除  , 而 PG_locked 标志位是在回写开始时和 I/O 读完成时才会被清除，而 readahead 到 pagecache 功能也对 block io 产生影响，太大了增加阻塞概率。</p><h1 id="实例"><a href="#实例" class="headerlink" title="实例"></a>实例</h1><p>下面这个 Trace 是低内存情况下 ， 抓取的一个 App 的冷启动 ， 我们只取应用启动到第一帧显示的部分 ，总耗时为2s 。<br>可以看到其 Running 的总时间是 682 ms ，</p><h2 id="低内存的启动情况"><a href="#低内存的启动情况" class="headerlink" title="低内存的启动情况"></a>低内存的启动情况</h2><p>低内存情况下 , 这个 App 从 bindApplication 到第一帧显示 , 共花费了 2s . 从下面的 Thread 信息那里可以看到 </p><ol><li>Uninterruptible Sleep | WakeKill - Block I/O 和 Uninterruptible Sleep 这两栏总共花费 750 ms 左右(对比下面正常情况才 130 ms)</li><li>Running 的时间在 600 ms (对比下面正常情况才 624 ms , 相差不大) </li></ol><p><img src="/images//15688227815756.jpg" alt=""></p><p>从这段时间内的 CPU 使用情况来看 , 除了 HeapTaskDeamon 跑的比较多之外 , 其他的内存和 io 相关的进程也非常多 , 比如若干个 kworker 和 kswapd0.</p><p><img src="/images//15688227887581.jpg" alt=""></p><h2 id="正常内存情况下"><a href="#正常内存情况下" class="headerlink" title="正常内存情况下"></a>正常内存情况下</h2><p>正常内存情况下 , 这个 App 从 bindApplication 到第一帧显示 , 只需要 1.22s . 从下面的 Thread 信息那里可以看到 </p><ol><li>Uninterruptible Sleep | WakeKill - Block I/O 和 Uninterruptible Sleep 这两栏总共才 130 ms.</li><li>Running 的时间是 624 ms<br><img src="/images//15688228638217.jpg" alt=""></li></ol><p>从这段时间内的 CPU 使用情况来看 , 除了 HeapTaskDeamon 跑的比较多之外 , 其他的内存和 io 相关的进程非常少.<br><img src="/images//15688228721814.jpg" alt=""></p><h1 id="可能的优化方案-来自实际的经验和大佬分享的经验"><a href="#可能的优化方案-来自实际的经验和大佬分享的经验" class="headerlink" title="可能的优化方案 (来自实际的经验和大佬分享的经验)"></a>可能的优化方案 (来自实际的经验和大佬分享的经验)</h1><p>下面列举的只是一些经验之谈 , 具体问题还是得具体分析 , 在 Android 平台上 , 对三方应用的管控是非常重要的 , 很多小白用户 , 一大堆常驻通知和后台服务 , 导致这些 App 的优先级非常高 , 很难被杀掉 . 导致整机的内存长时间比较低 . 所以做系统的必要的优化之后 , 就要着重考虑对三方应用的查杀和管控逻辑 , 尽量减少后台进程的个数 , 在必要的时候 , 清理掉无用的进程来释放内存个前台应用使用.</p><ol><li>提高 extra_free_kbytes 值</li><li>提高 disk I/O 读写速率，如用 UFS3.0，用固态硬盘</li><li>避免设置太大的 read_ahead_kb 值</li><li>使用 cgroup 的 blkio 来限制后台进程的 io 读操作，缩短前台 io 响应时间</li><li>提前做内存回收的操作，避免在用户使用应用时碰到而感受到稍微卡顿</li><li>增加 LMK 效率，避免无效的 kill</li><li>kswapd 周期性回收更多的 high 水位</li><li>调整 swappiness 来平衡 pagecache 和 swap </li><li>策略 : 针对低内存机器做特殊的策略 , 比如杀进程更加激进 (这会带来用户体验的降低 , 所以这个度需要兼顾性能和用户体验)</li><li>策略 : 在内存不足的时候提醒用户(或者不提醒用户) , 杀掉不必要的后台进程 .</li><li>策略 : 在内存严重不足且无法恢复的情况下 , 可以提示用户重启手机.</li></ol><h1 id="参考资料"><a href="#参考资料" class="headerlink" title="参考资料"></a>参考资料</h1><ol><li><a href="https://blog.csdn.net/qkhhyga2016/article/details/79540119" target="_blank" rel="noopener">https://blog.csdn.net/qkhhyga2016/article/details/79540119</a></li><li><a href="https://blog.csdn.net/zsj100213/article/details/82427527" target="_blank" rel="noopener">https://blog.csdn.net/zsj100213/article/details/82427527</a></li></ol><h1 id="本文知乎地址"><a href="#本文知乎地址" class="headerlink" title="本文知乎地址"></a>本文知乎地址</h1><p>由于博客留言交流不方便，点赞或者交流，可以移步本文的知乎界面<br><a href="https://zhuanlan.zhihu.com/p/84687400" target="_blank" rel="noopener">知乎 - Android 中低内存对性能的影响</a></p><h1 id="关于我"><a href="#关于我" class="headerlink" title="关于我"></a>关于我</h1><p>小厂系统研发工程师 , 更多信息可以点击 <a href="https://www.androidperformance.com/about/" target="_blank" rel="noopener">关于我</a> , 非常希望和大家一起交流 , 共同进步 . </p><blockquote><p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p></blockquote>]]></content>
     
@@ -450,11 +475,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -482,11 +507,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -514,11 +539,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -545,11 +570,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -577,11 +602,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -607,11 +632,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -637,11 +662,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -667,11 +692,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -697,11 +722,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -727,11 +752,11 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
+      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
       <category term="Tools" scheme="https://androidperformance.com/tags/Tools/"/>
     
       <category term="Systrace" scheme="https://androidperformance.com/tags/Systrace/"/>
-    
-      <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
     
   </entry>
   
@@ -1517,9 +1542,9 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
-      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
-    
       <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
+      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
     
       <category term="Memory" scheme="https://androidperformance.com/tags/Memory/"/>
     
@@ -1556,9 +1581,9 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
-      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
-    
       <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
+      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
     
       <category term="Memory" scheme="https://androidperformance.com/tags/Memory/"/>
     
@@ -1596,9 +1621,9 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
-      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
-    
       <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
+      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
     
       <category term="Memory" scheme="https://androidperformance.com/tags/Memory/"/>
     
@@ -1636,9 +1661,9 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
-      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
-    
       <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
+      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
     
       <category term="Memory" scheme="https://androidperformance.com/tags/Memory/"/>
     
@@ -1730,9 +1755,9 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
-      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
-    
       <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
+      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
     
       <category term="Memory" scheme="https://androidperformance.com/tags/Memory/"/>
     
@@ -1777,9 +1802,9 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
-      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
-    
       <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
+      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
     
       <category term="Memory" scheme="https://androidperformance.com/tags/Memory/"/>
     
@@ -1827,9 +1852,9 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
-      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
-    
       <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
+      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
     
       <category term="Memory" scheme="https://androidperformance.com/tags/Memory/"/>
     
@@ -1874,9 +1899,9 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
-      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
-    
       <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
+      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
     
       <category term="Memory" scheme="https://androidperformance.com/tags/Memory/"/>
     
@@ -1921,9 +1946,9 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
-      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
-    
       <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
+      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
     
       <category term="Memory" scheme="https://androidperformance.com/tags/Memory/"/>
     
@@ -1959,9 +1984,9 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
-      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
-    
       <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
+      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
     
       <category term="Memory" scheme="https://androidperformance.com/tags/Memory/"/>
     
@@ -2002,9 +2027,9 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
-      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
-    
       <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
+      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
     
       <category term="Memory" scheme="https://androidperformance.com/tags/Memory/"/>
     
@@ -2041,9 +2066,9 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
-      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
-    
       <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
+      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
     
       <category term="Memory" scheme="https://androidperformance.com/tags/Memory/"/>
     
@@ -2074,9 +2099,9 @@
     
       <category term="Android" scheme="https://androidperformance.com/tags/Android/"/>
     
-      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
-    
       <category term="Performance" scheme="https://androidperformance.com/tags/Performance/"/>
+    
+      <category term="MAT" scheme="https://androidperformance.com/tags/MAT/"/>
     
       <category term="Memory" scheme="https://androidperformance.com/tags/Memory/"/>
     

@@ -286,7 +286,7 @@ height:50vh;
                 
                 
                     <div class="post-intro-read">
-                        <span>字数统计: <span class="post-count word-count">6.9k</span>阅读时长: <span class="post-count reading-time">29 min</span></span>
+                        <span>字数统计: <span class="post-count word-count">7k</span>阅读时长: <span class="post-count reading-time">29 min</span></span>
                     </div>
                 
                 <div class="post-intro-meta">
@@ -453,7 +453,8 @@ height:50vh;
 <p><img src="/images/15717420453069.jpg" alt=""></p>
 <p><strong>Systrace 图示</strong></p>
 <p><img src="/images/15717420572997.jpg" alt=""></p>
-<p>对于用户来说，稳定的帧率才是好的体验，比如你玩王者荣耀，相比 fps 在 60 和 40 之间频繁变化，用户感觉更好的是稳定在 50 fps 的情况。</p>
+<p>可以看到这时候的瓶颈是在 dequeueBuffer, 因为屏幕是有刷新周期的, FB 消耗 Front Buffer 的速度是一定的, 所以 SF 消耗 App Buffer 的速度也是一定的, 所以 App 会卡在 dequeueBuffer 这里,这就会导致 App Buffer 获取不稳定, 很容易就会出现卡顿掉帧的情况.</p>
+<p>对于用户来说，稳定的帧率才是好的体验，比如你玩王者荣耀，相比 fps 在 60 和 40 之间频繁变化，用户感觉更好的是稳定在 50 fps 的情况.</p>
 <p>所以 Android 的演进中，引入了 <strong>Vsync + TripleBuffer + Choreographer</strong> 的机制，其主要目的就是提供一个稳定的帧率输出机制，让软件层和硬件层可以以共同的频率一起工作。</p>
 <h2 id="引入-Choreographer"><a href="#引入-Choreographer" class="headerlink" title="引入 Choreographer"></a>引入 Choreographer</h2><p>Choreographer 的引入，主要是配合 Vsync ，给上层 App 的渲染提供一个稳定的 Message 处理的时机，也就是 Vsync 到来的时候 ，系统通过对  Vsync 信号周期的调整，来控制每一帧绘制操作的时机. 至于为什么 Vsync 周期选择是 16.6ms (60 fps) ，是因为目前大部分手机的屏幕都是 60Hz 的刷新率，也就是 16.6ms 刷新一次，系统为了配合屏幕的刷新频率，将 Vsync 的周期也设置为 16.6 ms，每隔 16.6 ms ，Vsync 信号到来唤醒 Choreographer 来做 App 的绘制操作 ，如果每个 Vsync 周期应用都能渲染完成，那么应用的 fps 就是 60 ，给用户的感觉就是非常流畅，这就是引入 Choreographer 的主要作用</p>
 <p><img src="/images/15722752299458.jpg" alt=""></p>
@@ -582,8 +583,8 @@ height:50vh;
 <p><img src="/images/15717422327935.jpg" alt=""></p>
 <h2 id="源码小结"><a href="#源码小结" class="headerlink" title="源码小结"></a>源码小结</h2><ol>
 <li><strong>Choreographer</strong> 是线程单例的，而且必须要和一个 Looper 绑定，因为其内部有一个 Handler 需要和 Looper 绑定，一般是 App 主线程的 Looper 绑定</li>
-<li>*<em>DisplayEventReceiver *</em>是一个 abstract class，其 JNI 的代码部分会创建一个IDisplayEventConnection 的 Vsync 监听者对象。这样，来自 AppEventThread 的 VSYNC 中断信号就可以传递给 Choreographer 对象了。当 Vsync 信号到来时，DisplayEventReceiver 的 onVsync 函数将被调用。</li>
-<li>*<em>DisplayEventReceiver *</em>还有一个 scheduleVsync 函数。当应用需要绘制UI时，将首先申请一次 Vsync 中断，然后再在中断处理的 onVsync 函数去进行绘制。</li>
+<li><strong>DisplayEventReceiver</strong> 是一个 abstract class，其 JNI 的代码部分会创建一个IDisplayEventConnection 的 Vsync 监听者对象。这样，来自 AppEventThread 的 VSYNC 中断信号就可以传递给 Choreographer 对象了。当 Vsync 信号到来时，DisplayEventReceiver 的 onVsync 函数将被调用。</li>
+<li><strong>DisplayEventReceiver</strong> 还有一个 scheduleVsync 函数。当应用需要绘制UI时，将首先申请一次 Vsync 中断，然后再在中断处理的 onVsync 函数去进行绘制。</li>
 <li><strong>Choreographer</strong> 定义了一个 <strong>FrameCallback</strong> <strong>interface</strong>，每当 Vsync 到来时，其 doFrame 函数将被调用。这个接口对 Android Animation 的实现起了很大的帮助作用。以前都是自己控制时间，现在终于有了固定的时间中断。</li>
 <li><strong>Choreographer</strong> 的主要功能是，当收到 Vsync 信号时，去调用使用者通过 postCallback 设置的回调函数。目前一共定义了五种类型的回调，它们分别是：<ol>
 <li><strong>CALLBACK_INPUT</strong>  : 处理输入事件处理有关</li>
@@ -642,7 +643,7 @@ height:50vh;
 <h2 id="Choreographer-自身的掉帧计算逻辑"><a href="#Choreographer-自身的掉帧计算逻辑" class="headerlink" title="Choreographer 自身的掉帧计算逻辑"></a>Choreographer 自身的掉帧计算逻辑</h2><p>SKIPPED_FRAME_WARNING_LIMIT 默认为30 , 由 debug.choreographer.skipwarning 这个属性控制</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> (jitterNanos &gt;= mFrameIntervalNanos) &#123;</span><br><span class="line">    <span class="keyword">final</span> <span class="keyword">long</span> skippedFrames = jitterNanos / mFrameIntervalNanos;</span><br><span class="line">    <span class="keyword">if</span> (skippedFrames &gt;= SKIPPED_FRAME_WARNING_LIMIT) &#123;</span><br><span class="line">        Log.i(TAG, <span class="string">"Skipped "</span> + skippedFrames + <span class="string">" frames!  "</span></span><br><span class="line">                + <span class="string">"The application may be doing too much work on its main thread."</span>);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
-<h2 id="BlockCanary"><a href="#BlockCanary" class="headerlink" title="BlockCanary"></a>BlockCanary</h2><p>Blockcanary 计算做性能监控使用的是 Looper 的消息机制，通过对 MessageQueue 中每一个 Message 的前后进行记录，打到监控性能的目的</p>
+<h2 id="BlockCanary"><a href="#BlockCanary" class="headerlink" title="BlockCanary"></a>BlockCanary</h2><p>Blockcanary 做性能监控使用的是 Looper 的消息机制，通过对 MessageQueue 中每一个 Message 的前后进行记录，打到监控性能的目的</p>
 <p>android/os/Looper.java</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">loop</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    ...</span><br><span class="line">    <span class="keyword">for</span> (;;) &#123;</span><br><span class="line">        ...</span><br><span class="line">        <span class="comment">// This must be in a local variable, in case a UI event sets the logger</span></span><br><span class="line">        Printer logging = me.mLogging;</span><br><span class="line">        <span class="keyword">if</span> (logging != <span class="keyword">null</span>) &#123;</span><br><span class="line">            logging.println(<span class="string">"&gt;&gt;&gt;&gt;&gt; Dispatching to "</span> + msg.target + <span class="string">" "</span> +</span><br><span class="line">                    msg.callback + <span class="string">": "</span> + msg.what);</span><br><span class="line">        &#125;</span><br><span class="line">        msg.target.dispatchMessage(msg);</span><br><span class="line">        <span class="keyword">if</span> (logging != <span class="keyword">null</span>) &#123;</span><br><span class="line">            logging.println(<span class="string">"&lt;&lt;&lt;&lt;&lt; Finished to "</span> + msg.target + <span class="string">" "</span> + msg.callback);</span><br><span class="line">        &#125;</span><br><span class="line">        ...</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
@@ -659,7 +660,7 @@ height:50vh;
 <h2 id="后台动画优化"><a href="#后台动画优化" class="headerlink" title="后台动画优化"></a>后台动画优化</h2><p>当一个 Android App 退到后台之后，只要他没有被杀死，那么他做什么事情大家都不要奇怪，因为这就是 Android。有的 App 退到后台之后还在持续调用 Choreographer 中的 Animation Callback，而这个 Callback 的执行完全是无意义的，而且用户还不知道，但是对 cpu 的占用是比较高的。</p>
 <p>所以在 Choreographer 中会针对这种情况做优化，禁止不符合条件的 App 在后台继续无用的操作</p>
 <p><img src="/images/15717422623134.jpg" alt=""></p>
-<h2 id="帧绘制优化"><a href="#帧绘制优化" class="headerlink" title="帧绘制优化"></a>帧绘制优化</h2><p>和移动事件优化一样，由于有了 Input 事件的信息，在某些场景下我们可以通知 SurfaceFlinger 不用取等待 Vsync 直接做合成操作</p>
+<h2 id="帧绘制优化"><a href="#帧绘制优化" class="headerlink" title="帧绘制优化"></a>帧绘制优化</h2><p>和移动事件优化一样，由于有了 Input 事件的信息，在某些场景下我们可以通知 SurfaceFlinger 不用去等待 Vsync 直接做合成操作</p>
 <h2 id="应用启动优化"><a href="#应用启动优化" class="headerlink" title="应用启动优化"></a>应用启动优化</h2><p>我们前面说，主线程的所有操作都是给予 Message 的 ，如果某个操作，非重要的 Message 被排列到了队列后面，那么对这个操作产生影响；而通过重新排列 MessageQueue，在应用启动的时候，把启动相关的重要的启动 Message 放到队列前面，来起到加快启动速度的作用</p>
 <h2 id="高帧率优化"><a href="#高帧率优化" class="headerlink" title="高帧率优化"></a>高帧率优化</h2><p>90 fps 的手机上 ， Vsync 间隔从 16.6ms 变成了 11.1ms ，这带来了巨大的性能和功耗挑战，如何在一帧内完成渲染的必要操作，是手机厂商必须要思考和优化的地方：</p>
 <ol>
@@ -688,7 +689,7 @@ height:50vh;
             <p>原文作者：<a href="https://androidperformance.com">Gracker</a>
             <p>原文链接：<a href="https://androidperformance.com/2019/10/22/Android-Choreographer/">https://androidperformance.com/2019/10/22/Android-Choreographer/</a>
             <p>发表日期：<a href="https://androidperformance.com/2019/10/22/Android-Choreographer/">October 22nd 2019, 6:55:11 pm</a>
-            <p>更新日期：<a href="https://androidperformance.com/2019/10/22/Android-Choreographer/">May 27th 2020, 12:37:13 am</a>
+            <p>更新日期：<a href="https://androidperformance.com/2019/10/22/Android-Choreographer/">June 3rd 2020, 1:26:29 am</a>
             <p>版权声明：本文采用<a rel="license noopener" href="http://creativecommons.org/licenses/by-nc/4.0/" target="_blank">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     

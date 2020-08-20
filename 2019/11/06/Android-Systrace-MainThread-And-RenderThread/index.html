@@ -470,24 +470,24 @@ height:55vh;
 </ol>
 <h1 id="主线程的创建"><a href="#主线程的创建" class="headerlink" title="主线程的创建"></a>主线程的创建</h1><p>Android App 的进程是基于 Linux 的，其管理也是基于 Linux 的进程管理机制，所以其创建也是调用了 fork 函数</p>
 <p>frameworks/base/core/jni/com_android_internal_os_Zygote.cpp</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">pid_t pid = fork();</span><br></pre></td></tr></table></figure>
+<figure class="highlight abnf"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">pid_t pid = fork()<span class="comment">;</span></span><br></pre></td></tr></table></figure>
 <p>Fork 出来的进程，我们这里可以把他看做主线程，但是这个线程还没有和 Android 进行连接，所以无法处理 Android App 的 Message ；由于 Android App 线程运行<strong>基于消息机制</strong> ，那么这个 Fork 出来的主线程需要和 Android 的 Message 消息绑定，才能处理 Android App 的各种 Message </p>
 <p>这里就引入了 <strong>ActivityThread</strong> ，确切的说，ActivityThread 应该起名叫 ProcessThread 更贴切一些。ActivityThread 连接了 Fork 出来的进程和 App 的 Message ，他们的通力配合组成了我们熟知的 Android App 主线程。所以说 ActivityThread 其实并不是一个 Thread，而是他初始化了 Message 机制所需要的 MessageQueue、Looper、Handler ，而且其 Handler 负责处理大部分 Message 消息，所以我们习惯上觉得 ActivityThread 是主线程，其实他只是主线程的一个逻辑处理单元。</p>
 <h2 id="ActivityThread-的创建"><a href="#ActivityThread-的创建" class="headerlink" title="ActivityThread 的创建"></a>ActivityThread 的创建</h2><p>App 进程 fork 出来之后，回到 App 进程，查找 ActivityThread 的 Main函数</p>
 <p>com/android/internal/os/ZygoteInit.java</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">static final Runnable childZygoteInit(</span><br><span class="line">        int targetSdkVersion, String[] argv, ClassLoader classLoader) &#123;</span><br><span class="line">    RuntimeInit.Arguments args = new RuntimeInit.Arguments(argv);</span><br><span class="line">    return RuntimeInit.findStaticMain(args.startClass, args.startArgs, classLoader);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">static</span> <span class="keyword">final</span> Runnable childZygoteInit(</span><br><span class="line">        <span class="keyword">int</span> targetSdkVersion, String[] argv, ClassLoader classLoader) &#123;</span><br><span class="line">    RuntimeInit.Arguments args = <span class="keyword">new</span> RuntimeInit.Arguments(argv);</span><br><span class="line">    <span class="function"><span class="keyword">return</span> RuntimeInit.<span class="title">findStaticMain</span><span class="params">(args.startClass, args.startArgs, classLoader)</span></span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>这里的 startClass 就是 ActivityThread，找到之后调用，逻辑就到了 ActivityThread的main函数</p>
 <p>android/app/ActivityThread.java</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line">public static void main(String[] args) &#123;</span><br><span class="line">    //1. 初始化 Looper、MessageQueue</span><br><span class="line">    Looper.prepareMainLooper();</span><br><span class="line">    // 2. 初始化 ActivityThread</span><br><span class="line">    ActivityThread thread = new ActivityThread();</span><br><span class="line">    // 3. 主要是调用 AMS.attachApplicationLocked，同步进程信息，做一些初始化工作</span><br><span class="line">    thread.attach(false, startSeq);</span><br><span class="line">    // 4. 获取主线程的 Handler，这里是 H ，基本上 App 的 Message 都会在这个 Handler 里面进行处理 </span><br><span class="line">    if (sMainThreadHandler == null) &#123;</span><br><span class="line">        sMainThreadHandler = thread.getHandler();</span><br><span class="line">    &#125;</span><br><span class="line">    // 5. 初始化完成，Looper 开始工作</span><br><span class="line">    Looper.loop();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line">public static void main(String<span class="literal">[]</span> args) &#123;</span><br><span class="line">    <span class="comment">//1. 初始化 Looper、MessageQueue</span></span><br><span class="line">    <span class="module-access"><span class="module"><span class="identifier">Looper</span>.</span></span>prepare<span class="constructor">MainLooper()</span>;</span><br><span class="line">    <span class="comment">// 2. 初始化 ActivityThread</span></span><br><span class="line">    ActivityThread thread = <span class="keyword">new</span> <span class="constructor">ActivityThread()</span>;</span><br><span class="line">    <span class="comment">// 3. 主要是调用 AMS.attachApplicationLocked，同步进程信息，做一些初始化工作</span></span><br><span class="line">    thread.attach(<span class="literal">false</span>, startSeq);</span><br><span class="line">    <span class="comment">// 4. 获取主线程的 Handler，这里是 H ，基本上 App 的 Message 都会在这个 Handler 里面进行处理 </span></span><br><span class="line">    <span class="keyword">if</span> (sMainThreadHandler<span class="operator"> == </span>null) &#123;</span><br><span class="line">        sMainThreadHandler = thread.get<span class="constructor">Handler()</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="comment">// 5. 初始化完成，Looper 开始工作</span></span><br><span class="line">    <span class="module-access"><span class="module"><span class="identifier">Looper</span>.</span></span>loop<span class="literal">()</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>注释里面都很清楚，这里就不详细说了，main 函数处理完成之后，主线程就算是正式上线开始工作，其 Systrace 流程如下：</p>
 <p><img src="/images/15732905074966.jpg" alt=""></p>
 <h2 id="ActivityThread-的功能"><a href="#ActivityThread-的功能" class="headerlink" title="ActivityThread 的功能"></a>ActivityThread 的功能</h2><p>另外我们经常说的，Android 四大组件都是运行在主线程上的，其实这里也很好理解，看一下 ActivityThread 的 Handler 的 Message 就知道了</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">class H extends Handler &#123; //摘抄了部分</span><br><span class="line">    public static final int BIND_APPLICATION        = 110;</span><br><span class="line">    public static final int EXIT_APPLICATION        = 111;</span><br><span class="line">    public static final int RECEIVER                = 113;</span><br><span class="line">    public static final int CREATE_SERVICE          = 114;</span><br><span class="line">    public static final int STOP_SERVICE            = 116;</span><br><span class="line">    public static final int BIND_SERVICE            = 121;</span><br><span class="line">    public static final int UNBIND_SERVICE          = 122;</span><br><span class="line">    public static final int DUMP_SERVICE            = 123;</span><br><span class="line">    public static final int REMOVE_PROVIDER         = 131;</span><br><span class="line">    public static final int DISPATCH_PACKAGE_BROADCAST = 133;</span><br><span class="line">    public static final int DUMP_PROVIDER           = 141;</span><br><span class="line">    public static final int UNSTABLE_PROVIDER_DIED  = 142;</span><br><span class="line">    public static final int INSTALL_PROVIDER        = 145;</span><br><span class="line">    public static final int ON_NEW_ACTIVITY_OPTIONS = 146;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> <span class="symbol">H</span> <span class="symbol">extends</span> <span class="symbol">Handler</span> &#123; <span class="comment">//摘抄了部分</span></span><br><span class="line">    <span class="keyword">public</span> static <span class="keyword">final</span> <span class="built_in">int</span> BIND_APPLICATION        = <span class="number">110</span>;</span><br><span class="line">    <span class="keyword">public</span> static <span class="keyword">final</span> <span class="built_in">int</span> EXIT_APPLICATION        = <span class="number">111</span>;</span><br><span class="line">    <span class="keyword">public</span> static <span class="keyword">final</span> <span class="built_in">int</span> RECEIVER                = <span class="number">113</span>;</span><br><span class="line">    <span class="keyword">public</span> static <span class="keyword">final</span> <span class="built_in">int</span> CREATE_SERVICE          = <span class="number">114</span>;</span><br><span class="line">    <span class="keyword">public</span> static <span class="keyword">final</span> <span class="built_in">int</span> STOP_SERVICE            = <span class="number">116</span>;</span><br><span class="line">    <span class="keyword">public</span> static <span class="keyword">final</span> <span class="built_in">int</span> BIND_SERVICE            = <span class="number">121</span>;</span><br><span class="line">    <span class="keyword">public</span> static <span class="keyword">final</span> <span class="built_in">int</span> UNBIND_SERVICE          = <span class="number">122</span>;</span><br><span class="line">    <span class="keyword">public</span> static <span class="keyword">final</span> <span class="built_in">int</span> DUMP_SERVICE            = <span class="number">123</span>;</span><br><span class="line">    <span class="keyword">public</span> static <span class="keyword">final</span> <span class="built_in">int</span> REMOVE_PROVIDER         = <span class="number">131</span>;</span><br><span class="line">    <span class="keyword">public</span> static <span class="keyword">final</span> <span class="built_in">int</span> DISPATCH_PACKAGE_BROADCAST = <span class="number">133</span>;</span><br><span class="line">    <span class="keyword">public</span> static <span class="keyword">final</span> <span class="built_in">int</span> DUMP_PROVIDER           = <span class="number">141</span>;</span><br><span class="line">    <span class="keyword">public</span> static <span class="keyword">final</span> <span class="built_in">int</span> UNSTABLE_PROVIDER_DIED  = <span class="number">142</span>;</span><br><span class="line">    <span class="keyword">public</span> static <span class="keyword">final</span> <span class="built_in">int</span> INSTALL_PROVIDER        = <span class="number">145</span>;</span><br><span class="line">    <span class="keyword">public</span> static <span class="keyword">final</span> <span class="built_in">int</span> ON_NEW_ACTIVITY_OPTIONS = <span class="number">146</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>可以看到，进程创建、Activity 启动、Service 的管理、Receiver 的管理、Provider 的管理这些都会在这里处理，然后进到具体的 handleXXX </p>
 <p><img src="/images/15732905186985.jpg" alt=""></p>
 <h1 id="渲染线程的创建和发展"><a href="#渲染线程的创建和发展" class="headerlink" title="渲染线程的创建和发展"></a>渲染线程的创建和发展</h1><p>主线程讲完了我们来讲渲染线程，渲染线程也就是 RenderThread ，最初的 Android 版本里面是没有渲染线程的，渲染工作都是在主线程完成，使用的也都是 CPU ，调用的是 libSkia 这个库，RenderThread 是在 Android Lollipop 中新加入的组件，负责承担一部分之前主线程的渲染工作，减轻主线程的负担</p>
 <h2 id="软件绘制"><a href="#软件绘制" class="headerlink" title="软件绘制"></a>软件绘制</h2><p>我们一般提到的硬件加速，指的就是 GPU 加速，这里可以理解为用 RenderThread 调用 GPU 来进行渲染加速 。 硬件加速在目前的 Android 中是默认开启的， 所以如果我们什么都不设置，那么我们的进程默认都会有主线程和渲染线程(有可见的内容)。我们如果在 App 的 AndroidManifest 里面，在 Application 标签里面加一个 </p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">android:hardwareAccelerated=&quot;false&quot;</span><br></pre></td></tr></table></figure>
+<figure class="highlight avrasm"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="symbol">android:</span>hardwareAccelerated=<span class="string">"false"</span></span><br></pre></td></tr></table></figure>
 <p>我们就可以关闭硬件加速，系统检测到你这个 App 关闭了硬件加速，就不会初始化 RenderThread ，直接 cpu 调用 libSkia 来进行渲染。其 Systrace 的表现如下</p>
 <p><img src="/images/15732905305035.jpg" alt=""></p>
 <p>与这篇文章开头的开了硬件加速的那个图对比，可以看到主线程由于要进行渲染工作，所以执行的时间变长了，也更容易出现卡顿，同时帧与帧直接的空闲间隔也变短了，使得其他 Message 的执行时间被压缩</p>
@@ -495,13 +495,13 @@ height:55vh;
 <p><img src="/images/15732905407683.jpg" alt=""></p>
 <h2 id="渲染线程初始化"><a href="#渲染线程初始化" class="headerlink" title="渲染线程初始化"></a>渲染线程初始化</h2><p>渲染线程初始化在真正需要 draw 内容的时候，一般我们启动一个 Activity ，在第一个 draw 执行的时候，会去检测渲染线程是否初始化，如果没有则去进行初始化</p>
 <p>android/view/ViewRootImpl.java</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">mAttachInfo.mThreadedRenderer.initializeIfNeeded(</span><br><span class="line">        mWidth, mHeight, mAttachInfo, mSurface, surfaceInsets);</span><br></pre></td></tr></table></figure>
+<figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">mAttachInfo</span><span class="selector-class">.mThreadedRenderer</span><span class="selector-class">.initializeIfNeeded</span>(</span><br><span class="line">        <span class="selector-tag">mWidth</span>, <span class="selector-tag">mHeight</span>, <span class="selector-tag">mAttachInfo</span>, <span class="selector-tag">mSurface</span>, <span class="selector-tag">surfaceInsets</span>);</span><br></pre></td></tr></table></figure>
 <p>后续直接调用 draw </p>
 <p>android/graphics/HardwareRenderer.java</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br></pre></td><td class="code"><pre><span class="line">mAttachInfo.mThreadedRenderer.draw(mView, mAttachInfo, this);</span><br><span class="line">void draw(View view, AttachInfo attachInfo, DrawCallbacks callbacks) &#123;</span><br><span class="line">    final Choreographer choreographer = attachInfo.mViewRootImpl.mChoreographer;</span><br><span class="line">    choreographer.mFrameInfo.markDrawStart();</span><br><span class="line"></span><br><span class="line">    updateRootDisplayList(view, callbacks);</span><br><span class="line"></span><br><span class="line">    if (attachInfo.mPendingAnimatingRenderNodes != null) &#123;</span><br><span class="line">        final int count = attachInfo.mPendingAnimatingRenderNodes.size();</span><br><span class="line">        for (int i = 0; i &lt; count; i++) &#123;</span><br><span class="line">            registerAnimatingRenderNode(</span><br><span class="line">                    attachInfo.mPendingAnimatingRenderNodes.get(i));</span><br><span class="line">        &#125;</span><br><span class="line">        attachInfo.mPendingAnimatingRenderNodes.clear();</span><br><span class="line">        attachInfo.mPendingAnimatingRenderNodes = null;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    int syncResult = syncAndDrawFrame(choreographer.mFrameInfo);</span><br><span class="line">    if ((syncResult &amp; SYNC_LOST_SURFACE_REWARD_IF_FOUND) != 0) &#123;</span><br><span class="line">        setEnabled(false);</span><br><span class="line">        attachInfo.mViewRootImpl.mSurface.release();</span><br><span class="line">        attachInfo.mViewRootImpl.invalidate();</span><br><span class="line">    &#125;</span><br><span class="line">    if ((syncResult &amp; SYNC_REDRAW_REQUESTED) != 0) &#123;</span><br><span class="line">        attachInfo.mViewRootImpl.invalidate();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight processing"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br></pre></td><td class="code"><pre><span class="line">mAttachInfo.mThreadedRenderer.<span class="title">draw</span>(mView, mAttachInfo, <span class="keyword">this</span>);</span><br><span class="line"><span class="keyword">void</span> <span class="title">draw</span>(View view, AttachInfo attachInfo, DrawCallbacks callbacks) &#123;</span><br><span class="line">    <span class="keyword">final</span> Choreographer choreographer = attachInfo.mViewRootImpl.mChoreographer;</span><br><span class="line">    choreographer.mFrameInfo.markDrawStart();</span><br><span class="line"></span><br><span class="line">    updateRootDisplayList(view, callbacks);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (attachInfo.mPendingAnimatingRenderNodes != <span class="keyword">null</span>) &#123;</span><br><span class="line">        <span class="keyword">final</span> <span class="built_in">int</span> count = attachInfo.mPendingAnimatingRenderNodes.<span class="built_in">size</span>();</span><br><span class="line">        <span class="keyword">for</span> (<span class="built_in">int</span> i = <span class="number">0</span>; i &lt; count; i++) &#123;</span><br><span class="line">            registerAnimatingRenderNode(</span><br><span class="line">                    attachInfo.mPendingAnimatingRenderNodes.<span class="built_in">get</span>(i));</span><br><span class="line">        &#125;</span><br><span class="line">        attachInfo.mPendingAnimatingRenderNodes.<span class="built_in">clear</span>();</span><br><span class="line">        attachInfo.mPendingAnimatingRenderNodes = <span class="keyword">null</span>;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="built_in">int</span> syncResult = syncAndDrawFrame(choreographer.mFrameInfo);</span><br><span class="line">    <span class="keyword">if</span> ((syncResult &amp; SYNC_LOST_SURFACE_REWARD_IF_FOUND) != <span class="number">0</span>) &#123;</span><br><span class="line">        setEnabled(<span class="keyword">false</span>);</span><br><span class="line">        attachInfo.mViewRootImpl.mSurface.release();</span><br><span class="line">        attachInfo.mViewRootImpl.invalidate();</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">if</span> ((syncResult &amp; SYNC_REDRAW_REQUESTED) != <span class="number">0</span>) &#123;</span><br><span class="line">        attachInfo.mViewRootImpl.invalidate();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>上面的 draw 只是更新 DIsplayList ，更新结束后，调用 syncAndDrawFrame ，通知渲染线程开始工作，主线程释放。渲染线程的核心实现在 libhwui 库里面，其代码位于 frameworks/base/libs/hwui</p>
 <p>frameworks/base/libs/hwui/renderthread/RenderProxy.cpp</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">int RenderProxy::syncAndDrawFrame() &#123;</span><br><span class="line">    return mDrawFrameTask.drawFrame();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">int</span> RenderProxy::syncAndDrawFrame() &#123;</span><br><span class="line">    <span class="keyword">return</span> mDrawFrameTask.drawFrame();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>关于 RenderThread 的工作流程这里就不细说了，后续会有专门的篇幅来讲解这个，目前 hwui 这一块的流程也有很多优秀的文章，大家可以对照文章和源码来看，其核心流程在 Systrace 上的表现如下:</p>
 <p><img src="/images/15732905545821.jpg" alt=""></p>
 <h2 id="主线程和渲染线程的分工"><a href="#主线程和渲染线程的分工" class="headerlink" title="主线程和渲染线程的分工"></a>主线程和渲染线程的分工</h2><p>主线程负责处理进程 Message、处理 Input 事件、处理 Animation 逻辑、处理 Measure、Layout、Draw ，更新 DIsplayList ，但是不涉及 SurfaceFlinger 打交道；渲染线程负责渲染渲染相关的工作，一部分工作也是 CPU 来完成的，一部分操作是调用 OpenGL 函数来完成的</p>
@@ -1639,9 +1639,26 @@ top:55vh;
     
     
     
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     <div class="total-and-search">
         <div class="total-archive">
-        Total : 84
+        Total : 85
         </div>
         <!-- search  -->
         
@@ -1654,6 +1671,11 @@ top:55vh;
     
     <div class="archive-year"> 2020 </div>
     <ul class="year-list">
+    
+    
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span><a class="archive-post-title" href= "/2020/08/20/weibo-imageload-opt-on-huawei/" >华为手机刷微博体验更好？技术角度的一些分析和思考</a>
+        </li>
     
     
         <li class="archive-post-item">
@@ -2134,8 +2156,6 @@ top:55vh;
         <div class="sidebar-panel-tags">
     <div class="sidebar-tags-name">
     
-        <span class="sidebar-tag-name" data-tags="流畅度"><span class="iconfont-archer">&#xe606;</span>流畅度</span>
-    
         <span class="sidebar-tag-name" data-tags="年度推荐"><span class="iconfont-archer">&#xe606;</span>年度推荐</span>
     
         <span class="sidebar-tag-name" data-tags="Android"><span class="iconfont-archer">&#xe606;</span>Android</span>
@@ -2146,11 +2166,13 @@ top:55vh;
     
         <span class="sidebar-tag-name" data-tags="Systrace"><span class="iconfont-archer">&#xe606;</span>Systrace</span>
     
+        <span class="sidebar-tag-name" data-tags="流畅度"><span class="iconfont-archer">&#xe606;</span>流畅度</span>
+    
         <span class="sidebar-tag-name" data-tags="Lunch"><span class="iconfont-archer">&#xe606;</span>Lunch</span>
     
-        <span class="sidebar-tag-name" data-tags="随笔"><span class="iconfont-archer">&#xe606;</span>随笔</span>
-    
         <span class="sidebar-tag-name" data-tags="Framework"><span class="iconfont-archer">&#xe606;</span>Framework</span>
+    
+        <span class="sidebar-tag-name" data-tags="随笔"><span class="iconfont-archer">&#xe606;</span>随笔</span>
     
         <span class="sidebar-tag-name" data-tags="MethodTrace"><span class="iconfont-archer">&#xe606;</span>MethodTrace</span>
     
@@ -2168,19 +2190,19 @@ top:55vh;
     
         <span class="sidebar-tag-name" data-tags="Menory"><span class="iconfont-archer">&#xe606;</span>Menory</span>
     
-        <span class="sidebar-tag-name" data-tags="Java"><span class="iconfont-archer">&#xe606;</span>Java</span>
-    
-        <span class="sidebar-tag-name" data-tags="HashMap"><span class="iconfont-archer">&#xe606;</span>HashMap</span>
-    
         <span class="sidebar-tag-name" data-tags="程序员"><span class="iconfont-archer">&#xe606;</span>程序员</span>
-    
-        <span class="sidebar-tag-name" data-tags="设计规范"><span class="iconfont-archer">&#xe606;</span>设计规范</span>
-    
-        <span class="sidebar-tag-name" data-tags="Process"><span class="iconfont-archer">&#xe606;</span>Process</span>
     
         <span class="sidebar-tag-name" data-tags="流畅性"><span class="iconfont-archer">&#xe606;</span>流畅性</span>
     
         <span class="sidebar-tag-name" data-tags="个人感悟"><span class="iconfont-archer">&#xe606;</span>个人感悟</span>
+    
+        <span class="sidebar-tag-name" data-tags="Nexus"><span class="iconfont-archer">&#xe606;</span>Nexus</span>
+    
+        <span class="sidebar-tag-name" data-tags="Java"><span class="iconfont-archer">&#xe606;</span>Java</span>
+    
+        <span class="sidebar-tag-name" data-tags="HashMap"><span class="iconfont-archer">&#xe606;</span>HashMap</span>
+    
+        <span class="sidebar-tag-name" data-tags="设计规范"><span class="iconfont-archer">&#xe606;</span>设计规范</span>
     
         <span class="sidebar-tag-name" data-tags="Singleton"><span class="iconfont-archer">&#xe606;</span>Singleton</span>
     
@@ -2188,23 +2210,25 @@ top:55vh;
     
         <span class="sidebar-tag-name" data-tags="Ubuntu"><span class="iconfont-archer">&#xe606;</span>Ubuntu</span>
     
-        <span class="sidebar-tag-name" data-tags="设计原则"><span class="iconfont-archer">&#xe606;</span>设计原则</span>
+        <span class="sidebar-tag-name" data-tags="读书笔记"><span class="iconfont-archer">&#xe606;</span>读书笔记</span>
     
         <span class="sidebar-tag-name" data-tags="程序员的修炼"><span class="iconfont-archer">&#xe606;</span>程序员的修炼</span>
     
-        <span class="sidebar-tag-name" data-tags="了解你的用户"><span class="iconfont-archer">&#xe606;</span>了解你的用户</span>
+        <span class="sidebar-tag-name" data-tags="测试"><span class="iconfont-archer">&#xe606;</span>测试</span>
     
         <span class="sidebar-tag-name" data-tags="游戏与编程"><span class="iconfont-archer">&#xe606;</span>游戏与编程</span>
     
-        <span class="sidebar-tag-name" data-tags="读书笔记"><span class="iconfont-archer">&#xe606;</span>读书笔记</span>
-    
         <span class="sidebar-tag-name" data-tags="阅读之美"><span class="iconfont-archer">&#xe606;</span>阅读之美</span>
-    
-        <span class="sidebar-tag-name" data-tags="测试"><span class="iconfont-archer">&#xe606;</span>测试</span>
     
         <span class="sidebar-tag-name" data-tags="互联网那些事"><span class="iconfont-archer">&#xe606;</span>互联网那些事</span>
     
         <span class="sidebar-tag-name" data-tags="利器"><span class="iconfont-archer">&#xe606;</span>利器</span>
+    
+        <span class="sidebar-tag-name" data-tags="了解你的用户"><span class="iconfont-archer">&#xe606;</span>了解你的用户</span>
+    
+        <span class="sidebar-tag-name" data-tags="Process"><span class="iconfont-archer">&#xe606;</span>Process</span>
+    
+        <span class="sidebar-tag-name" data-tags="设计原则"><span class="iconfont-archer">&#xe606;</span>设计原则</span>
     
         <span class="sidebar-tag-name" data-tags="用户体验"><span class="iconfont-archer">&#xe606;</span>用户体验</span>
     
@@ -2212,7 +2236,7 @@ top:55vh;
     
         <span class="sidebar-tag-name" data-tags="StartingWindow"><span class="iconfont-archer">&#xe606;</span>StartingWindow</span>
     
-        <span class="sidebar-tag-name" data-tags="Nexus"><span class="iconfont-archer">&#xe606;</span>Nexus</span>
+        <span class="sidebar-tag-name" data-tags="体验优化"><span class="iconfont-archer">&#xe606;</span>体验优化</span>
     
     </div>
     <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
@@ -2253,9 +2277,9 @@ jsonContent:
     
         <span class="sidebar-category-name" data-categories="Memory"><span class="iconfont-archer">&#xe60a;</span>Memory</span>
     
-        <span class="sidebar-category-name" data-categories="Android/Memory"><span class="iconfont-archer">&#xe60a;</span>Android/Memory</span>
-    
         <span class="sidebar-category-name" data-categories="Memory/Android"><span class="iconfont-archer">&#xe60a;</span>Memory/Android</span>
+    
+        <span class="sidebar-category-name" data-categories="Android/Memory"><span class="iconfont-archer">&#xe60a;</span>Android/Memory</span>
     
         <span class="sidebar-category-name" data-categories="Performance"><span class="iconfont-archer">&#xe60a;</span>Performance</span>
     

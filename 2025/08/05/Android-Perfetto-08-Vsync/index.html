@@ -41,7 +41,7 @@
 <meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918223532482.png">
 <meta property="og:image" content="https://androidperformance.com/images/WechatIMG581.png">
 <meta property="article:published_time" content="2025-08-05T02:15:30.000Z">
-<meta property="article:modified_time" content="2025-10-27T12:19:09.000Z">
+<meta property="article:modified_time" content="2025-11-12T15:02:23.732Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Android">
 <meta property="article:tag" content="Perfetto">
@@ -540,6 +540,16 @@
 </blockquote>
 <span id="more"></span>
 
+<h2 id="本文目录"><a href="#本文目录" class="headerlink" title="本文目录"></a>本文目录</h2><ul>
+<li><a href="#series">系列文章目录</a></li>
+<li><a href="#what-is-vsync">什么是 Vsync</a></li>
+<li><a href="#principle">Android 中 Vsync 的基本工作原理</a></li>
+<li><a href="#perfetto-observe">在 Perfetto 中观察 Vsync</a></li>
+<li><a href="#app-frames">Android App 每一帧是如何基于 Vsync 工作的</a></li>
+<li><a href="#refs">参考文档</a></li>
+<li><a href="#about">关于我 &amp;&amp; 博客</a></li>
+</ul>
+<p><a id="series"></a></p>
 <h1 id="系列文章目录"><a href="#系列文章目录" class="headerlink" title="系列文章目录"></a>系列文章目录</h1><ol>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/03/27/Android-Perfetto-101/#/Perfetto-%E7%B3%BB%E5%88%97%E7%9B%AE%E5%BD%95">Android Perfetto 系列目录</a></li>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto 系列 1：Perfetto 工具简介</a></li>
@@ -550,6 +560,7 @@
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</a></li>
 <li><a href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7 - MainThread 和 RenderThread 解读</a></li>
 <li><a href="https://androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/09/23/Android-Perfetto-09-CPU/">Android Perfetto 系列 (九) - CPU 信息解读</a></li>
 <li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV1oi82efE4D/?vd_source=0c6d2191e785de0a36dc21a9da7e664e">视频(B站) - Android Perfetto 基础和案例分享</a></li>
 </ol>
 <p>如果大家还没看过 Systrace 系列，下面是传送门：</p>
@@ -558,6 +569,7 @@
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/">个人博客</a> ：个人博客，主要是 Android 相关的内容，也放了一些生活和工作相关的内容。</li>
 </ol>
 <p>欢迎大家在 <a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">关于我</a> 页面加入微信群或者星球，讨论你的问题、你最想看到的关于 Perfetto 的部分，以及跟各位群友讨论所有 Android 开发相关的内容</p>
+<p><a id="what-is-vsync"></a></p>
 <h2 id="什么是-Vsync"><a href="#什么是-Vsync" class="headerlink" title="什么是 Vsync"></a>什么是 Vsync</h2><p>Vsync（Vertical Synchronization，垂直同步）是 Android 图形系统的核心机制，它的存在是为了解决一个根本性的问题：如何让软件的渲染节奏与硬件的显示节奏保持同步。</p>
 <p>在没有 Vsync 机制之前，常见问题是屏幕撕裂（Screen Tearing）。当显示器读取 framebuffer 的同时，GPU 写入了下一帧，就会在同一次刷新中出现上下两部分不一致的画面。</p>
 <h3 id="Vsync-解决什么问题？"><a href="#Vsync-解决什么问题？" class="headerlink" title="Vsync 解决什么问题？"></a>Vsync 解决什么问题？</h3><p>Vsync 机制的核心思想非常简单：<strong>让所有的渲染工作都按照显示器的刷新节拍来进行</strong>。具体来说：</p>
@@ -567,6 +579,7 @@
 <li><strong>缓冲机制</strong>：使用双缓冲或三缓冲技术，确保显示器总是读取完整的帧数据。</li>
 </ol>
 <p>这样，帧的生产与显示以 Vsync 为节拍对齐。以 120Hz 为例，每 8.333ms 会有一个显示机会；应用需要在该窗口前把可合成的 Buffer 提交给 SurfaceFlinger。关键约束是 <code>queueBuffer</code>&#x2F;<code>acquire_fence</code>&#x2F;<code>present_fence</code> 的时序；若未赶上本周期，会顺延到下一个周期显示。</p>
+<p><a id="principle"></a></p>
 <h2 id="Android-中-Vsync-的基本工作原理"><a href="#Android-中-Vsync-的基本工作原理" class="headerlink" title="Android 中 Vsync 的基本工作原理"></a>Android 中 Vsync 的基本工作原理</h2><p>Android 系统的 Vsync 实现比基本概念复杂得多，需要考虑多个不同的渲染组件，以及它们之间的协调工作。</p>
 <h3 id="Vsync-信号的分层架构"><a href="#Vsync-信号的分层架构" class="headerlink" title="Vsync 信号的分层架构"></a>Vsync 信号的分层架构</h3><p>在 Android 系统中，并不是只有一个简单的 Vsync 信号。实际上，系统维护着多个不同用途的 Vsync 信号：</p>
 <p><strong>硬件 Vsync（HW Vsync）</strong>：<br>这是最底层的 Vsync 信号，由显示硬件（HWC，Hardware Composer）产生。它的频率严格对应显示器的刷新率，比如 60Hz 的显示器会每 16.67ms 产生一次 HW Vsync，120Hz 的显示器会每 8.333ms 产生一次。（硬件 Vsync 回调由 HWC&#x2F;SurfaceFlinger 管理，详见 <code>frameworks/native/services/surfaceflinger</code> 相关实现）</p>
@@ -577,6 +590,7 @@
 <p>Vsync-app 是按需申请的。如果应用界面是静态的，没有任何动画或用户交互，那么应用不会申请 Vsync-app 信号，系统也就不会为这个应用生成 Vsync 事件。</p>
 <p><strong>Vsync-sf（SurfaceFlinger Vsync）</strong>：<br>这是专门用于驱动 SurfaceFlinger 进行图层合成的 Vsync 信号。SurfaceFlinger 是 Android 系统中负责将所有应用的图层合成为最终画面的服务。</p>
 <p><strong>Vsync-appSf（应用-SurfaceFlinger Vsync）</strong>：<br>Android 13 引入的新信号类型。为消除旧设计中 sf EventThread 既唤醒 SurfaceFlinger 又服务部分 Choreographer 客户端带来的时序歧义，系统将两类职责分离：<code>vsync-sf</code> 专注唤醒 SurfaceFlinger，<code>vsync-appSf</code> 面向需要与 SurfaceFlinger 同步的客户端。</p>
+<p><a id="perfetto-observe"></a></p>
 <h2 id="在-Perfetto-中观察-Vsync"><a href="#在-Perfetto-中观察-Vsync" class="headerlink" title="在 Perfetto 中观察 Vsync"></a>在 Perfetto 中观察 Vsync</h2><p>Perfetto trace 中包含多个与 Vsync 相关的 Track，理解这些 Track 的含义有助于分析性能问题。</p>
 <p><strong>在 SurfaceFlinger 进程中</strong>：</p>
 <ol>
@@ -596,6 +610,7 @@
 <p><img src="/images/Android-Perfetto-08-Vsync/image-20250918220709655.png" alt="image-20250918220709655"></p>
 <p><code>RenderThread</code> Slice Track：<br>包含 <code>DrawFrame</code>、<code>syncAndDrawFrame</code>、<code>queueBuffer</code> 等 Slice，对应渲染线程工作。</p>
 <p><img src="/images/Android-Perfetto-08-Vsync/image-20250918220730872.png" alt="image-20250918220730872"></p>
+<p><a id="app-frames"></a></p>
 <h2 id="Android-App-每一帧是如何基于-Vsync-工作的"><a href="#Android-App-每一帧是如何基于-Vsync-工作的" class="headerlink" title="Android App 每一帧是如何基于 Vsync 工作的"></a>Android App 每一帧是如何基于 Vsync 工作的</h2><p>Android 应用的每一帧基于 Vsync 机制完成从渲染到显示的完整过程涉及多个关键步骤。</p>
 <p><img src="/images/Android-Perfetto-08-Vsync/image-20250918221821265.png" alt="image-20250918221821265"></p>
 <h3 id="流程总览（按顺序）"><a href="#流程总览（按顺序）" class="headerlink" title="流程总览（按顺序）"></a>流程总览（按顺序）</h3><ol>
@@ -819,6 +834,7 @@
 </ul>
 </li>
 </ol>
+<p><a id="refs"></a></p>
 <h2 id="参考文档"><a href="#参考文档" class="headerlink" title="参考文档"></a>参考文档</h2><ol>
 <li><a target="_blank" rel="noopener" href="https://source.android.com/docs/core/graphics">Android Graphics Architecture</a></li>
 <li><a target="_blank" rel="noopener" href="https://source.android.com/docs/core/graphics/implement-vsync">VSYNC Implementation Guide</a></li>
@@ -829,6 +845,7 @@
 <li><a target="_blank" rel="noopener" href="https://cloud.tencent.com/developer/article/1905184">Vsync offset 相关技术分析</a></li>
 <li><a target="_blank" rel="noopener" href="https://blog.csdn.net/learnframework/article/details/133964332">Android 13&#x2F;14高版本SurfaceFlinger出现VSYNC-app&#x2F;VSYNC-appSf&#x2F;VSYNC-sf剖析</a></li>
 </ol>
+<p><a id="about"></a></p>
 <h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p>
 <ol>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li>
@@ -847,7 +864,7 @@
             <p>Author：<a href="https://androidperformance.com">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/">https://androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/</a>
             <p>Publish date：<a href="https://androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/">August 5th 2025, 10:15:30 am</a>
-            <p>Update date：<a href="https://androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/">October 27th 2025, 8:19:09 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/">November 12th 2025, 11:02:23 pm</a>
             <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     <!-- paginator -->
@@ -929,7 +946,7 @@
                 <div class="toc-catalog">
                     <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
                 </div>
-                <ol class="toc"><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0%E7%9B%AE%E5%BD%95"><span class="toc-number">1.</span> <span class="toc-text">系列文章目录</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BB%80%E4%B9%88%E6%98%AF-Vsync"><span class="toc-number">1.1.</span> <span class="toc-text">什么是 Vsync</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Vsync-%E8%A7%A3%E5%86%B3%E4%BB%80%E4%B9%88%E9%97%AE%E9%A2%98%EF%BC%9F"><span class="toc-number">1.1.1.</span> <span class="toc-text">Vsync 解决什么问题？</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Android-%E4%B8%AD-Vsync-%E7%9A%84%E5%9F%BA%E6%9C%AC%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86"><span class="toc-number">1.2.</span> <span class="toc-text">Android 中 Vsync 的基本工作原理</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Vsync-%E4%BF%A1%E5%8F%B7%E7%9A%84%E5%88%86%E5%B1%82%E6%9E%B6%E6%9E%84"><span class="toc-number">1.2.1.</span> <span class="toc-text">Vsync 信号的分层架构</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%9C%A8-Perfetto-%E4%B8%AD%E8%A7%82%E5%AF%9F-Vsync"><span class="toc-number">1.3.</span> <span class="toc-text">在 Perfetto 中观察 Vsync</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Android-App-%E6%AF%8F%E4%B8%80%E5%B8%A7%E6%98%AF%E5%A6%82%E4%BD%95%E5%9F%BA%E4%BA%8E-Vsync-%E5%B7%A5%E4%BD%9C%E7%9A%84"><span class="toc-number">1.4.</span> <span class="toc-text">Android App 每一帧是如何基于 Vsync 工作的</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%B5%81%E7%A8%8B%E6%80%BB%E8%A7%88%EF%BC%88%E6%8C%89%E9%A1%BA%E5%BA%8F%EF%BC%89"><span class="toc-number">1.4.1.</span> <span class="toc-text">流程总览（按顺序）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#App-%E4%BB%80%E4%B9%88%E6%97%B6%E5%80%99%E4%BC%9A%E7%94%B3%E8%AF%B7-Vsync-%E4%BF%A1%E5%8F%B7"><span class="toc-number">1.4.2.</span> <span class="toc-text">App 什么时候会申请 Vsync 信号</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#App-%E7%94%B3%E8%AF%B7-Vsync-%E7%9A%84%E5%AE%8C%E6%95%B4%E6%B5%81%E7%A8%8B"><span class="toc-number">1.4.3.</span> <span class="toc-text">App 申请 Vsync 的完整流程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%B8%BB%E7%BA%BF%E7%A8%8B%E5%A6%82%E4%BD%95%E7%9B%91%E5%90%AC-Vsync-%E4%BF%A1%E5%8F%B7"><span class="toc-number">1.4.4.</span> <span class="toc-text">主线程如何监听 Vsync 信号</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%87%A0%E4%B8%AA%E9%81%97%E7%95%99%E9%97%AE%E9%A2%98"><span class="toc-number">1.4.5.</span> <span class="toc-text">几个遗留问题</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Vsync-Offset-%E7%9A%84%E6%8A%80%E6%9C%AF%E5%AE%9E%E7%8E%B0"><span class="toc-number">1.4.6.</span> <span class="toc-text">Vsync Offset 的技术实现</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%AE%9E%E9%99%85%E7%9A%84%E4%BC%98%E5%8C%96%E6%95%88%E6%9E%9C"><span class="toc-number">1.4.7.</span> <span class="toc-text">实际的优化效果</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Vsync-%E4%BF%A1%E5%8F%B7%E7%9A%84%E5%AE%8C%E6%95%B4%E4%BB%A3%E7%A0%81%E6%B5%81%E7%A8%8B"><span class="toc-number">1.5.</span> <span class="toc-text">Vsync 信号的完整代码流程</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Native-%E5%B1%82%EF%BC%9AVsync-%E4%BF%A1%E5%8F%B7%E7%9A%84%E4%BA%A7%E7%94%9F%E4%B8%8E%E7%AE%A1%E7%90%86"><span class="toc-number">1.5.1.</span> <span class="toc-text">Native 层：Vsync 信号的产生与管理</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Framework-%E5%B1%82%EF%BC%9AVsync-%E4%BF%A1%E5%8F%B7%E7%9A%84%E6%8E%A5%E6%94%B6%E4%B8%8E%E5%A4%84%E7%90%86"><span class="toc-number">1.5.2.</span> <span class="toc-text">Framework 层：Vsync 信号的接收与处理</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%85%B3%E9%94%AE%E6%97%B6%E5%BA%8F%E7%82%B9%E5%88%86%E6%9E%90"><span class="toc-number">1.5.3.</span> <span class="toc-text">关键时序点分析</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#FrameTimeline"><span class="toc-number">1.5.4.</span> <span class="toc-text">FrameTimeline</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%88%B7%E6%96%B0%E7%8E%87-x2F-%E6%98%BE%E7%A4%BA%E6%A8%A1%E5%BC%8F-x2F-VRR-%E5%AF%B9-Vsync-%E4%B8%8E-Offset-x2F-%E9%A2%84%E6%B5%8B%E7%9A%84%E5%BD%B1%E5%93%8D"><span class="toc-number">1.5.5.</span> <span class="toc-text">刷新率&#x2F;显示模式&#x2F;VRR 对 Vsync 与 Offset&#x2F;预测的影响</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Perfetto-%E5%AE%9E%E6%88%98-Checklist%EF%BC%88%E5%BB%BA%E8%AE%AE%E6%8C%89%E5%BA%8F%E6%9F%A5%E7%9C%8B%EF%BC%89"><span class="toc-number">1.5.6.</span> <span class="toc-text">Perfetto 实战 Checklist（建议按序查看）</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E6%96%87%E6%A1%A3"><span class="toc-number">1.6.</span> <span class="toc-text">参考文档</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number">2.</span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a></li></ol>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%9C%AC%E6%96%87%E7%9B%AE%E5%BD%95"><span class="toc-number">1.</span> <span class="toc-text">本文目录</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0%E7%9B%AE%E5%BD%95"><span class="toc-number"></span> <span class="toc-text">系列文章目录</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BB%80%E4%B9%88%E6%98%AF-Vsync"><span class="toc-number">1.</span> <span class="toc-text">什么是 Vsync</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Vsync-%E8%A7%A3%E5%86%B3%E4%BB%80%E4%B9%88%E9%97%AE%E9%A2%98%EF%BC%9F"><span class="toc-number">1.1.</span> <span class="toc-text">Vsync 解决什么问题？</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Android-%E4%B8%AD-Vsync-%E7%9A%84%E5%9F%BA%E6%9C%AC%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86"><span class="toc-number">2.</span> <span class="toc-text">Android 中 Vsync 的基本工作原理</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Vsync-%E4%BF%A1%E5%8F%B7%E7%9A%84%E5%88%86%E5%B1%82%E6%9E%B6%E6%9E%84"><span class="toc-number">2.1.</span> <span class="toc-text">Vsync 信号的分层架构</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%9C%A8-Perfetto-%E4%B8%AD%E8%A7%82%E5%AF%9F-Vsync"><span class="toc-number">3.</span> <span class="toc-text">在 Perfetto 中观察 Vsync</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Android-App-%E6%AF%8F%E4%B8%80%E5%B8%A7%E6%98%AF%E5%A6%82%E4%BD%95%E5%9F%BA%E4%BA%8E-Vsync-%E5%B7%A5%E4%BD%9C%E7%9A%84"><span class="toc-number">4.</span> <span class="toc-text">Android App 每一帧是如何基于 Vsync 工作的</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%B5%81%E7%A8%8B%E6%80%BB%E8%A7%88%EF%BC%88%E6%8C%89%E9%A1%BA%E5%BA%8F%EF%BC%89"><span class="toc-number">4.1.</span> <span class="toc-text">流程总览（按顺序）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#App-%E4%BB%80%E4%B9%88%E6%97%B6%E5%80%99%E4%BC%9A%E7%94%B3%E8%AF%B7-Vsync-%E4%BF%A1%E5%8F%B7"><span class="toc-number">4.2.</span> <span class="toc-text">App 什么时候会申请 Vsync 信号</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#App-%E7%94%B3%E8%AF%B7-Vsync-%E7%9A%84%E5%AE%8C%E6%95%B4%E6%B5%81%E7%A8%8B"><span class="toc-number">4.3.</span> <span class="toc-text">App 申请 Vsync 的完整流程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%B8%BB%E7%BA%BF%E7%A8%8B%E5%A6%82%E4%BD%95%E7%9B%91%E5%90%AC-Vsync-%E4%BF%A1%E5%8F%B7"><span class="toc-number">4.4.</span> <span class="toc-text">主线程如何监听 Vsync 信号</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%87%A0%E4%B8%AA%E9%81%97%E7%95%99%E9%97%AE%E9%A2%98"><span class="toc-number">4.5.</span> <span class="toc-text">几个遗留问题</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Vsync-Offset-%E7%9A%84%E6%8A%80%E6%9C%AF%E5%AE%9E%E7%8E%B0"><span class="toc-number">4.6.</span> <span class="toc-text">Vsync Offset 的技术实现</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%AE%9E%E9%99%85%E7%9A%84%E4%BC%98%E5%8C%96%E6%95%88%E6%9E%9C"><span class="toc-number">4.7.</span> <span class="toc-text">实际的优化效果</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Vsync-%E4%BF%A1%E5%8F%B7%E7%9A%84%E5%AE%8C%E6%95%B4%E4%BB%A3%E7%A0%81%E6%B5%81%E7%A8%8B"><span class="toc-number">5.</span> <span class="toc-text">Vsync 信号的完整代码流程</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Native-%E5%B1%82%EF%BC%9AVsync-%E4%BF%A1%E5%8F%B7%E7%9A%84%E4%BA%A7%E7%94%9F%E4%B8%8E%E7%AE%A1%E7%90%86"><span class="toc-number">5.1.</span> <span class="toc-text">Native 层：Vsync 信号的产生与管理</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Framework-%E5%B1%82%EF%BC%9AVsync-%E4%BF%A1%E5%8F%B7%E7%9A%84%E6%8E%A5%E6%94%B6%E4%B8%8E%E5%A4%84%E7%90%86"><span class="toc-number">5.2.</span> <span class="toc-text">Framework 层：Vsync 信号的接收与处理</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%85%B3%E9%94%AE%E6%97%B6%E5%BA%8F%E7%82%B9%E5%88%86%E6%9E%90"><span class="toc-number">5.3.</span> <span class="toc-text">关键时序点分析</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#FrameTimeline"><span class="toc-number">5.4.</span> <span class="toc-text">FrameTimeline</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%88%B7%E6%96%B0%E7%8E%87-x2F-%E6%98%BE%E7%A4%BA%E6%A8%A1%E5%BC%8F-x2F-VRR-%E5%AF%B9-Vsync-%E4%B8%8E-Offset-x2F-%E9%A2%84%E6%B5%8B%E7%9A%84%E5%BD%B1%E5%93%8D"><span class="toc-number">5.5.</span> <span class="toc-text">刷新率&#x2F;显示模式&#x2F;VRR 对 Vsync 与 Offset&#x2F;预测的影响</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Perfetto-%E5%AE%9E%E6%88%98-Checklist%EF%BC%88%E5%BB%BA%E8%AE%AE%E6%8C%89%E5%BA%8F%E6%9F%A5%E7%9C%8B%EF%BC%89"><span class="toc-number">5.6.</span> <span class="toc-text">Perfetto 实战 Checklist（建议按序查看）</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E6%96%87%E6%A1%A3"><span class="toc-number">6.</span> <span class="toc-text">参考文档</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number"></span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a>
             </div>
         <!-- sidebar -->
         <div class="sidebar sidebar-hide">
@@ -1078,15 +1095,20 @@
         
         
         
+        
     <div class="total-and-search">
         <div class="total-archive">
-        Total : 137
+        Total : 138
         </div>
         <!-- search  -->
     </div>
     <div class="post-archive">
             <div class="archive-year"> 2025 </div>
             <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 (九) - CPU 信息解读</a>
+        </li>
         <li class="archive-post-item">
             <span class="archive-post-date">10/27</span>
             <a class="archive-post-title" href="/2025/10/27/Android-Weekly-2025-20/">Android Weekly 2025-20 期</a>
@@ -1846,6 +1868,30 @@
                 <span class="iconfont-archer">&#xe606;</span>
                 用户体验
             </span>
+            <span class="sidebar-tag-name" data-tags="性能优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                性能优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="线程优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                线程优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="电量优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                电量优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR分析">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR分析
+            </span>
+            <span class="sidebar-tag-name" data-tags="页面响应">
+                <span class="iconfont-archer">&#xe606;</span>
+                页面响应
+            </span>
     </div>
     <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
     <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
@@ -1875,6 +1921,10 @@
         <span class="sidebar-category-name" data-categories="iOS">
             <span class="iconfont-archer">&#xe60a;</span>
             iOS
+        </span>
+        <span class="sidebar-category-name" data-categories="Android性能优化">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android性能优化
         </span>
     </div>
     <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>

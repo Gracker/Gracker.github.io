@@ -28,7 +28,7 @@
 <meta property="og:image" content="https://androidperformance.com/images/15756310119592.jpg">
 <meta property="og:image" content="https://androidperformance.com/images/WechatIMG581.png">
 <meta property="article:published_time" content="2019-12-06T11:12:34.000Z">
-<meta property="article:modified_time" content="2025-10-27T12:19:09.000Z">
+<meta property="article:modified_time" content="2025-11-10T09:17:40.000Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Startup">
 <meta property="article:tag" content="Android">
@@ -361,7 +361,7 @@
 
                 <!-- 文章字数统计 -->
                     <div class="post-intro-read">
-                        <span>Word count: <span class="post-count word-count">3k</span>Reading time: <span class="post-count reading-time">12 min</span></span>
+                        <span>Word count: <span class="post-count word-count">3.1k</span>Reading time: <span class="post-count reading-time">12 min</span></span>
                     </div>
                 <div class="post-intro-meta">
                     <!-- 撰写日期 -->
@@ -524,6 +524,18 @@
 <p>本系列的目的是通过 Systrace 这个工具，从另外一个角度来看待 Android 系统整体的运行，同时也从另外一个角度来对 Framework 进行学习。也许你看了很多讲 Framework 的文章，但是总是记不住代码，或者不清楚其运行的流程，也许从 Systrace 这个图形化的角度，你可以理解的更深入一些。</p>
 <span id="more"></span>
 
+<h2 id="本文目录"><a href="#本文目录" class="headerlink" title="本文目录"></a>本文目录</h2><ul>
+<li><a href="#series">系列文章目录</a></li>
+<li><a href="#overview">Binder 概述</a></li>
+<li><a href="#diagram">Binder 调用图例</a></li>
+<li><a href="#locks">Systrace 显示的锁的信息</a></li>
+<li><a href="#waiting">等锁分析</a></li>
+<li><a href="#code">相关代码</a></li>
+<li><a href="#refs">参考</a></li>
+<li><a href="#attachments">附件</a></li>
+<li><a href="#about">关于我 &amp;&amp; 博客</a></li>
+</ul>
+<p><a id="series"></a></p>
 <h1 id="系列文章目录"><a href="#系列文章目录" class="headerlink" title="系列文章目录"></a>系列文章目录</h1><ol>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/05/28/Android-Systrace-About/">Systrace 简介</a></li>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/07/23/Android-Systrace-Pre/">Systrace 基础知识 - Systrace 预备知识</a></li>
@@ -547,6 +559,7 @@
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-running/">Systrace 线程 CPU 运行状态分析技巧 - Running 篇</a></li>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a></li>
 </ol>
+<p><a id="overview"></a></p>
 <h1 id="Binder-概述"><a href="#Binder-概述" class="headerlink" title="Binder 概述"></a>Binder 概述</h1><p>Android 的大部分进程间通信都使用 Binder，这里对 Binder 不做过多的解释，想对 Binder 的实现有一个比较深入的了解的话，推荐你阅读下面三篇文章</p>
 <ol>
 <li><a target="_blank" rel="noopener" href="https://paul.pub/android-binder-driver/">理解Android Binder机制1&#x2F;3：驱动篇</a></li>
@@ -556,6 +569,7 @@
 <p><strong>之所以要单独讲 Systrace 中的 Binder 和锁，是因为很多卡顿问题和响应速度的问题，是因为跨进程 binder 通信的时候，锁竞争导致 binder 通信事件变长，影响了调用端。最常见的就是应用渲染线程 dequeueBuffer 的时候 SurfaceFlinger 主线程阻塞导致 dequeueBuffer 耗时，从而导致应用渲染出现卡顿; 或者 SystemServer 中的 AMS 或者 WMS 持锁方法等待太多, 导致应用调用的时候等待时间比较长导致主线程卡顿</strong></p>
 <p>这里放一张文章里面的 Binder 架构图 ， 本文主要是以 Systrace 为主，所以会讲 Systrace 中的 Binder 表现，不涉及 Binder 的实现</p>
 <p><img src="/images/15756309069397.jpg"></p>
+<p><a id="diagram"></a></p>
 <h1 id="Binder-调用图例"><a href="#Binder-调用图例" class="headerlink" title="Binder 调用图例"></a>Binder 调用图例</h1><p>Binder 主要是用来跨进程进行通信，可以看下面这张图，简单显示了在 Systrace 中 ，Binder 通信是如何显示的</p>
 <p><img src="/images/15756309176435.jpg"></p>
 <p>图中主要是 SystemServer 进程和 高通的 perf 进程通信，Systrace 中右上角 ViewOption 里面勾选 Flow Events  就可以看到 Binder 的信息</p>
@@ -563,6 +577,7 @@
 <p>点击 Binder 可以查看其详细信息，其中有的信息在分析问题的时候可以用到，这里不做过多的描述</p>
 <p><img src="/images/15756309336019.jpg"></p>
 <p>对于 Binder，这里主要介绍如何在 Systrace 中查看 Binder <strong>锁信息</strong>和<strong>锁等待</strong>这两个部分，很多卡顿和响应问题的分析，都离不开这两部分信息的解读，不过最后还是要回归代码，找到问题后，要读源码来理顺其代码逻辑，以方便做相应的优化工作</p>
+<p><a id="locks"></a></p>
 <h1 id="Systrace-显示的锁的信息"><a href="#Systrace-显示的锁的信息" class="headerlink" title="Systrace 显示的锁的信息"></a>Systrace 显示的锁的信息</h1><p><img src="/images/15756309429683.jpg"></p>
 <p><strong>monitor contention with owner Binder:1605_B (4667) at void com.android.server.wm.ActivityTaskManagerService.activityPaused(android.os.IBinder)(ActivityTaskManagerService.java:1733) waiters&#x3D;2 blocking from android.app.ActivityManager$StackInfo com.android.server.wm.ActivityTaskManagerService.getFocusedStackInfo()(ActivityTaskManagerService.java:2064)</strong></p>
 <p>上面的话分两段来看，以 <strong>blocking</strong> 为分界线　</p>
@@ -585,6 +600,7 @@
 <p><strong>ActivityTaskManagerService 的 getFocusedStackInfo 方法在执行过程中被阻塞，原因是因为执行同步方法块的时候，没有拿到同步对象的锁的拥有权；需要等待拥有同步对象的锁拥有权的另外一个方法 ActivityTaskManagerService.activityPaused 执行完成后，才能拿到同步对象的锁的拥有权，然后继续执行</strong></p>
 <p>可以对照原文看上面的翻译</p>
 <p><strong>monitor contention with owner Binder:1605_B (4667)<br>at void com.android.server.wm.ActivityTaskManagerService.activityPaused(android.os.IBinder)(ActivityTaskManagerService.java:1733)<br>waiters&#x3D;2<br>blocking from android.app.ActivityManager$StackInfo com.android.server.wm.ActivityTaskManagerService.getFocusedStackInfo()(ActivityTaskManagerService.java:2064)</strong></p>
+<p><a id="waiting"></a></p>
 <h1 id="等锁分析"><a href="#等锁分析" class="headerlink" title="等锁分析"></a>等锁分析</h1><p>还是上面那个 Systrace，Binder 信息里面显示 waiters&#x3D;2，意味着前面还有两个操作在等锁释放，也就是说总共有三个操作都在等待 Binder:1605_B (4667) 释放锁，我们来看一下 Binder:1605_B 的执行情况</p>
 <p><img src="/images/15756309846544.jpg"></p>
 <p>从上图可以看到，Binder:1605_B 正在执行 activityPaused，中间也有一些其他的 Binder 操作，最终 activityPaused 执行完成后，释放锁</p>
@@ -612,18 +628,22 @@
 <p><img src="/images/15756310119592.jpg"></p>
 <p>这也就可以解释为什么 Android 手机 App 安装多了、用的久了之后，系统就会卡的一个原因；另外重启后也会有短暂的时候出现这种情况</p>
 <p>如果不知道怎么查看唤醒信息，可以查看： <a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/07/23/Android-Systrace-Pre/#%E8%BF%9B%E7%A8%8B%E5%94%A4%E9%86%92%E4%BF%A1%E6%81%AF%E5%88%86%E6%9E%90">Systrace中查看进程信息唤醒</a> 这篇文章</p>
+<p><a id="code"></a></p>
 <h1 id="相关代码"><a href="#相关代码" class="headerlink" title="相关代码"></a>相关代码</h1><h3 id="Monitor-信息"><a href="#Monitor-信息" class="headerlink" title="Monitor 信息"></a>Monitor 信息</h3><p>art&#x2F;runtime&#x2F;monitor.cc</p>
 <figure class="highlight cc"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br></pre></td><td class="code"><pre><span class="line"><span class="function">std::string <span class="title">Monitor::PrettyContentionInfo</span><span class="params">(<span class="type">const</span> std::string&amp; owner_name,</span></span></span><br><span class="line"><span class="params"><span class="function">                                          <span class="type">pid_t</span> owner_tid,</span></span></span><br><span class="line"><span class="params"><span class="function">                                          ArtMethod* owners_method,</span></span></span><br><span class="line"><span class="params"><span class="function">                                          <span class="type">uint32_t</span> owners_dex_pc,</span></span></span><br><span class="line"><span class="params"><span class="function">                                          <span class="type">size_t</span> num_waiters)</span> </span>&#123;</span><br><span class="line">  Locks::mutator_lock_-&gt;<span class="built_in">AssertSharedHeld</span>(Thread::<span class="built_in">Current</span>());</span><br><span class="line">  <span class="type">const</span> <span class="type">char</span>* owners_filename;</span><br><span class="line">  <span class="type">int32_t</span> owners_line_number = <span class="number">0</span>;</span><br><span class="line">  <span class="keyword">if</span> (owners_method != <span class="literal">nullptr</span>) &#123;</span><br><span class="line">    <span class="built_in">TranslateLocation</span>(owners_method, owners_dex_pc, &amp;owners_filename, &amp;owners_line_number);</span><br><span class="line">  &#125;</span><br><span class="line">  std::ostringstream oss;</span><br><span class="line">  oss &lt;&lt; <span class="string">&quot;monitor contention with owner &quot;</span> &lt;&lt; owner_name &lt;&lt; <span class="string">&quot; (&quot;</span> &lt;&lt; owner_tid &lt;&lt; <span class="string">&quot;)&quot;</span>;</span><br><span class="line">  <span class="keyword">if</span> (owners_method != <span class="literal">nullptr</span>) &#123;</span><br><span class="line">    oss &lt;&lt; <span class="string">&quot; at &quot;</span> &lt;&lt; owners_method-&gt;<span class="built_in">PrettyMethod</span>();</span><br><span class="line">    oss &lt;&lt; <span class="string">&quot;(&quot;</span> &lt;&lt; owners_filename &lt;&lt; <span class="string">&quot;:&quot;</span> &lt;&lt; owners_line_number &lt;&lt; <span class="string">&quot;)&quot;</span>;</span><br><span class="line">  &#125;</span><br><span class="line">  oss &lt;&lt; <span class="string">&quot; waiters=&quot;</span> &lt;&lt; num_waiters;</span><br><span class="line">  <span class="keyword">return</span> oss.<span class="built_in">str</span>();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
 <h3 id="Block-信息"><a href="#Block-信息" class="headerlink" title="Block 信息"></a>Block 信息</h3><p>art&#x2F;runtime&#x2F;monitor.cc</p>
 <figure class="highlight cc"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> (<span class="built_in">ATRACE_ENABLED</span>()) &#123;</span><br><span class="line">  <span class="keyword">if</span> (owner_ != <span class="literal">nullptr</span>) &#123;  <span class="comment">// Did the owner_ give the lock up?</span></span><br><span class="line">    std::ostringstream oss;</span><br><span class="line">    std::string name;</span><br><span class="line">    owner_-&gt;<span class="built_in">GetThreadName</span>(name);</span><br><span class="line">    oss &lt;&lt; <span class="built_in">PrettyContentionInfo</span>(name,</span><br><span class="line">                                owner_-&gt;<span class="built_in">GetTid</span>(),</span><br><span class="line">                                owners_method,</span><br><span class="line">                                owners_dex_pc,</span><br><span class="line">                                num_waiters);</span><br><span class="line">    <span class="comment">// Add info for contending thread.</span></span><br><span class="line">    <span class="type">uint32_t</span> pc;</span><br><span class="line">    ArtMethod* m = self-&gt;<span class="built_in">GetCurrentMethod</span>(&amp;pc);</span><br><span class="line">    <span class="type">const</span> <span class="type">char</span>* filename;</span><br><span class="line">    <span class="type">int32_t</span> line_number;</span><br><span class="line">    <span class="built_in">TranslateLocation</span>(m, pc, &amp;filename, &amp;line_number);</span><br><span class="line">    oss &lt;&lt; <span class="string">&quot; blocking from &quot;</span></span><br><span class="line">        &lt;&lt; ArtMethod::<span class="built_in">PrettyMethod</span>(m) &lt;&lt; <span class="string">&quot;(&quot;</span> &lt;&lt; (filename != <span class="literal">nullptr</span> ? filename : <span class="string">&quot;null&quot;</span>)</span><br><span class="line">        &lt;&lt; <span class="string">&quot;:&quot;</span> &lt;&lt; line_number &lt;&lt; <span class="string">&quot;)&quot;</span>;</span><br><span class="line">    <span class="built_in">ATRACE_BEGIN</span>(oss.<span class="built_in">str</span>().<span class="built_in">c_str</span>());</span><br><span class="line">    started_trace = <span class="literal">true</span>;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
+<p><a id="refs"></a></p>
 <h1 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h1><ol>
 <li><a target="_blank" rel="noopener" href="https://paul.pub/android-binder-driver/">理解Android Binder机制1&#x2F;3：驱动篇</a></li>
 <li><a target="_blank" rel="noopener" href="https://paul.pub/android-binder-cpp/">理解Android Binder机制2&#x2F;3：C++层</a></li>
 <li><a target="_blank" rel="noopener" href="https://paul.pub/android-binder-java/">理解Android Binder机制3&#x2F;3：Java层</a></li>
 </ol>
+<p><a id="attachments"></a></p>
 <h1 id="附件"><a href="#附件" class="headerlink" title="附件"></a>附件</h1><p>本文涉及到的附件也上传了，各位下载后解压，使用 <strong>Chrome</strong> 浏览器打开即可<br><a target="_blank" rel="noopener" href="https://github.com/Gracker/SystraceForBlog/tree/master/Android_Systrace_Binder">点此链接下载文章所涉及到的 Systrace 附件</a></p>
+<p><a id="about"></a></p>
 <h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p>
 <ol>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li>
@@ -642,7 +662,7 @@
             <p>Author：<a href="https://androidperformance.com">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/2019/12/06/Android-Systrace-Binder/">https://androidperformance.com/2019/12/06/Android-Systrace-Binder/</a>
             <p>Publish date：<a href="https://androidperformance.com/2019/12/06/Android-Systrace-Binder/">December 6th 2019, 7:12:34 pm</a>
-            <p>Update date：<a href="https://androidperformance.com/2019/12/06/Android-Systrace-Binder/">October 27th 2025, 8:19:09 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/2019/12/06/Android-Systrace-Binder/">November 10th 2025, 5:17:40 pm</a>
             <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     <!-- paginator -->
@@ -724,7 +744,7 @@
                 <div class="toc-catalog">
                     <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
                 </div>
-                <ol class="toc"><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0%E7%9B%AE%E5%BD%95"><span class="toc-number">1.</span> <span class="toc-text">系列文章目录</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Binder-%E6%A6%82%E8%BF%B0"><span class="toc-number">2.</span> <span class="toc-text">Binder 概述</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Binder-%E8%B0%83%E7%94%A8%E5%9B%BE%E4%BE%8B"><span class="toc-number">3.</span> <span class="toc-text">Binder 调用图例</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Systrace-%E6%98%BE%E7%A4%BA%E7%9A%84%E9%94%81%E7%9A%84%E4%BF%A1%E6%81%AF"><span class="toc-number">4.</span> <span class="toc-text">Systrace 显示的锁的信息</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%AC%AC%E4%B8%80%E6%AE%B5%E4%BF%A1%E6%81%AF%E8%A7%A3%E8%AF%BB"><span class="toc-number">4.1.</span> <span class="toc-text">第一段信息解读</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%AC%AC%E4%BA%8C%E6%AE%B5%E4%BF%A1%E6%81%AF%E8%A7%A3%E8%AF%BB"><span class="toc-number">4.2.</span> <span class="toc-text">第二段信息解读</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%80%BB%E7%BB%93"><span class="toc-number">4.3.</span> <span class="toc-text">总结</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%AD%89%E9%94%81%E5%88%86%E6%9E%90"><span class="toc-number">5.</span> <span class="toc-text">等锁分析</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E9%94%81%E7%AD%89%E5%BE%85"><span class="toc-number">5.1.</span> <span class="toc-text">锁等待</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E9%94%81%E9%87%8A%E6%94%BE"><span class="toc-number">5.2.</span> <span class="toc-text">锁释放</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%9B%B8%E5%85%B3%E4%BB%A3%E7%A0%81"><span class="toc-number">6.</span> <span class="toc-text">相关代码</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Monitor-%E4%BF%A1%E6%81%AF"><span class="toc-number">6.0.1.</span> <span class="toc-text">Monitor 信息</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Block-%E4%BF%A1%E6%81%AF"><span class="toc-number">6.0.2.</span> <span class="toc-text">Block 信息</span></a></li></ol></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%8F%82%E8%80%83"><span class="toc-number">7.</span> <span class="toc-text">参考</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E9%99%84%E4%BB%B6"><span class="toc-number">8.</span> <span class="toc-text">附件</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number">9.</span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a></li></ol>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%9C%AC%E6%96%87%E7%9B%AE%E5%BD%95"><span class="toc-number">1.</span> <span class="toc-text">本文目录</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0%E7%9B%AE%E5%BD%95"><span class="toc-number"></span> <span class="toc-text">系列文章目录</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Binder-%E6%A6%82%E8%BF%B0"><span class="toc-number"></span> <span class="toc-text">Binder 概述</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Binder-%E8%B0%83%E7%94%A8%E5%9B%BE%E4%BE%8B"><span class="toc-number"></span> <span class="toc-text">Binder 调用图例</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Systrace-%E6%98%BE%E7%A4%BA%E7%9A%84%E9%94%81%E7%9A%84%E4%BF%A1%E6%81%AF"><span class="toc-number"></span> <span class="toc-text">Systrace 显示的锁的信息</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%AC%AC%E4%B8%80%E6%AE%B5%E4%BF%A1%E6%81%AF%E8%A7%A3%E8%AF%BB"><span class="toc-number">1.</span> <span class="toc-text">第一段信息解读</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%AC%AC%E4%BA%8C%E6%AE%B5%E4%BF%A1%E6%81%AF%E8%A7%A3%E8%AF%BB"><span class="toc-number">2.</span> <span class="toc-text">第二段信息解读</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%80%BB%E7%BB%93"><span class="toc-number">3.</span> <span class="toc-text">总结</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%AD%89%E9%94%81%E5%88%86%E6%9E%90"><span class="toc-number"></span> <span class="toc-text">等锁分析</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E9%94%81%E7%AD%89%E5%BE%85"><span class="toc-number">1.</span> <span class="toc-text">锁等待</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E9%94%81%E9%87%8A%E6%94%BE"><span class="toc-number">2.</span> <span class="toc-text">锁释放</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%9B%B8%E5%85%B3%E4%BB%A3%E7%A0%81"><span class="toc-number"></span> <span class="toc-text">相关代码</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Monitor-%E4%BF%A1%E6%81%AF"><span class="toc-number">0.1.</span> <span class="toc-text">Monitor 信息</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Block-%E4%BF%A1%E6%81%AF"><span class="toc-number">0.2.</span> <span class="toc-text">Block 信息</span></a></li></ol></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%8F%82%E8%80%83"><span class="toc-number"></span> <span class="toc-text">参考</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E9%99%84%E4%BB%B6"><span class="toc-number"></span> <span class="toc-text">附件</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number"></span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a>
             </div>
         <!-- sidebar -->
         <div class="sidebar sidebar-hide">
@@ -873,15 +893,20 @@
         
         
         
+        
     <div class="total-and-search">
         <div class="total-archive">
-        Total : 137
+        Total : 138
         </div>
         <!-- search  -->
     </div>
     <div class="post-archive">
             <div class="archive-year"> 2025 </div>
             <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 (九) - CPU 信息解读</a>
+        </li>
         <li class="archive-post-item">
             <span class="archive-post-date">10/27</span>
             <a class="archive-post-title" href="/2025/10/27/Android-Weekly-2025-20/">Android Weekly 2025-20 期</a>
@@ -1641,6 +1666,30 @@
                 <span class="iconfont-archer">&#xe606;</span>
                 用户体验
             </span>
+            <span class="sidebar-tag-name" data-tags="性能优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                性能优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="线程优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                线程优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="电量优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                电量优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR分析">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR分析
+            </span>
+            <span class="sidebar-tag-name" data-tags="页面响应">
+                <span class="iconfont-archer">&#xe606;</span>
+                页面响应
+            </span>
     </div>
     <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
     <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
@@ -1670,6 +1719,10 @@
         <span class="sidebar-category-name" data-categories="iOS">
             <span class="iconfont-archer">&#xe60a;</span>
             iOS
+        </span>
+        <span class="sidebar-category-name" data-categories="Android性能优化">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android性能优化
         </span>
     </div>
     <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>

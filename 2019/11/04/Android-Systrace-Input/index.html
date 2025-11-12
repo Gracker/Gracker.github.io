@@ -32,7 +32,7 @@
 <meta property="og:image" content="https://androidperformance.com/images/15728725296687.jpg">
 <meta property="og:image" content="https://androidperformance.com/images/WechatIMG581.png">
 <meta property="article:published_time" content="2019-11-04T01:38:29.000Z">
-<meta property="article:modified_time" content="2025-10-27T12:19:09.000Z">
+<meta property="article:modified_time" content="2025-11-10T09:18:20.000Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Startup">
 <meta property="article:tag" content="Android">
@@ -528,6 +528,21 @@
 <p>本系列的目的是通过 Systrace 这个工具，从另外一个角度来看待 Android 系统整体的运行，同时也从另外一个角度来对 Framework 进行学习。也许你看了很多讲 Framework 的文章，但是总是记不住代码，或者不清楚其运行的流程，也许从 Systrace 这个图形化的角度，你可以理解的更深入一些。</p>
 <span id="more"></span>
 
+<h2 id="本文目录"><a href="#本文目录" class="headerlink" title="本文目录"></a>本文目录</h2><ul>
+<li><a href="#series">系列文章目录</a></li>
+<li><a href="#content">正文</a></li>
+<li><a href="#input-overview">Input in Systrace</a></li>
+<li><a href="#inputdown-ss">InputDown 事件在 SystemServer 的工作流</a></li>
+<li><a href="#inputdown-app">InputDown 事件在 App 的工作流</a></li>
+<li><a href="#key-points">关键知识点和流程</a></li>
+<li><a href="#input-vsync">Input 刷新与 Vsync</a></li>
+<li><a href="#input-debug">Input 调试信息</a></li>
+<li><a href="#refs">参考</a></li>
+<li><a href="#attachments">附件</a></li>
+<li><a href="#others">本文其他地址</a></li>
+<li><a href="#about">关于我 &amp;&amp; 博客</a></li>
+</ul>
+<p><a id="series"></a></p>
 <h1 id="系列文章目录"><a href="#系列文章目录" class="headerlink" title="系列文章目录"></a>系列文章目录</h1><ol>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/05/28/Android-Systrace-About/">Systrace 简介</a></li>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/07/23/Android-Systrace-Pre/">Systrace 基础知识 - Systrace 预备知识</a></li>
@@ -551,6 +566,7 @@
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-running/">Systrace 线程 CPU 运行状态分析技巧 - Running 篇</a></li>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a></li>
 </ol>
+<p><a id="content"></a></p>
 <h1 id="正文"><a href="#正文" class="headerlink" title="正文"></a>正文</h1><p>在<a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/10/22/Android-Choreographer/">Android 基于 Choreographer 的渲染机制详解</a> 这篇文章中，我有讲到，Android App 的主线程运行的本质是靠 Message 驱动的，这个 Message 可以是循环动画、可以是定时任务、可以是其他线程唤醒，不过我们最常见的还是 Input Message ，这里的 Input 是以 InputReader 这里的分类，不仅包含触摸事件(Down、Up、Move) ， 可包含 Key 事件(Home Key  、 Back Key) . 这里我们着重讲的是<strong>触摸事件</strong></p>
 <p>由于 Android 系统在 Input 链上加了一些 Trace 点，且这些 Trace 点也比较完善，部分厂家可能会自己加一些，不过我们这里以标准的 Trace 点来讲解，这样不至于你换了个手机抓的 Trace 就不一样了</p>
 <p>Input 在 Android 中的地位是很高的，我们在玩手机的时候，大部分应用的滑动、跳转这些都依靠 Input 事件来驱动，后续我会专门写一篇文章，来介绍 Android 中基于 Input 的运行机制。这里是从 Systrace 的角度来看 Input 。看下面的流程之前，脑子里先有个关于 Input 的大概处理流程，这样看的时候，就可以代入：</p>
@@ -561,6 +577,7 @@
 <li><strong>App 拿到事件之后，进行 Input 事件分发，如果此事件分发的过程中，App 的 UI 发生了变化，那么会请求 Vsync，则进行一帧的绘制</strong></li>
 </ol>
 <p><strong>另外在看 Systrace 的时候，要牢记 Systrace 中时间是从左到右流逝的，也就是说如果你在 Systrace 上画一条竖直线，那么竖直线左边的事件永远比右边的事件先发生，这也是我们分析源码流程的一个基石。我希望大家在看基于  Systrace 的源码流程分析之后，脑子里有一个图形化的、立体的流程图，你跟的代码走到哪一步了在图形你在脑中可以快速定位出来</strong></p>
+<p><a id="input-overview"></a></p>
 <h1 id="Input-in-Systrace"><a href="#Input-in-Systrace" class="headerlink" title="Input in Systrace"></a>Input in Systrace</h1><p>下面这张图是一个概览图，以滑动桌面为例 (<strong>滑动桌面包括一个 Input_Down 事件 + 若干个 Input_Move 事件 + 一个 Input_Up 事件，这些事件和事件流都会在 Systrace 上有所体现，这也是我们分析 Systrace 的一个重要的切入点</strong>)，主要牵扯到的模块是 SystemServer 和 App 模块，其中用蓝色标识的是事件的流动信息，红色的是辅助信息。</p>
 <p><img src="/images/15728723423427.jpg"></p>
 <p><strong>InputReader</strong> 和 <strong>InputDispatcher</strong> 是跑在 SystemServer 里面的两个 Native 线程，负责读取和分发 Input 事件，我们分析 Systrace 的 Input 事件流，首先是找到这里。下面针对上图中标号进行简单说明</p>
@@ -575,13 +592,16 @@
 <li><strong>App 响应 Input 事件</strong> ： 这里是滑动然后松手，也就是我们熟悉的桌面滑动的操作，桌面随着手指的滑动更新画面，松手后触发 Fling 继续滑动，从 Systrace 就可以看到整个事件的流程</li>
 </ol>
 <p>下面以第一个 Input_Down 事件的处理流程来进行详细的工作流说明，其他的 Move 事件和 Up 事件的处理是一样的（部分不一样，不过影响不大）</p>
+<p><a id="inputdown-ss"></a></p>
 <h2 id="InputDown-事件在-SystemServer-的工作流"><a href="#InputDown-事件在-SystemServer-的工作流" class="headerlink" title="InputDown 事件在 SystemServer 的工作流"></a>InputDown 事件在 SystemServer 的工作流</h2><p>放大 SystemServer 的部分，可以看到其工作流(蓝色)，<strong>滑动桌面包括 Input_Down + 若干个 Input_Move + Input_Up ，我们这里看的是 Input_Down 这个事件</strong></p>
 <p><img src="/images/15728723576583.jpg"></p>
+<p><a id="inputdown-app"></a></p>
 <h2 id="InputDown-事件在-App-的工作流"><a href="#InputDown-事件在-App-的工作流" class="headerlink" title="InputDown 事件在 App 的工作流"></a>InputDown 事件在 App 的工作流</h2><p>应用在收到 Input 事件后，有时候会马上去处理 (没有 Vsync 的情况下)，有时候会等 Vsync 信号来了之后去处理，这里 Input_Down 事件就是直接去唤醒主线程做处理，其 Systrace 比较简单，最上面有个 Input 事件队列，主线程则是简单的处理</p>
 <p><img src="/images/15728723679523.jpg"></p>
 <h3 id="App-的-Pending-队列"><a href="#App-的-Pending-队列" class="headerlink" title="App 的 Pending 队列"></a>App 的 Pending 队列</h3><p><img src="/images/15728723758398.jpg"></p>
 <h3 id="主线程处理-Input-事件"><a href="#主线程处理-Input-事件" class="headerlink" title="主线程处理 Input 事件"></a>主线程处理 Input 事件</h3><p>主线程处理 Input 事件这个大家比较熟悉，从下面的调用栈可以看到，Input 事件传到了 ViewRootImpl，最终到了 DecorView ，然后就是大家熟悉的 Input 事件分发机制</p>
 <p><img src="/images/15728723834004.jpg"></p>
+<p><a id="key-points"></a></p>
 <h1 id="关键知识点和流程"><a href="#关键知识点和流程" class="headerlink" title="关键知识点和流程"></a>关键知识点和流程</h1><p>从上面的 Systrace 来看，Input 事件的基本流向如下：</p>
 <ol>
 <li><strong>InputReader 读取 Input 事件</strong></li>
@@ -626,6 +646,7 @@
 <p>如果主线程发生卡顿，那么 Input 事件没有及时被消耗，也会在 WaitQueue 这里体现出来，如下图：</p>
 <p><img src="/images/15728725102137.jpg"></p>
 <h2 id="整体逻辑"><a href="#整体逻辑" class="headerlink" title="整体逻辑"></a>整体逻辑</h2><p>图来自 <a target="_blank" rel="noopener" href="http://gityuan.com/">Gityuan 博客</a><br><img src="/images/15728725219191.jpg"></p>
+<p><a id="input-vsync"></a></p>
 <h1 id="Input-刷新与-Vsync"><a href="#Input-刷新与-Vsync" class="headerlink" title="Input 刷新与 Vsync"></a>Input 刷新与 Vsync</h1><p>Input 的刷新取决于触摸屏的采样，目前比较多的屏幕采样率是 120Hz 和 160Hz ，对应就是 8ms 采样一次或者 6.25ms 采样一次，我们来看一下其在 Systrace 上的展示</p>
 <p><img src="/images/15728725296687.jpg"></p>
 <p>可以看到上图中， InputReader 每隔 6.25ms 就可以读上来一个数据，交给 InputDispatcher 去分发给 App ，那么是不是屏幕采样率越高越好呢？也不一定，比如上面那张图，虽然 InputReader 每隔 6.25ms 就可以读上来一个数据给 InputDispatcher 去分发给 App ，但是从 WaitQueue 的表现来看，应用并没有消耗这个 Input 事件，这是为什么呢？</p>
@@ -635,6 +656,7 @@
 <li><strong>在屏幕刷新率和系统 FPS 都是 60 的时候，使用 120Hz 采样率的触摸屏就可以了</strong></li>
 <li><strong>如果在屏幕刷新率和系统 FPS 都是 90 的时候 ，那么 120Hz 采样率的触摸屏显然不够用了，这时候应该采用 180Hz 采样率的屏幕</strong></li>
 </ol>
+<p><a id="input-debug"></a></p>
 <h1 id="Input-调试信息"><a href="#Input-调试信息" class="headerlink" title="Input 调试信息"></a>Input 调试信息</h1><p>Dumpsys Input 主要是 Debug 用，我们也可以来看一下其中的一些关键信息，到时候遇到了问题也可以从这里面找 ， 其命令如下：</p>
 <figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">adb shell dumpsys input</span><br></pre></td></tr></table></figure>
 <p>其中的输出比较多，我们终点截取 Device 信息、InputReader、InputDispatcher 三段来看就可以了</p>
@@ -656,6 +678,7 @@
 </ol>
 <figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br></pre></td><td class="code"><pre><span class="line">Input Dispatcher State:</span><br><span class="line">  DispatchEnabled: 1</span><br><span class="line">  DispatchFrozen: 0</span><br><span class="line">  FocusedApplication: name=&#x27;AppWindowToken&#123;ac6ec28 token=Token&#123;a38a4b ActivityRecord&#123;7230f1a u0 com.meizu.flyme.launcher/.Launcher t13&#125;&#125;&#125;&#x27;, dispatchingTimeout=5000.000ms</span><br><span class="line">  FocusedWindow: name=&#x27;Window&#123;3c007ad u0 com.meizu.flyme.launcher/com.meizu.flyme.launcher.Launcher&#125;&#x27;</span><br><span class="line">  TouchStatesByDisplay:</span><br><span class="line">    0: down=true, split=true, deviceId=3, source=0x00005002</span><br><span class="line">      Windows:</span><br><span class="line">        0: name=&#x27;Window&#123;3c007ad u0 com.meizu.flyme.launcher/com.meizu.flyme.launcher.Launcher&#125;&#x27;, pointerIds=0x80000000, targetFlags=0x105</span><br><span class="line">        1: name=&#x27;Window&#123;8cb8f7 u0 com.android.systemui.ImageWallpaper&#125;&#x27;, pointerIds=0x0, targetFlags=0x4102</span><br><span class="line">  Windows:</span><br><span class="line">    2: name=&#x27;Window&#123;ba2fc6b u0 NavigationBar&#125;&#x27;, displayId=0, paused=false, hasFocus=false, hasWallpaper=false, visible=true, canReceiveKeys=false, flags=0x21840068, type=0x000007e3, layer=0, frame=[0,2136][1080,2232], scale=1.000000, touchableRegion=[0,2136][1080,2232], inputFeatures=0x00000000, ownerPid=26514, ownerUid=10033, dispatchingTimeout=5000.000ms</span><br><span class="line">    3: name=&#x27;Window&#123;72b7776 u0 StatusBar&#125;&#x27;, displayId=0, paused=false, hasFocus=false, hasWallpaper=false, visible=true, canReceiveKeys=false, flags=0x81840048, type=0x000007d0, layer=0, frame=[0,0][1080,84], scale=1.000000, touchableRegion=[0,0][1080,84], inputFeatures=0x00000000, ownerPid=26514, ownerUid=10033, dispatchingTimeout=5000.000ms</span><br><span class="line">    9: name=&#x27;Window&#123;3c007ad u0 com.meizu.flyme.launcher/com.meizu.flyme.launcher.Launcher&#125;&#x27;, displayId=0, paused=false, hasFocus=true, hasWallpaper=true, visible=true, canReceiveKeys=true, flags=0x81910120, type=0x00000001, layer=0, frame=[0,0][1080,2232], scale=1.000000, touchableRegion=[0,0][1080,2232], inputFeatures=0x00000000, ownerPid=27619, ownerUid=10021, dispatchingTimeout=5000.000ms</span><br><span class="line">  MonitoringChannels:</span><br><span class="line">    0: &#x27;WindowManager (server)&#x27;</span><br><span class="line">  RecentQueue: length=10</span><br><span class="line">    MotionEvent(deviceId=3, source=0x00005002, action=MOVE, actionButton=0x00000000, flags=0x00000000, metaState=0x00000000, buttonState=0x00000000, edgeFlags=0x00000000, xPrecision=1.0, yPrecision=1.0, displayId=0, pointers=[0: (524.5, 1306.4)]), policyFlags=0x62000000, age=61.2ms</span><br><span class="line">    MotionEvent(deviceId=3, source=0x00005002, action=MOVE, actionButton=0x00000000, flags=0x00000000, metaState=0x00000000, buttonState=0x00000000, edgeFlags=0x00000000, xPrecision=1.0, yPrecision=1.0, displayId=0, pointers=[0: (543.5, 1309.4)]), policyFlags=0x62000000, age=54.7ms</span><br><span class="line">  PendingEvent: &lt;none&gt;</span><br><span class="line">  InboundQueue: &lt;empty&gt;</span><br><span class="line">  ReplacedKeys: &lt;empty&gt;</span><br><span class="line">  Connections:</span><br><span class="line">    0: channelName=&#x27;WindowManager (server)&#x27;, windowName=&#x27;monitor&#x27;, status=NORMAL, monitor=true, inputPublisherBlocked=false</span><br><span class="line">      OutboundQueue: &lt;empty&gt;</span><br><span class="line">      WaitQueue: &lt;empty&gt;</span><br><span class="line">    5: channelName=&#x27;72b7776 StatusBar (server)&#x27;, windowName=&#x27;Window&#123;72b7776 u0 StatusBar&#125;&#x27;, status=NORMAL, monitor=false, inputPublisherBlocked=false</span><br><span class="line">      OutboundQueue: &lt;empty&gt;</span><br><span class="line">      WaitQueue: &lt;empty&gt;</span><br><span class="line">    6: channelName=&#x27;ba2fc6b NavigationBar (server)&#x27;, windowName=&#x27;Window&#123;ba2fc6b u0 NavigationBar&#125;&#x27;, status=NORMAL, monitor=false, inputPublisherBlocked=false</span><br><span class="line">      OutboundQueue: &lt;empty&gt;</span><br><span class="line">      WaitQueue: &lt;empty&gt;</span><br><span class="line">    12: channelName=&#x27;3c007ad com.meizu.flyme.launcher/com.meizu.flyme.launcher.Launcher (server)&#x27;, windowName=&#x27;Window&#123;3c007ad u0 com.meizu.flyme.launcher/com.meizu.flyme.launcher.Launcher&#125;&#x27;, status=NORMAL, monitor=false, inputPublisherBlocked=false</span><br><span class="line">      OutboundQueue: &lt;empty&gt;</span><br><span class="line">      WaitQueue: length=3</span><br><span class="line">        MotionEvent(deviceId=3, source=0x00005002, action=MOVE, actionButton=0x00000000, flags=0x00000000, metaState=0x00000000, buttonState=0x00000000, edgeFlags=0x00000000, xPrecision=1.0, yPrecision=1.0, displayId=0, pointers=[0: (634.4, 1329.4)]), policyFlags=0x62000000, targetFlags=0x00000105, resolvedAction=2, age=17.4ms, wait=16.8ms</span><br><span class="line">        MotionEvent(deviceId=3, source=0x00005002, action=MOVE, actionButton=0x00000000, flags=0x00000000, metaState=0x00000000, buttonState=0x00000000, edgeFlags=0x00000000, xPrecision=1.0, yPrecision=1.0, displayId=0, pointers=[0: (647.4, 1333.4)]), policyFlags=0x62000000, targetFlags=0x00000105, resolvedAction=2, age=11.1ms, wait=10.4ms</span><br><span class="line">        MotionEvent(deviceId=3, source=0x00005002, action=MOVE, actionButton=0x00000000, flags=0x00000000, metaState=0x00000000, buttonState=0x00000000, edgeFlags=0x00000000, xPrecision=1.0, yPrecision=1.0, displayId=0, pointers=[0: (659.4, 1337.4)]), policyFlags=0x62000000, targetFlags=0x00000105, resolvedAction=2, age=5.2ms, wait=4.6ms</span><br><span class="line">  AppSwitch: not pending</span><br><span class="line">  Configuration:</span><br><span class="line">    KeyRepeatDelay: 50.0ms</span><br><span class="line">    KeyRepeatTimeout: 500.0ms</span><br></pre></td></tr></table></figure>
 
+<p><a id="refs"></a></p>
 <h1 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h1><p>本文部分图文参考和拷贝自下面几篇文章，同时下面几篇文章讲解了 Input 流程的细节部分，推荐大家在看完这篇文章后，如果对代码细节感兴趣，可以仔细研读下面这几篇非常棒的文章。</p>
 <ol>
 <li><a target="_blank" rel="noopener" href="http://gityuan.com/2016/12/11/input-reader/">http://gityuan.com/2016/12/11/input-reader/</a></li>
@@ -663,8 +686,11 @@
 <li><a target="_blank" rel="noopener" href="http://gityuan.com/2016/12/17/input-dispatcher/">http://gityuan.com/2016/12/17/input-dispatcher/</a></li>
 <li><a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/29386642">https://zhuanlan.zhihu.com/p/29386642</a></li>
 </ol>
+<p><a id="attachments"></a></p>
 <h1 id="附件"><a href="#附件" class="headerlink" title="附件"></a>附件</h1><p>本文涉及到的附件也上传了，各位下载后解压，使用 <strong>Chrome</strong> 浏览器打开即可<br><a target="_blank" rel="noopener" href="https://github.com/Gracker/SystraceForBlog/tree/master/Android_Systrace_Input">点此链接下载文章所涉及到的 Systrace 附件</a></p>
+<p><a id="others"></a></p>
 <h1 id="本文其他地址"><a href="#本文其他地址" class="headerlink" title="本文其他地址"></a>本文其他地址</h1><p>由于博客留言交流不方便，点赞或者交流，可以移步本文的知乎或者掘金页面<br><a target="_blank" rel="noopener" href="https://juejin.im/post/5dc1838ef265da4d02626ae0">掘金 - Systrace 基础知识 - Input 解读</a></p>
+<p><a id="about"></a></p>
 <h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p>
 <ol>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li>
@@ -683,7 +709,7 @@
             <p>Author：<a href="https://androidperformance.com">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/2019/11/04/Android-Systrace-Input/">https://androidperformance.com/2019/11/04/Android-Systrace-Input/</a>
             <p>Publish date：<a href="https://androidperformance.com/2019/11/04/Android-Systrace-Input/">November 4th 2019, 9:38:29 am</a>
-            <p>Update date：<a href="https://androidperformance.com/2019/11/04/Android-Systrace-Input/">October 27th 2025, 8:19:09 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/2019/11/04/Android-Systrace-Input/">November 10th 2025, 5:18:20 pm</a>
             <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     <!-- paginator -->
@@ -765,7 +791,7 @@
                 <div class="toc-catalog">
                     <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
                 </div>
-                <ol class="toc"><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0%E7%9B%AE%E5%BD%95"><span class="toc-number">1.</span> <span class="toc-text">系列文章目录</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E6%AD%A3%E6%96%87"><span class="toc-number">2.</span> <span class="toc-text">正文</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Input-in-Systrace"><span class="toc-number">3.</span> <span class="toc-text">Input in Systrace</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#InputDown-%E4%BA%8B%E4%BB%B6%E5%9C%A8-SystemServer-%E7%9A%84%E5%B7%A5%E4%BD%9C%E6%B5%81"><span class="toc-number">3.1.</span> <span class="toc-text">InputDown 事件在 SystemServer 的工作流</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#InputDown-%E4%BA%8B%E4%BB%B6%E5%9C%A8-App-%E7%9A%84%E5%B7%A5%E4%BD%9C%E6%B5%81"><span class="toc-number">3.2.</span> <span class="toc-text">InputDown 事件在 App 的工作流</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#App-%E7%9A%84-Pending-%E9%98%9F%E5%88%97"><span class="toc-number">3.2.1.</span> <span class="toc-text">App 的 Pending 队列</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%B8%BB%E7%BA%BF%E7%A8%8B%E5%A4%84%E7%90%86-Input-%E4%BA%8B%E4%BB%B6"><span class="toc-number">3.2.2.</span> <span class="toc-text">主线程处理 Input 事件</span></a></li></ol></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E9%94%AE%E7%9F%A5%E8%AF%86%E7%82%B9%E5%92%8C%E6%B5%81%E7%A8%8B"><span class="toc-number">4.</span> <span class="toc-text">关键知识点和流程</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#InputReader"><span class="toc-number">4.1.</span> <span class="toc-text">InputReader</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#InputDispatcher"><span class="toc-number">4.2.</span> <span class="toc-text">InputDispatcher</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#InboundQueue"><span class="toc-number">4.3.</span> <span class="toc-text">InboundQueue</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#OutboundQueue"><span class="toc-number">4.4.</span> <span class="toc-text">OutboundQueue</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#WaitQueue"><span class="toc-number">4.5.</span> <span class="toc-text">WaitQueue</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%95%B4%E4%BD%93%E9%80%BB%E8%BE%91"><span class="toc-number">4.6.</span> <span class="toc-text">整体逻辑</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Input-%E5%88%B7%E6%96%B0%E4%B8%8E-Vsync"><span class="toc-number">5.</span> <span class="toc-text">Input 刷新与 Vsync</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Input-%E8%B0%83%E8%AF%95%E4%BF%A1%E6%81%AF"><span class="toc-number">6.</span> <span class="toc-text">Input 调试信息</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#Device-%E4%BF%A1%E6%81%AF"><span class="toc-number">6.1.</span> <span class="toc-text">Device 信息</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Input-Reader-%E7%8A%B6%E6%80%81"><span class="toc-number">6.2.</span> <span class="toc-text">Input Reader 状态</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#InputDispatcher-%E7%8A%B6%E6%80%81"><span class="toc-number">6.3.</span> <span class="toc-text">InputDispatcher 状态</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%8F%82%E8%80%83"><span class="toc-number">7.</span> <span class="toc-text">参考</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E9%99%84%E4%BB%B6"><span class="toc-number">8.</span> <span class="toc-text">附件</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E6%9C%AC%E6%96%87%E5%85%B6%E4%BB%96%E5%9C%B0%E5%9D%80"><span class="toc-number">9.</span> <span class="toc-text">本文其他地址</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number">10.</span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a></li></ol>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%9C%AC%E6%96%87%E7%9B%AE%E5%BD%95"><span class="toc-number">1.</span> <span class="toc-text">本文目录</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0%E7%9B%AE%E5%BD%95"><span class="toc-number"></span> <span class="toc-text">系列文章目录</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E6%AD%A3%E6%96%87"><span class="toc-number"></span> <span class="toc-text">正文</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Input-in-Systrace"><span class="toc-number"></span> <span class="toc-text">Input in Systrace</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#InputDown-%E4%BA%8B%E4%BB%B6%E5%9C%A8-SystemServer-%E7%9A%84%E5%B7%A5%E4%BD%9C%E6%B5%81"><span class="toc-number">1.</span> <span class="toc-text">InputDown 事件在 SystemServer 的工作流</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#InputDown-%E4%BA%8B%E4%BB%B6%E5%9C%A8-App-%E7%9A%84%E5%B7%A5%E4%BD%9C%E6%B5%81"><span class="toc-number">2.</span> <span class="toc-text">InputDown 事件在 App 的工作流</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#App-%E7%9A%84-Pending-%E9%98%9F%E5%88%97"><span class="toc-number">2.1.</span> <span class="toc-text">App 的 Pending 队列</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%B8%BB%E7%BA%BF%E7%A8%8B%E5%A4%84%E7%90%86-Input-%E4%BA%8B%E4%BB%B6"><span class="toc-number">2.2.</span> <span class="toc-text">主线程处理 Input 事件</span></a></li></ol></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E9%94%AE%E7%9F%A5%E8%AF%86%E7%82%B9%E5%92%8C%E6%B5%81%E7%A8%8B"><span class="toc-number"></span> <span class="toc-text">关键知识点和流程</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#InputReader"><span class="toc-number">1.</span> <span class="toc-text">InputReader</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#InputDispatcher"><span class="toc-number">2.</span> <span class="toc-text">InputDispatcher</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#InboundQueue"><span class="toc-number">3.</span> <span class="toc-text">InboundQueue</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#OutboundQueue"><span class="toc-number">4.</span> <span class="toc-text">OutboundQueue</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#WaitQueue"><span class="toc-number">5.</span> <span class="toc-text">WaitQueue</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%95%B4%E4%BD%93%E9%80%BB%E8%BE%91"><span class="toc-number">6.</span> <span class="toc-text">整体逻辑</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Input-%E5%88%B7%E6%96%B0%E4%B8%8E-Vsync"><span class="toc-number"></span> <span class="toc-text">Input 刷新与 Vsync</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Input-%E8%B0%83%E8%AF%95%E4%BF%A1%E6%81%AF"><span class="toc-number"></span> <span class="toc-text">Input 调试信息</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#Device-%E4%BF%A1%E6%81%AF"><span class="toc-number">1.</span> <span class="toc-text">Device 信息</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Input-Reader-%E7%8A%B6%E6%80%81"><span class="toc-number">2.</span> <span class="toc-text">Input Reader 状态</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#InputDispatcher-%E7%8A%B6%E6%80%81"><span class="toc-number">3.</span> <span class="toc-text">InputDispatcher 状态</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%8F%82%E8%80%83"><span class="toc-number"></span> <span class="toc-text">参考</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E9%99%84%E4%BB%B6"><span class="toc-number"></span> <span class="toc-text">附件</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E6%9C%AC%E6%96%87%E5%85%B6%E4%BB%96%E5%9C%B0%E5%9D%80"><span class="toc-number"></span> <span class="toc-text">本文其他地址</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number"></span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a>
             </div>
         <!-- sidebar -->
         <div class="sidebar sidebar-hide">
@@ -914,15 +940,20 @@
         
         
         
+        
     <div class="total-and-search">
         <div class="total-archive">
-        Total : 137
+        Total : 138
         </div>
         <!-- search  -->
     </div>
     <div class="post-archive">
             <div class="archive-year"> 2025 </div>
             <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 (九) - CPU 信息解读</a>
+        </li>
         <li class="archive-post-item">
             <span class="archive-post-date">10/27</span>
             <a class="archive-post-title" href="/2025/10/27/Android-Weekly-2025-20/">Android Weekly 2025-20 期</a>
@@ -1682,6 +1713,30 @@
                 <span class="iconfont-archer">&#xe606;</span>
                 用户体验
             </span>
+            <span class="sidebar-tag-name" data-tags="性能优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                性能优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="线程优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                线程优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="电量优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                电量优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR分析">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR分析
+            </span>
+            <span class="sidebar-tag-name" data-tags="页面响应">
+                <span class="iconfont-archer">&#xe606;</span>
+                页面响应
+            </span>
     </div>
     <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
     <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
@@ -1711,6 +1766,10 @@
         <span class="sidebar-category-name" data-categories="iOS">
             <span class="iconfont-archer">&#xe60a;</span>
             iOS
+        </span>
+        <span class="sidebar-category-name" data-categories="Android性能优化">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android性能优化
         </span>
     </div>
     <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>

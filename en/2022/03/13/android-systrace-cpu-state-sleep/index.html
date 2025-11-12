@@ -29,7 +29,7 @@
 <meta property="og:image" content="https://androidperformance.com/images/android-systrace-cpu-state-sleep/image_9.png">
 <meta property="og:image" content="https://androidperformance.com/images/WechatIMG581.png">
 <meta property="article:published_time" content="2022-03-13T00:38:12.000Z">
-<meta property="article:modified_time" content="2025-10-27T12:19:09.000Z">
+<meta property="article:modified_time" content="2025-11-10T09:25:47.000Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Memory">
 <meta property="article:tag" content="Android">
@@ -362,7 +362,7 @@
 
                 <!-- 文章字数统计 -->
                     <div class="post-intro-read">
-                        <span>Word count: <span class="post-count word-count">4.6k</span>Reading time: <span class="post-count reading-time">17 min</span></span>
+                        <span>Word count: <span class="post-count word-count">4.7k</span>Reading time: <span class="post-count reading-time">17 min</span></span>
                     </div>
                 <div class="post-intro-meta">
                     <!-- 撰写日期 -->
@@ -525,11 +525,19 @@
 <p>本系列的目的是通过 Systrace 这个工具，从另外一个角度来看待 Android 系统整体的运行，同时也从另外一个角度来对 Framework 进行学习。也许你看了很多讲 Framework 的文章，但是总是记不住代码，或者不清楚其运行的流程，也许从 Systrace 这个图形化的角度，你可以理解的更深入一些。Systrace 基础和实战系列大家可以在 <a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/07/23/Android-Systrace-Pre/">Systrace 基础知识 - Systrace 预备知识</a> 或者 <a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/12/01/BlogMap/">博客文章目录</a> 这里看到完整的目录</p>
 <span id="more"></span>
 
+<h2 id="本文目录"><a href="#本文目录" class="headerlink" title="本文目录"></a>本文目录</h2><ul>
+<li><a href="#sleep-overview">Linux 中的 Sleep 状态是什么</a></li>
+<li><a href="#sleep-analysis">Sleep 状态分析</a></li>
+<li><a href="#usleep-analysis">UninterruptibleSleep 状态分析</a></li>
+<li><a href="#appendix">附录</a></li>
+<li><a href="#about">关于我 &amp;&amp; 博客</a></li>
+</ul>
 <ol>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2022/01/21/android-systrace-cpu-state-runnable/">Systrace 线程 CPU 运行状态分析技巧 - Runnable 篇</a></li>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-running/">Systrace 线程 CPU 运行状态分析技巧 - Running 篇</a></li>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a></li>
 </ol>
+<p><a id="sleep-overview"></a></p>
 <h1 id="Linux-中的-Sleep-状态是什么"><a href="#Linux-中的-Sleep-状态是什么" class="headerlink" title="Linux 中的 Sleep 状态是什么"></a>Linux 中的 Sleep 状态是什么</h1><h2 id="TASK-INTERUPTIBLE-vs-TASK-UNINTERRUPTIBLE"><a href="#TASK-INTERUPTIBLE-vs-TASK-UNINTERRUPTIBLE" class="headerlink" title="TASK_INTERUPTIBLE vs TASK_UNINTERRUPTIBLE"></a>TASK_INTERUPTIBLE vs TASK_UNINTERRUPTIBLE</h2><p>一个线程的状态不属于 Running 或者 Runnable 的时候，那就是 Sleep 状态了（严谨来说，还有其他状态，不过对性能分析来说不常见，比如 STOP、Trace 等）。</p>
 <p>在 Linux 中的Sleep 状态可以细分为 3 个状态：</p>
 <ul>
@@ -559,6 +567,7 @@
 <p>本文没办法列举完所有状态的原因，因此只能列举最为常见的类型，以及典型的实际案例。更重要的是，你需要掌握诊断方法，并结合源代码来定位问题。</p>
 <h2 id="Trace-中的可视化效果"><a href="#Trace-中的可视化效果" class="headerlink" title="Trace 中的可视化效果"></a>Trace 中的可视化效果</h2><p><img src="/images/android-systrace-cpu-state-sleep/image_1.png" alt="Pefetto 中支持显示的状态"></p>
 <p><img src="/images/android-systrace-cpu-state-sleep/image_2.png" alt="Systrace 支持显示的状态"></p>
+<p><a id="sleep-analysis"></a></p>
 <h1 id="Sleep-状态分析"><a href="#Sleep-状态分析" class="headerlink" title="Sleep 状态分析"></a>Sleep 状态分析</h1><p><img src="/images/android-systrace-cpu-state-sleep/image_3.png" alt="图 1: UIThread 等待 RenderThread"></p>
 <p><img src="/images/android-systrace-cpu-state-sleep/image_4.png" alt="图 2: Binder 调用等待"></p>
 <h2 id="诊断方法"><a href="#诊断方法" class="headerlink" title="诊断方法"></a>诊断方法</h2><h3 id="通过-wakeup-from-tid-查看唤醒线程"><a href="#通过-wakeup-from-tid-查看唤醒线程" class="headerlink" title="通过 wakeup from tid: ***查看唤醒线程"></a>通过 <code>wakeup from tid: ***</code>查看唤醒线程</h3><p>Sleep 最常见的有图 1（UIThread 与 RenderThread 同步）的情况与图 2（Binder 调用）的情况。 Sleep 状态一般是由程序主动等待某个事件的发生而造成的，比如锁等待，因此它有个比较明确的唤醒源。比如图 1，UIThread 等待的是 RenderThread，你可以通过阅读代码来了解这种多线程之间的交互关系。虽然最直接，但是对开发者的要求非常高，因为这需要你熟读图形栈的代码。这可不是一般的难度，是追求的目标，但不具备普适性。 </p>
@@ -579,6 +588,7 @@
 <li><strong>主动等待</strong> → 线程主动进入 Sleep 状态，等待其它线程的唤醒，比如等待信号量的释放。优化建议：需要看代码逻辑分析等待是否合理，不合理就要优化掉。</li>
 <li><strong>等待 GPU 执行完毕</strong> → 等 GPU 任务执行完毕，Trace 中可以看到等 GPU fence 时间。常见的原因有渲染任务过重、 GPU 能力弱、GPU 频率低等。优化建议：提升 GPU 频率、降低渲染任务复杂度，比如精简 Shader、降低渲染分辨率、降低Texture 画质等。</li>
 </ul>
+<p><a id="usleep-analysis"></a></p>
 <h1 id="UninterruptibleSleep-状态分析"><a href="#UninterruptibleSleep-状态分析" class="headerlink" title="UninterruptibleSleep 状态分析"></a>UninterruptibleSleep 状态分析</h1><h2 id="诊断方法-1"><a href="#诊断方法-1" class="headerlink" title="诊断方法"></a>诊断方法</h2><p>本质上UninterruptibleSleep 也是一种 Sleep，因此分析 Sleep 状态时用到的方法也是通用的。不过此状态有两个特殊点与 Sleep 不同，因此在此特别说明。 </p>
 <ol>
 <li><strong>UninterruptibleSleep 分为 IOWait 与 Non-IOWait</strong></li>
@@ -586,7 +596,7 @@
 </ol>
 <h3 id="UninterruptibleSleep-分为-IOWait-与-Non-IOWait"><a href="#UninterruptibleSleep-分为-IOWait-与-Non-IOWait" class="headerlink" title="UninterruptibleSleep 分为 IOWait 与 Non-IOWait"></a>UninterruptibleSleep 分为 IOWait 与 Non-IOWait</h3><p>IO 等待好理解，就是程序执行了 IO 操作。最简单的，程序如果没法从 PageCache 缓存里快速拿到数据，那就要与设备进行 IO 操作。CPU 内部缓存的访问速度是最快的，其次是内存，最后是磁盘。它们之间的延迟差异是数量级差异，因此系统越是从磁盘中读取数据，对整体性能的影响就越大。  </p>
 <p>非 IO 等待主要是指内核级别的锁等待，或者驱动程序中人为设置的等待。Linux 内核中某些路径是热点区域，因此不得不拿锁来进行保护。比如Binder 驱动，当负载大到一定程度，Binder 的内部的锁竞争导致的性能瓶颈就会呈现出来。 </p>
-<h3 id="Block-Reason"><a href="#Block-Reason" class="headerlink" title="Block Reason"></a>Block Reason</h3><p>谷歌的 Riley Andrews(<a href="mailto:&#114;&#105;&#x61;&#110;&#100;&#114;&#101;&#119;&#115;&#x40;&#x67;&#111;&#x6f;&#103;&#x6c;&#101;&#46;&#x63;&#111;&#109;">&#114;&#105;&#x61;&#110;&#100;&#114;&#101;&#119;&#115;&#x40;&#x67;&#111;&#x6f;&#103;&#x6c;&#101;&#46;&#x63;&#111;&#109;</a>) 15年左右往内核里提交了一个 tracepoint 补丁，用于记录当发生 UninterruptibleSleep 的时候是否是 IO 等待、调用函数等信息。Systrace 中的展示的 IOWait 与 BlockReason，就是通过解析这条 tracepoint 而来的。这条代码提交的介绍如下（由于这笔提交未合入到 Linux 上游主线，因此要注意你用的内核是否单独带了此补丁）: </p>
+<h3 id="Block-Reason"><a href="#Block-Reason" class="headerlink" title="Block Reason"></a>Block Reason</h3><p>谷歌的 Riley Andrews(<a href="mailto:&#x72;&#105;&#97;&#x6e;&#100;&#114;&#x65;&#119;&#115;&#64;&#103;&#111;&#x6f;&#103;&#x6c;&#x65;&#x2e;&#x63;&#x6f;&#x6d;">&#x72;&#105;&#97;&#x6e;&#100;&#114;&#x65;&#119;&#115;&#64;&#103;&#111;&#x6f;&#103;&#x6c;&#x65;&#x2e;&#x63;&#x6f;&#x6d;</a>) 15年左右往内核里提交了一个 tracepoint 补丁，用于记录当发生 UninterruptibleSleep 的时候是否是 IO 等待、调用函数等信息。Systrace 中的展示的 IOWait 与 BlockReason，就是通过解析这条 tracepoint 而来的。这条代码提交的介绍如下（由于这笔提交未合入到 Linux 上游主线，因此要注意你用的内核是否单独带了此补丁）: </p>
 <figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">sched: add sched blocked tracepoint which dumps out context of sleep.</span><br><span class="line">Decare war on uninterruptible sleep. Add a tracepoint which</span><br><span class="line">walks the kernel stack and dumps the first non-scheduler function</span><br><span class="line">called before the scheduler is invoked.</span><br><span class="line"></span><br><span class="line">Change-Id: [I19e965d5206329360a92cbfe2afcc8c30f65c229](https://android-review.googlesource.com/#/q/I19e965d5206329360a92cbfe2afcc8c30f65c229)</span><br><span class="line">Signed-off-by: Riley Andrews [riandrews@google.com](mailto:riandrews@google.com)</span><br></pre></td></tr></table></figure>
 
 
@@ -634,6 +644,7 @@
 </ul>
 <h2 id="系统调度与-UninterruptibleSleep-耦合的问题"><a href="#系统调度与-UninterruptibleSleep-耦合的问题" class="headerlink" title="系统调度与 UninterruptibleSleep   耦合的问题"></a>系统调度与 UninterruptibleSleep   耦合的问题</h2><p>当线程处于 UninterruptibleSleep 非 IO等待状态（即内核锁），而持有该锁的其他线程因 CPU 调度原因，较长时间处于 Runnable 状态。这时候就出现了有意思的现象，即使被等待的线程处于高优先级，它的依赖方没有被调度器及时的识别到，即使是非常短的锁持有，也会出现较长时间的等待。 </p>
 <p>规避或者彻底解决这类问题都是件比较难的事情，不同厂家实现了不同的解决方案，也是比较考虑厂家技术能力的一个问题。 </p>
+<p><a id="appendix"></a></p>
 <h1 id="附录"><a href="#附录" class="headerlink" title="附录"></a>附录</h1><h2 id="Linux-线程状态释义"><a href="#Linux-线程状态释义" class="headerlink" title="Linux 线程状态释义"></a>Linux 线程状态释义</h2><table>
 <thead>
 <tr>
@@ -699,6 +710,7 @@
 
 
 
+<p><a id="about"></a></p>
 <h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p>
 <ol>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li>
@@ -717,7 +729,7 @@
             <p>Author：<a href="https://androidperformance.com">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/2022/03/13/android-systrace-cpu-state-sleep/">https://androidperformance.com/2022/03/13/android-systrace-cpu-state-sleep/</a>
             <p>Publish date：<a href="https://androidperformance.com/2022/03/13/android-systrace-cpu-state-sleep/">March 13th 2022, 8:38:12 am</a>
-            <p>Update date：<a href="https://androidperformance.com/2022/03/13/android-systrace-cpu-state-sleep/">October 27th 2025, 8:19:09 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/2022/03/13/android-systrace-cpu-state-sleep/">November 10th 2025, 5:25:47 pm</a>
             <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     <!-- paginator -->
@@ -799,7 +811,7 @@
                 <div class="toc-catalog">
                     <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
                 </div>
-                <ol class="toc"><li class="toc-item toc-level-1"><a class="toc-link" href="#Linux-%E4%B8%AD%E7%9A%84-Sleep-%E7%8A%B6%E6%80%81%E6%98%AF%E4%BB%80%E4%B9%88"><span class="toc-number">1.</span> <span class="toc-text">Linux 中的 Sleep 状态是什么</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#TASK-INTERUPTIBLE-vs-TASK-UNINTERRUPTIBLE"><span class="toc-number">1.1.</span> <span class="toc-text">TASK_INTERUPTIBLE vs TASK_UNINTERRUPTIBLE</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#TASK-UNINTERRUPTIBLE-%E4%BD%9C%E7%94%A8"><span class="toc-number">1.2.</span> <span class="toc-text">TASK_UNINTERRUPTIBLE 作用</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%88%86%E6%9E%90%E6%97%B6%E5%80%99%E7%9A%84%E6%B3%A8%E6%84%8F%E7%82%B9"><span class="toc-number">1.3.</span> <span class="toc-text">分析时候的注意点</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Trace-%E4%B8%AD%E7%9A%84%E5%8F%AF%E8%A7%86%E5%8C%96%E6%95%88%E6%9E%9C"><span class="toc-number">1.4.</span> <span class="toc-text">Trace 中的可视化效果</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Sleep-%E7%8A%B6%E6%80%81%E5%88%86%E6%9E%90"><span class="toc-number">2.</span> <span class="toc-text">Sleep 状态分析</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%AF%8A%E6%96%AD%E6%96%B9%E6%B3%95"><span class="toc-number">2.1.</span> <span class="toc-text">诊断方法</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%80%9A%E8%BF%87-wakeup-from-tid-%E6%9F%A5%E7%9C%8B%E5%94%A4%E9%86%92%E7%BA%BF%E7%A8%8B"><span class="toc-number">2.1.1.</span> <span class="toc-text">通过 wakeup from tid: ***查看唤醒线程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%85%B6%E4%BB%96%E6%96%B9%E6%B3%95"><span class="toc-number">2.1.2.</span> <span class="toc-text">其他方法</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%80%97%E6%97%B6%E8%BF%87%E9%95%BF%E7%9A%84%E5%B8%B8%E8%A7%81%E5%8E%9F%E5%9B%A0"><span class="toc-number">2.2.</span> <span class="toc-text">耗时过长的常见原因</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#UninterruptibleSleep-%E7%8A%B6%E6%80%81%E5%88%86%E6%9E%90"><span class="toc-number">3.</span> <span class="toc-text">UninterruptibleSleep 状态分析</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%AF%8A%E6%96%AD%E6%96%B9%E6%B3%95-1"><span class="toc-number">3.1.</span> <span class="toc-text">诊断方法</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#UninterruptibleSleep-%E5%88%86%E4%B8%BA-IOWait-%E4%B8%8E-Non-IOWait"><span class="toc-number">3.1.1.</span> <span class="toc-text">UninterruptibleSleep 分为 IOWait 与 Non-IOWait</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Block-Reason"><span class="toc-number">3.1.2.</span> <span class="toc-text">Block Reason</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#IOWait-%E5%B8%B8%E8%A7%81%E5%8E%9F%E5%9B%A0%E4%B8%8E%E4%BC%98%E5%8C%96%E6%96%B9%E6%B3%95"><span class="toc-number">3.2.</span> <span class="toc-text">IOWait 常见原因与优化方法</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#1-%E4%B8%BB%E5%8A%A8IO-%E6%93%8D%E4%BD%9C"><span class="toc-number">3.2.1.</span> <span class="toc-text">1. 主动IO 操作</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-%E4%BD%8E%E5%86%85%E5%AD%98%E5%AF%BC%E8%87%B4%E7%9A%84-IO-%E5%8F%98%E5%A4%9A"><span class="toc-number">3.2.2.</span> <span class="toc-text">2. 低内存导致的 IO 变多</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Non-IOWait-%E5%B8%B8%E8%A7%81%E5%8E%9F%E5%9B%A0"><span class="toc-number">3.3.</span> <span class="toc-text">Non-IOWait 常见原因</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%B3%BB%E7%BB%9F%E8%B0%83%E5%BA%A6%E4%B8%8E-UninterruptibleSleep-%E8%80%A6%E5%90%88%E7%9A%84%E9%97%AE%E9%A2%98"><span class="toc-number">3.4.</span> <span class="toc-text">系统调度与 UninterruptibleSleep   耦合的问题</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E9%99%84%E5%BD%95"><span class="toc-number">4.</span> <span class="toc-text">附录</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#Linux-%E7%BA%BF%E7%A8%8B%E7%8A%B6%E6%80%81%E9%87%8A%E4%B9%89"><span class="toc-number">4.1.</span> <span class="toc-text">Linux 线程状态释义</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%A1%88%E4%BE%8B-%E4%BB%8E-Swap-%E8%AF%BB%E5%8F%96%E6%95%B0%E6%8D%AE%E6%97%B6%E7%9A%84%E7%AD%89%E5%BE%85"><span class="toc-number">4.2.</span> <span class="toc-text">案例: 从 Swap 读取数据时的等待</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%A1%88%E4%BE%8B-%E5%90%8C%E8%BF%9B%E7%A8%8B%E7%9A%84%E5%A4%9A%E4%B8%AA%E7%BA%BF%E7%A8%8B%E8%BF%9B%E8%A1%8C-mmap"><span class="toc-number">4.3.</span> <span class="toc-text">案例: 同进程的多个线程进行 mmap</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number">5.</span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a></li></ol>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%9C%AC%E6%96%87%E7%9B%AE%E5%BD%95"><span class="toc-number">1.</span> <span class="toc-text">本文目录</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Linux-%E4%B8%AD%E7%9A%84-Sleep-%E7%8A%B6%E6%80%81%E6%98%AF%E4%BB%80%E4%B9%88"><span class="toc-number"></span> <span class="toc-text">Linux 中的 Sleep 状态是什么</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#TASK-INTERUPTIBLE-vs-TASK-UNINTERRUPTIBLE"><span class="toc-number">1.</span> <span class="toc-text">TASK_INTERUPTIBLE vs TASK_UNINTERRUPTIBLE</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#TASK-UNINTERRUPTIBLE-%E4%BD%9C%E7%94%A8"><span class="toc-number">2.</span> <span class="toc-text">TASK_UNINTERRUPTIBLE 作用</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%88%86%E6%9E%90%E6%97%B6%E5%80%99%E7%9A%84%E6%B3%A8%E6%84%8F%E7%82%B9"><span class="toc-number">3.</span> <span class="toc-text">分析时候的注意点</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Trace-%E4%B8%AD%E7%9A%84%E5%8F%AF%E8%A7%86%E5%8C%96%E6%95%88%E6%9E%9C"><span class="toc-number">4.</span> <span class="toc-text">Trace 中的可视化效果</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Sleep-%E7%8A%B6%E6%80%81%E5%88%86%E6%9E%90"><span class="toc-number"></span> <span class="toc-text">Sleep 状态分析</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%AF%8A%E6%96%AD%E6%96%B9%E6%B3%95"><span class="toc-number">1.</span> <span class="toc-text">诊断方法</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%80%9A%E8%BF%87-wakeup-from-tid-%E6%9F%A5%E7%9C%8B%E5%94%A4%E9%86%92%E7%BA%BF%E7%A8%8B"><span class="toc-number">1.1.</span> <span class="toc-text">通过 wakeup from tid: ***查看唤醒线程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%85%B6%E4%BB%96%E6%96%B9%E6%B3%95"><span class="toc-number">1.2.</span> <span class="toc-text">其他方法</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%80%97%E6%97%B6%E8%BF%87%E9%95%BF%E7%9A%84%E5%B8%B8%E8%A7%81%E5%8E%9F%E5%9B%A0"><span class="toc-number">2.</span> <span class="toc-text">耗时过长的常见原因</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#UninterruptibleSleep-%E7%8A%B6%E6%80%81%E5%88%86%E6%9E%90"><span class="toc-number"></span> <span class="toc-text">UninterruptibleSleep 状态分析</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%AF%8A%E6%96%AD%E6%96%B9%E6%B3%95-1"><span class="toc-number">1.</span> <span class="toc-text">诊断方法</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#UninterruptibleSleep-%E5%88%86%E4%B8%BA-IOWait-%E4%B8%8E-Non-IOWait"><span class="toc-number">1.1.</span> <span class="toc-text">UninterruptibleSleep 分为 IOWait 与 Non-IOWait</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Block-Reason"><span class="toc-number">1.2.</span> <span class="toc-text">Block Reason</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#IOWait-%E5%B8%B8%E8%A7%81%E5%8E%9F%E5%9B%A0%E4%B8%8E%E4%BC%98%E5%8C%96%E6%96%B9%E6%B3%95"><span class="toc-number">2.</span> <span class="toc-text">IOWait 常见原因与优化方法</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#1-%E4%B8%BB%E5%8A%A8IO-%E6%93%8D%E4%BD%9C"><span class="toc-number">2.1.</span> <span class="toc-text">1. 主动IO 操作</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-%E4%BD%8E%E5%86%85%E5%AD%98%E5%AF%BC%E8%87%B4%E7%9A%84-IO-%E5%8F%98%E5%A4%9A"><span class="toc-number">2.2.</span> <span class="toc-text">2. 低内存导致的 IO 变多</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Non-IOWait-%E5%B8%B8%E8%A7%81%E5%8E%9F%E5%9B%A0"><span class="toc-number">3.</span> <span class="toc-text">Non-IOWait 常见原因</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%B3%BB%E7%BB%9F%E8%B0%83%E5%BA%A6%E4%B8%8E-UninterruptibleSleep-%E8%80%A6%E5%90%88%E7%9A%84%E9%97%AE%E9%A2%98"><span class="toc-number">4.</span> <span class="toc-text">系统调度与 UninterruptibleSleep   耦合的问题</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E9%99%84%E5%BD%95"><span class="toc-number"></span> <span class="toc-text">附录</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#Linux-%E7%BA%BF%E7%A8%8B%E7%8A%B6%E6%80%81%E9%87%8A%E4%B9%89"><span class="toc-number">1.</span> <span class="toc-text">Linux 线程状态释义</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%A1%88%E4%BE%8B-%E4%BB%8E-Swap-%E8%AF%BB%E5%8F%96%E6%95%B0%E6%8D%AE%E6%97%B6%E7%9A%84%E7%AD%89%E5%BE%85"><span class="toc-number">2.</span> <span class="toc-text">案例: 从 Swap 读取数据时的等待</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%A1%88%E4%BE%8B-%E5%90%8C%E8%BF%9B%E7%A8%8B%E7%9A%84%E5%A4%9A%E4%B8%AA%E7%BA%BF%E7%A8%8B%E8%BF%9B%E8%A1%8C-mmap"><span class="toc-number">3.</span> <span class="toc-text">案例: 同进程的多个线程进行 mmap</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number"></span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a>
             </div>
         <!-- sidebar -->
         <div class="sidebar sidebar-hide">
@@ -948,15 +960,20 @@
         
         
         
+        
     <div class="total-and-search">
         <div class="total-archive">
-        Total : 137
+        Total : 138
         </div>
         <!-- search  -->
     </div>
     <div class="post-archive">
             <div class="archive-year"> 2025 </div>
             <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 (九) - CPU 信息解读</a>
+        </li>
         <li class="archive-post-item">
             <span class="archive-post-date">10/27</span>
             <a class="archive-post-title" href="/2025/10/27/Android-Weekly-2025-20/">Android Weekly 2025-20 期</a>
@@ -1716,6 +1733,30 @@
                 <span class="iconfont-archer">&#xe606;</span>
                 用户体验
             </span>
+            <span class="sidebar-tag-name" data-tags="性能优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                性能优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="线程优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                线程优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="电量优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                电量优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR分析">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR分析
+            </span>
+            <span class="sidebar-tag-name" data-tags="页面响应">
+                <span class="iconfont-archer">&#xe606;</span>
+                页面响应
+            </span>
     </div>
     <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
     <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
@@ -1745,6 +1786,10 @@
         <span class="sidebar-category-name" data-categories="iOS">
             <span class="iconfont-archer">&#xe60a;</span>
             iOS
+        </span>
+        <span class="sidebar-category-name" data-categories="Android性能优化">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android性能优化
         </span>
     </div>
     <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>

@@ -1,0 +1,1707 @@
+<!DOCTYPE html>
+<html lang="zh,en">
+    <!-- title -->
+            <!-- keywords -->
+
+                  <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <meta name="author" content="Gracker">
+                    <meta name="renderer" content="webkit">
+                    <meta name="copyright" content="Gracker">
+                      <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,启动优化,Startup,Perfetto,Systrace,RenderThread,Java">
+                          <meta name="description" content="Focus On Android Performance">
+                          <meta name="description" content="本文为 Android App ANR 系列的第一篇，主要是从系统的角度来剖析 Android ANR 的设计思想，系列文章目录如下  Android App ANR 系列 1 ：理解 Android ANR 设计思想 Android App ANR 系列 2 ：ANR 分析套路和关键 Log 介绍 Android App ANR 系列 3 ：ANR 案例分享">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Android ANR 系列 1 ：理解 Android ANR 设计思想">
+<meta property="og:url" content="https://androidperformance.com/2025/02/08/Android-ANR-01-ANR-Design/index.html">
+<meta property="og:site_name" content="Android Performance">
+<meta property="og:description" content="本文为 Android App ANR 系列的第一篇，主要是从系统的角度来剖析 Android ANR 的设计思想，系列文章目录如下  Android App ANR 系列 1 ：理解 Android ANR 设计思想 Android App ANR 系列 2 ：ANR 分析套路和关键 Log 介绍 Android App ANR 系列 3 ：ANR 案例分享">
+<meta property="og:locale">
+<meta property="article:published_time" content="2025-02-08T08:28:17.000Z">
+<meta property="article:modified_time" content="2026-01-11T05:36:33.454Z">
+<meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Startup">
+<meta property="article:tag" content="Memory">
+<meta property="article:tag" content="Android">
+<meta property="article:tag" content="Perfetto">
+<meta property="article:tag" content="ANR">
+<meta name="twitter:card" content="summary">
+                            <meta http-equiv="Cache-control" content="no-cache">
+                            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+                            <link rel="icon" href="/assets/favicon.ico">
+                                <title>
+                                  Android ANR 系列 1 ：理解 Android ANR 设计思想 · Android Performance
+                                </title>
+                                <!-- /*! loadCSS. [c]2017 Filament Group, Inc. MIT License */
+/* This file is meant as a standalone workflow for
+- testing support for link[rel=preload]
+- enabling async CSS loading in browsers that do not support rel=preload
+- applying rel preload css once loaded, whether supported or not.
+*/ -->
+<script>
+    (function (w) {
+        'use strict'
+        // rel=preload support test
+        if (!w.loadCSS) {
+            w.loadCSS = function () {}
+        }
+        // define on the loadCSS obj
+        var rp = (loadCSS.relpreload = {})
+        // rel=preload feature support test
+        // runs once and returns a function for compat purposes
+        rp.support = (function () {
+            var ret
+            try {
+                ret = w.document.createElement('link').relList.supports('preload')
+            } catch (e) {
+                ret = false
+            }
+            return function () {
+                return ret
+            }
+        })()
+
+        // if preload isn't supported, get an asynchronous load by using a non-matching media attribute
+        // then change that media back to its intended value on load
+        rp.bindMediaToggle = function (link) {
+            // remember existing media attr for ultimate state, or default to 'all'
+            var finalMedia = link.media || 'all'
+
+            function enableStylesheet() {
+                link.media = finalMedia
+            }
+
+            // bind load handlers to enable media
+            if (link.addEventListener) {
+                link.addEventListener('load', enableStylesheet)
+            } else if (link.attachEvent) {
+                link.attachEvent('onload', enableStylesheet)
+            }
+
+            // Set rel and non-applicable media type to start an async request
+            // note: timeout allows this to happen async to let rendering continue in IE
+            setTimeout(function () {
+                link.rel = 'stylesheet'
+                link.media = 'only x'
+            })
+            // also enable media after 3 seconds,
+            // which will catch very old browsers (android 2.x, old firefox) that don't support onload on link
+            setTimeout(enableStylesheet, 3000)
+        }
+
+        // loop through link elements in DOM
+        rp.poly = function () {
+            // double check this to prevent external calls from running
+            if (rp.support()) {
+                return
+            }
+            var links = w.document.getElementsByTagName('link')
+            for (var i = 0; i < links.length; i++) {
+                var link = links[i]
+                // qualify links to those with rel=preload and as=style attrs
+                if (
+                    link.rel === 'preload' &&
+                    link.getAttribute('as') === 'style' &&
+                    !link.getAttribute('data-loadcss')
+                ) {
+                    // prevent rerunning on link
+                    link.setAttribute('data-loadcss', true)
+                    // bind listeners to toggle media back
+                    rp.bindMediaToggle(link)
+                }
+            }
+        }
+
+        // if unsupported, run the polyfill
+        if (!rp.support()) {
+            // run once at least
+            rp.poly()
+
+            // rerun poly on an interval until onload
+            var run = w.setInterval(rp.poly, 500)
+            if (w.addEventListener) {
+                w.addEventListener('load', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            } else if (w.attachEvent) {
+                w.attachEvent('onload', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            }
+        }
+
+        // commonjs
+        if (typeof exports !== 'undefined') {
+            exports.loadCSS = loadCSS
+        } else {
+            w.loadCSS = loadCSS
+        }
+    })(typeof global !== 'undefined' ? global : this)
+</script>
+
+                                  <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/font/Oswald-Regular.woff2") format('woff2'),
+             url("/font/Oswald-Regular.ttf") format('truetype');
+        font-display: swap;
+    }
+
+    body {
+        margin: 0;
+    }
+
+    /* Removed initial hide to show content immediately */
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(
+            -45deg,
+            #444 0,
+            #444 80px,
+            #333 80px,
+            #333 160px
+        );
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+</style>
+
+                                    <link id="stylesheet-base" rel="preload" href="/css/style.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <link id="stylesheet-mobile" rel="preload" href="/css/mobile.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet';this.media='screen and
+                                    (max-width: 960px)'">
+                                    <link id="stylesheet-theme-dark" rel="preload" href="/css/dark.css
+                                    " as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <!-- Font Awesome CSS (with CDN fallback) -->
+                                    <link id="stylesheet-fontawesome" rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+                                      as="style" onload="this.onload=null;this.rel='stylesheet'"
+                                      onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css';this.rel='stylesheet'">
+                                    <link rel="preconnect" href="https://cdn.bootcdn.net" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.bootcdn.net">
+                                    <link rel="preconnect" href="https://cdn.staticfile.org" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.staticfile.org">
+                                    <link rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js" as="script">
+                                    <link rel="preload" href="/scripts/main.js" as="script">
+                                    <!-- use compressed font format to reduce transfer size -->
+                                    <link rel="preload" href="/font/Source%5C%20Sans%5C%20Pro.woff2"
+                                      as="font" type="font/woff2" crossorigin>
+                                    <link rel="preload" href="/font/Source%5C%20Sans%5C%20Pro.woff" as="font"
+                                      type="font/woff" crossorigin>
+                                    <link rel="preload" href="https://at.alicdn.com/t/font_327081_1dta1rlogw17zaor.woff"
+                                      as="font" crossorigin>
+                                    <!-- algolia -->
+                                        <!-- 百度统计（延迟加载，失败静默）  -->
+                                            <!-- CNZZ（延迟加载，失败静默）  -->
+                                                <!-- Google tag (gtag.js) 延迟加载，失败静默 -->
+                                                  <script>
+                                                    (function () {
+                                                      function loadGtag() {
+                                                        try {
+                                                          window.dataLayer = window.dataLayer || []
+                                                          function gtag() { dataLayer.push(arguments) }
+                                                          window.gtag = gtag
+                                                          gtag('js', new Date())
+                                                          var s = document.createElement('script')
+                                                          s.async = true
+                                                          s.src = 'https://www.googletagmanager.com/gtag/js?id=UA-50993302-2'
+                                                          s.onerror = function () { }
+                                                          s.onload = function () { gtag('config', 'UA-50993302-2') }
+                                                          document.head.appendChild(s)
+                                                        } catch (e) { }
+                                                      }
+                                                      if (window.requestIdleCallback) {
+                                                        requestIdleCallback(loadGtag, { timeout: 5000 })
+                                                      } else {
+                                                        window.addEventListener('load', function () { setTimeout(loadGtag, 3000) })
+                                                      }
+                                                    })();
+                                                  </script>
+                                                    <!-- Hreflang Tags -->
+                                                    
+                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2025/02/08/Android-ANR-01-ANR-Design/" />
+                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2025/02/08/Android-ANR-01-ANR-Design/" />
+                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2025/02/08/Android-ANR-01-ANR-Design/" />
+                  <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/atom.xml" title="Android Performance" type="application/atom+xml">
+</head>
+        <body class="post-body">
+        <!-- header -->
+        <header class="header header-mobile">
+    <!-- top read progress line -->
+    <div class="header-element">
+        <div class="read-progress"></div>
+    </div>
+    <!-- sidebar menu button -->
+    <div class="header-element">
+        <div class="header-sidebar-menu">
+            <div style="padding-left: 1px;">&#xe775;</div>
+        </div>
+    </div>
+    <!-- header actions -->
+    <div class="header-actions">
+        <!-- theme mode switch button -->
+        <span class="header-theme-btn header-element">
+            <i class="fas fa-adjust"></i>
+        </span>
+        <!-- back to home page text -->
+        <span class="home-link header-element">
+            <a href="/">Android Performance</a>
+        </span>
+    </div>
+    <!-- toggle banner -->
+    <div class="banner">
+        <div class="blog-title header-element">
+            <a href="/">Android Performance</a>
+        </div>
+        <div class="post-title header-element">
+            <a href="#" class="post-name">Android ANR 系列 1 ：理解 Android ANR 设计思想</a>
+        </div>
+    </div>
+</header>
+
+        <!-- fixed footer -->
+        <footer class="footer-fixed">
+    <!-- donate button -->
+    <div class="donate-popup donate-popup--hidden">
+    <div class="donate-popup__title">Buy Me A Coffee</div>
+    <div class="donate-popup__content">
+        <div class="donate-popup__content-description">如果觉得文章还不错，打赏一杯咖啡吧.</div>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Wechat"
+            alt="Wechat"
+            src="/assets/donate-wechat.png"
+        ></img>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Alipay"
+            alt="Alipay"
+            src="/assets/donate-alipay.png"
+        ></img>
+    </div>
+</div>
+
+    <div
+        title="Donate to the author"
+        class="footer-fixed-btn footer-fixed-btn--hidden donate-btn"
+    >
+        <i class="fas fa-donate"></i>
+    </div>
+
+    <!-- back to top button -->
+    <div class="footer-fixed-btn footer-fixed-btn--hidden back-top">
+        <div>&#xe639;</div>
+    </div>
+</footer>
+
+        <!-- wrapper -->
+        <div class="wrapper">
+            <div class="site-intro" style="    height:50vh;
+">
+    <!-- 主页  -->
+    <!-- 404页  -->
+    <div class="site-intro-placeholder"></div>
+    <picture>
+            <source type="image/webp" srcset="/intro/post-bg.webp">
+        <img class="site-intro-img"
+             src="/intro/post-bg.jpg"
+             alt=""
+loading="lazy"             decoding="async"
+             fetchpriority="auto"
+             sizes="100vw">
+    </picture>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+                Android ANR 系列 1 ：理解 Android ANR 设计思想
+            <!-- 404 -->
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            <!-- 404 -->
+        </p>
+        <!-- 文章页 meta -->
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                    <div class="post-intro-tags" >
+        <span class="post-category" data-categories="Android">
+            <i class="fas fa-folder post-category-icon"></i>
+            <span class="post-category-text">
+                Android
+            </span>
+        </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Startup">Startup</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Memory">Memory</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="ANR">ANR</a>
+</div>
+
+                <!-- 文章字数统计 -->
+                    <div class="post-intro-read">
+                        <span>Word count: <span class="post-count word-count">6k</span>Reading time: <span class="post-count reading-time">21 min</span></span>
+                    </div>
+                <div class="post-intro-meta">
+                    <!-- 撰写日期 -->
+                    <span class="iconfont-archer post-intro-calander">&#xe676;</span>
+                    <span class="post-intro-time">2025/02/08</span>
+                    <!-- 文章分享 -->
+                    <span class="share-wrapper">
+                        <span class="iconfont-archer share-icon">&#xe71d;</span>
+                        <span class="share-text">Share</span>
+                        <ul class="share-list">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+    </div>
+</div>
+
+            
+            <script>
+  // get user agent
+  function getBrowserVersions() {
+    var u = window.navigator.userAgent
+    return {
+      userAgent: u,
+      trident: u.indexOf('Trident') > -1, //IE内核
+      presto: u.indexOf('Presto') > -1, //opera内核
+      webKit: u.indexOf('AppleWebKit') > -1, //苹果、谷歌内核
+      gecko: u.indexOf('Gecko') > -1 && u.indexOf('KHTML') == -1, //火狐内核
+      mobile: !!u.match(/AppleWebKit.*Mobile.*/), //是否为移动终端
+      ios: !!u.match(/\(i[^;]+;( U;)? CPU.+Mac OS X/), //ios终端
+      android: u.indexOf('Android') > -1 || u.indexOf('Linux') > -1, //android终端或者uc浏览器
+      iPhone: u.indexOf('iPhone') > -1 || u.indexOf('Mac') > -1, //是否为iPhone或者安卓QQ浏览器
+      iPad: u.indexOf('iPad') > -1, //是否为iPad
+      webApp: u.indexOf('Safari') == -1, //是否为web应用程序，没有头部与底部
+      weixin: u.indexOf('MicroMessenger') == -1, //是否为微信浏览器
+      uc: u.indexOf('UCBrowser') > -1, //是否为android下的UC浏览器
+    }
+  }
+  var browser = {
+    versions: getBrowserVersions(),
+  }
+  console.log('userAgent: ' + browser.versions.userAgent)
+
+  // callback
+  function fontLoaded() {
+    console.log('font loaded')
+    if (document.getElementsByClassName('site-intro-meta')) {
+      document
+        .getElementsByClassName('intro-title')[0]
+        .classList.add('intro-fade-in')
+      document
+        .getElementsByClassName('intro-subtitle')[0]
+        .classList.add('intro-fade-in')
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+      if (postIntros) {
+        postIntros.classList.add('post-fade-in')
+      }
+    }
+  }
+
+  // UC不支持跨域，所以直接显示
+  function asyncCb() {
+    if (browser.versions.uc) {
+      console.log('UCBrowser')
+      fontLoaded()
+    } else {
+      WebFont.load({
+        custom: {
+          families: ['Oswald-Regular'],
+        },
+        loading: function () {
+          // 所有字体开始加载
+          // console.log('font loading');
+        },
+        active: function () {
+          // 所有字体已渲染
+          fontLoaded()
+        },
+        inactive: function () {
+          // 字体预加载失败，无效字体或浏览器不支持加载
+          console.log('inactive: timeout')
+          fontLoaded()
+        },
+        timeout: 5000, // Set the timeout to two seconds
+      })
+    }
+  }
+
+  function asyncErr() {
+    console.warn('script load from CDN failed, will load local script')
+  }
+
+  // load webfont-loader async, and add callback function
+  function async(u, cb, err) {
+    var d = document,
+      t = 'script',
+      o = d.createElement(t),
+      s = d.getElementsByTagName(t)[0]
+    o.src = u
+    if (cb) {
+      o.addEventListener(
+        'load',
+        function (e) {
+          cb(null, e)
+        },
+        false
+      )
+    }
+    if (err) {
+      o.addEventListener(
+        'error',
+        function (e) {
+          err(null, e)
+        },
+        false
+      )
+    }
+    s.parentNode.insertBefore(o, s)
+  }
+
+  var asyncLoadWithFallBack = function (arr, success, reject) {
+    var currReject = function () {
+      reject()
+      arr.shift()
+      if (arr.length) async(arr[0], success, currReject)
+    }
+
+    async(arr[0], success, currReject)
+  }
+
+  asyncLoadWithFallBack(
+    [
+      'https://cdn.bootcdn.net/ajax/libs/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.staticfile.org/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.jsdelivr.net/npm/webfontloader@1.6.28/webfontloader.min.js',
+      "/lib/webfontloader.min.js",
+    ],
+    asyncCb,
+    asyncErr
+  )
+</script>
+
+            <img class="loading" src="/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" alt="loading">
+            <div class="container container-unloaded">
+                <main class="main post-page">
+    <article class="article-entry">
+        <p>本文为 Android App ANR 系列的第一篇，主要是从系统的角度来剖析 Android ANR 的设计思想，系列文章目录如下</p>
+<ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/02/08/Android-ANR-01-ANR-Design/">Android App ANR 系列 1 ：理解 Android ANR 设计思想</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android App ANR 系列 2 ：ANR 分析套路和关键 Log 介绍</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android App ANR 系列 3 ：ANR 案例分享</a></li>
+</ol>
+<span id="more"></span>
+
+<h1 id="一、ANR-的普遍性与复杂性"><a href="#一、ANR-的普遍性与复杂性" class="headerlink" title="一、ANR 的普遍性与复杂性"></a>一、ANR 的普遍性与复杂性</h1><p>在 Android 生态系统中，应用无响应（<code>ANR</code>，Application Not Responding）不仅是开发者面临的常见挑战，更是系统设计哲学的核心体现。虽然 <code>ANR</code> 常被简化为“主线程耗时操作”的代名词，但这种表面化的理解远远不足以揭示问题的本质。实际上，<code>ANR</code> 的根本原因在于 Android 多进程架构、事件分发和资源调度机制之间复杂的协同作用，其实质是系统层面对应用行为实施严格约束与监控的综合体现。</p>
+<p>Android 明确将 <code>ANR</code> 定性为应用层问题，这与 <code>SNR</code>（System Not Responding）形成了鲜明对比。<code>SNR</code> 指的是系统进程（如 <code>system_server</code>）失去响应能力，通常依靠 Watchdog 机制通过监控关键系统线程状态来实现；而 <code>ANR</code> 则依托于消息调度机制，系统进程利用精心设计的超时模型追踪应用主线程的响应能力。这种区别反映了系统针对不同层级问题所采取的治理策略：</p>
+<ul>
+<li><strong>SNR</strong> 侧重于确保系统核心服务的生存，采用主动轮询的监控方式；</li>
+<li><strong>ANR</strong> 则聚焦于应用进程的实时响应，通过事件驱动的异步检测机制来进行判断。</li>
+</ul>
+<p>从系统架构的角度来看，<code>ANR</code> 机制主要实现于系统层（即 <code>system_server</code> 进程中），其核心在于构建跨进程的事件监控体系。当应用进程通过 <code>Binder</code> 向系统服务发起操作请求（如启动 <code>Activity</code>、处理广播等）时，系统会同步启动超时计时器；而对于输入事件这类异步操作，<code>InputDispatcher</code> 会通过 <code>socket</code> 与窗口建立事件通道，并在事件派发后启动超时检测。这种分层监控设计充分体现了 Android 针对不同任务类型所采用的差异化处理策略。</p>
+<p><code>ANR</code> 机制的深层意义在于平衡开放性与系统可控性。作为一个开放平台，Android 允许应用自由申请硬件资源（如 <code>CPU</code>、<code>IO</code>、<code>内存</code> 等），但必须通过严格的规则防止单个应用的异常行为蔓延至整个系统。当检测到超时事件时，系统会启动多维度熔断机制：首先，通过强制终止问题进程来释放关键系统资源（例如防止其占用 <code>Binder</code> 线程池或文件描述符），从而避免级联故障；同时，系统会冻结进程状态，并采集 <code>CPU</code> 使用率、线程堆栈、内存快照等关键信息，将这些数据写入 <code>/data/anr/traces.txt</code>，为后续问题分析保留现场。更巧妙的是，系统还通过用户可见的弹窗将最终操作权交还给用户，从而既避免了自动化处理可能带来的误判风险，又保持了人机交互的连续性。这种“故障隔离—现场保护—用户决策”相结合的设计，充分展现了 Android 在技术严谨性与用户体验友好性之间的平衡智慧。</p>
+<hr>
+<h1 id="二、ANR-的核心设计哲学"><a href="#二、ANR-的核心设计哲学" class="headerlink" title="二、ANR 的核心设计哲学"></a>二、ANR 的核心设计哲学</h1><h2 id="ANR-的本质：系统级监控与强制干预"><a href="#ANR-的本质：系统级监控与强制干预" class="headerlink" title="ANR 的本质：系统级监控与强制干预"></a>ANR 的本质：系统级监控与强制干预</h2><p>ANR 机制构成了 Android 系统架构中一套深层次的稳定性防御体系，其核心在于通过 <strong>跨层协同监控</strong> 与 <strong>异步决策隔离</strong> 构建一个独立于应用状态的全局安全网。这种设计远非简单的超时检测，而是深深植根于 Linux 进程沙箱机制和 Android 组件架构的有机结合中。系统进程（如 <code>system_server</code>）通过 <code>ActivityManagerService</code> (AMS) 与 <code>InputManagerService</code> (IMS) 这两大核心模块，分别对组件生命周期和输入事件流实施全方位监控。正因这种分层架构，监控逻辑得以与业务逻辑解耦，即使目标应用的主线程完全阻塞，系统依然可以依靠独立线程进行超时裁决，从根本上避免了“监控者反被监控对象拖垮”的风险。</p>
+<p>在实现层面，ANR 充分体现了<strong>事件驱动型系统设计</strong>的精髓。例如，在组件类 ANR 的场景中，当 AMS 通过 <code>Binder</code> 向应用进程派发跨进程任务时，系统会同步启动一个倒计时器（例如针对 <code>Service</code> 启动的 20 秒阈值），这一“埋炸弹”机制实质上将异步任务转化为带有超时约束的同步契约。应用进程在完成任务后必须通过 <code>Binder</code> 回调主动“拆弹”，否则系统将介入收集现场信息（如主线程堆栈）并触发用户交互。整个过程由系统进程主导，应用仅作为事件响应方存在，从而确保监控的绝对权威性。</p>
+<p>任务派发依赖 <code>Binder</code> 的同步调用来确保原子性，同时 AMS 通过专门的 <code>Handler</code> 将超时检测消息推入消息队列，从而在规定时间内监控任务的执行情况。这种设计既保证了跨进程通信期间任务的完整性，也能在超时后迅速触发熔断处理。</p>
+<hr>
+<h2 id="组件类-ANR：异步任务的全局防护逻辑"><a href="#组件类-ANR：异步任务的全局防护逻辑" class="headerlink" title="组件类 ANR：异步任务的全局防护逻辑"></a>组件类 ANR：异步任务的全局防护逻辑</h2><p>组件类 ANR 的监控逻辑围绕 <code>ActivityManagerService</code> (AMS) 展开，其本质是通过 <strong>任务派发–回调–熔断</strong> 的三阶段模型，实现对异步任务生命周期的全链路追踪。当系统通过 <code>Binder</code> 跨进程通信向应用派发任务（例如启动 <code>Service</code>）时，AMS 会同步启动超时检测机制：利用 <code>MainHandler</code> 发送延迟消息实现精确计时。以 <code>Service</code> 启动为例，当 AMS 调用 <code>IApplicationThread</code> 的 <code>scheduleCreateService()</code> 后，会启动对应的超时监控（默认 20 秒）。如果应用在规定时间内未通过 <code>serviceDoneExecuting()</code> 回调通知 AMS，则触发 ANR 判定。</p>
+<p>开发者需要特别注意 <strong>跨进程回调的时序陷阱</strong>：即使异步任务在子线程完成，但若主线程因消息队列堵塞（例如过度调用 <code>runOnUiThread</code>）导致 <code>Binder</code> 回调延迟，系统依然会判定为 ANR。</p>
+<p><strong>Android 14+</strong> 引入的 <code>ProcessStateRecord</code> 对进程状态进行了更细粒度的划分，不仅详细记录了主线程消息处理的状态，还实时监控后台任务和挂起状态，从而降低了误判率，并为开发者提供了更丰富的调试信息。</p>
+<p>这一设计的关键在于 <strong>同步事务与异步熔断的解耦</strong>。任务派发依靠 <code>Binder</code> 的同步调用确保原子性，而超时检测则通过 <code>Handler</code> 消息机制异步执行，避免阻塞系统主线程。</p>
+<p>当 ANR 触发时，系统会执行多维度的熔断策略：</p>
+<ol>
+<li><p><strong>现场采集</strong><br>系统会收集主线程堆栈信息、CPU 使用情况、进程状态等关键数据，并将这些数据写入 <code>/data/anr/traces.txt</code> 文件。同时，系统还会利用 <code>ProcessCpuTracker</code> 记录详细的 CPU 使用统计，为后续问题分析提供依据。</p>
+</li>
+<li><p><strong>资源隔离</strong><br>系统通过 <code>ProcessRecord</code> 的调度优先级调整机制确保熔断决策的实时性，从而保证即使在系统负载较高的情况下，ANR 处理流程也能得到及时执行。</p>
+</li>
+<li><p><strong>诊断数据收集</strong><br>系统提供 <code>ApplicationExitInfo</code> API，允许开发者查询历史 ANR 记录，包括发生时间、进程状态、异常堆栈等详细信息，这些数据对于问题复现和根因分析极为重要。</p>
+</li>
+</ol>
+<p>值得注意的是，<strong>Android 15</strong> 对后台服务施加了更严格的约束：前台服务必须在 3 秒内完成初始化并调用 <code>startForeground()</code>，否则系统将直接触发 ANR。具体而言，系统通过内部属性（例如 <code>persist.sys.fgs_timeout</code>）以及 API 参数（如 AMS 内部控制前台服务启动超时的参数）来管理这一超时机制。开发者可参照最新的 API 文档了解这些变更，从而在设计服务时确保满足严格的响应时限要求。</p>
+<p>系统还提供了多种工具来支持 ANR 问题的诊断和分析：</p>
+<ul>
+<li><strong>系统日志收集</strong>：开发者可通过 <code>adb</code> 命令获取 ANR 堆栈信息和系统报告，其中包含了问题发生时的详细系统状态。</li>
+<li><strong>性能分析工具</strong>：Android Studio 的 CPU Profiler 能够实时监控应用性能，帮助开发者发现潜在的性能问题。</li>
+<li><strong>系统级分析</strong>：Perfetto 提供了强大的系统级性能分析能力，帮助开发者理解复杂的性能问题。</li>
+</ul>
+<p>通过这种多层次的监控和防护机制，Android 系统确保了应用响应性能的可靠性，并为开发者提供了完整的问题诊断工具链。开发者需深入理解这些机制，在应用设计中充分考虑性能因素，遵循系统生命周期契约，合理管理主线程负载，确保关键回调的及时响应。</p>
+<p>这种设计哲学体现了 Android 平台对应用质量的严格要求：通过明确的超时限制和完善的监控机制，推动开发者构建更可靠、响应更及时的应用。同时，丰富的诊断工具也为开发者提供了必要的支持，帮助他们在遇到问题时能快速定位并解决问题。</p>
+<hr>
+<h2 id="Input-类-ANR：输入事件分发的动态熔断体系"><a href="#Input-类-ANR：输入事件分发的动态熔断体系" class="headerlink" title="Input 类 ANR：输入事件分发的动态熔断体系"></a>Input 类 ANR：输入事件分发的动态熔断体系</h2><p>输入类 ANR 的监控机制更为复杂，其核心挑战在于如何在 <strong>高实时性要求</strong> 与 <strong>资源高效利用</strong> 之间取得平衡。从硬件事件产生到应用主线程处理，输入系统通过 <code>EventHub</code>、<code>InputReader</code> 和 <code>InputDispatcher</code> 三大组件协同构建了一条高效且可控的事件分发链路。</p>
+<ul>
+<li><p><strong>事件读取层</strong> (<code>EventHub</code>)<br><code>EventHub</code> 利用 Linux 的 <code>epoll</code> 机制监听 <code>/dev/input</code> 设备节点，支持多设备并发监听，并通过事件驱动模型（而非轮询）实现零空闲 CPU 消耗。当硬件中断触发时，系统通过 inotify 接收原始输入数据，并将其封装为 <code>RawEvent</code>。</p>
+</li>
+<li><p><strong>事件预处理</strong> (<code>InputReader</code>)<br><code>InputReader</code> 通过特定的 <code>InputMapper</code> 对原始数据进行设备相关的预处理（如触摸校准），并将其转换为标准的输入事件（如 <code>MotionEvent</code> 或 <code>KeyEvent</code>）。同时，根据设备类型和配置进行必要的事件过滤，确保数据质量。</p>
+</li>
+<li><p><strong>事件分发层</strong> (<code>InputDispatcher</code>)<br><code>InputDispatcher</code> 的核心职责是确定当前焦点窗口，并通过基于 Unix Domain Socket 的 <code>InputChannel</code> 将事件推送至应用进程。它采用 multiplexing 机制高效管理多个 <code>InputChannel</code>，并依赖 <code>WindowManagerService</code> 获取最新窗口焦点信息，确保事件准确送达目标窗口。</p>
+</li>
+</ul>
+<p>输入 ANR 机制依赖于对事件状态的持续追踪与超时判定，其核心在于 <strong>队列状态管理</strong> 与 <strong>跨线程协作模型</strong> 的设计：</p>
+<ul>
+<li><code>inboundQueue</code>：存储从 <code>InputReader</code> 接收的待分发事件</li>
+<li><code>outboundQueues</code>：为每个连接维护的输出队列，同时通过 <code>waitQueue</code> 跟踪已分发但未收到完成响应的事件</li>
+<li><code>waitQueue</code>：记录已经分发出去但尚未收到应用端处理确认的事件。</li>
+</ul>
+<p>当事件被分发后，系统通过 <code>MonitoredTimeout</code> 机制跟踪其处理状态。默认超时时间为 5000 毫秒（可通过系统属性调整），超时检测采用事件驱动模式，在新事件到达、应用回调完成或周期性心跳检查时触发。一旦检测到超时，系统会通过 <code>WindowManagerService</code> 通知 <code>ActivityManagerService</code>，并收集包括 <code>InputDispatcher</code> 状态及应用进程信息在内的诊断数据，随后可能触发 ANR 弹窗及进程重启流程。</p>
+<p>整个输入系统采用了优化的线程模型设计：</p>
+<ul>
+<li><code>InputReaderThread</code> 专注于事件读取与预处理</li>
+<li><code>InputDispatcherThread</code> 负责事件分发与超时监控</li>
+</ul>
+<p>两者通过无锁队列实现高效的线程间通信，使得即使某个应用进程的主线程阻塞，系统层面的输入处理依然能够正常运行，从而有效防止问题扩散。</p>
+<p>对于开发者而言，应特别关注主线程的响应性，避免在输入事件处理回调中执行耗时操作。同时，理解输入系统的分层设计有助于在性能优化时从整体角度提高事件处理链路的效率。</p>
+<hr>
+<h2 id="No-Focused-Window-类-ANR"><a href="#No-Focused-Window-类-ANR" class="headerlink" title="No Focused Window 类 ANR"></a>No Focused Window 类 ANR</h2><p>No Focused Window ANR 是输入系统中另一类重要的无响应场景，其本质在于窗口焦点状态异常，导致输入事件无法正确分发。与常规输入超时不同，这类 ANR 反映的是 WindowManager 子系统与输入系统之间的协同问题。</p>
+<p>在 <code>WindowManagerService</code> (WMS) 的设计中，窗口焦点管理是一个独立而复杂的子系统。当用户界面发生变化（如 Activity 切换或对话框弹出）时，系统会触发一系列窗口事务操作：首先对旧窗口执行 <code>relayoutWindow</code> 以解除焦点标记，然后为新窗口执行 <code>addWindow</code> 并授予焦点。这些状态变化会通过 <code>WindowManagerPolicy</code> 实时同步至 <code>InputDispatcher</code>，确保输入事件能够路由到当前的焦点窗口。</p>
+<p>焦点的获得与丢失由多种系统行为触发。例如：</p>
+<ul>
+<li><strong>焦点获得</strong>：新 Activity 启动完成并显示第一帧、<code>Dialog</code> 或 <code>PopupWindow</code> 弹出、分屏模式下触碰窗口区域、从后台任务切换器中恢复应用、解锁后前台应用恢复。</li>
+<li><strong>焦点丢失</strong>：Activity 被全屏 Activity 覆盖、用户按下 <code>Home</code> 键、系统弹出权限请求等关键级别 <code>Dialog</code>、应用进入后台、设备锁屏等情况。</li>
+</ul>
+<p>No Focused Window ANR 往往与窗口生命周期管理异常有关。最常见的情况是在 Activity 切换过程中，由于目标 Activity 的 <code>handleResumeActivity</code> 执行延迟，系统在一定时间内无法确定合法的焦点窗口。与输入超时 ANR 不同，输入超时是目标窗口存在但未及时处理事件，而 No Focused Window ANR 则是系统无法找到合适的事件接收者。基于这一区别，系统对这两类情况采取不同的防护策略：对于输入超时，系统会在默认 5 秒后触发 ANR；而对于无焦点窗口情况，如果连续多次事件分发找不到目标窗口，系统会更快地启动 ANR 流程。</p>
+<p>从应用开发角度来看，影响焦点切换的代码路径较为有限，主要涉及 Activity 生命周期回调、窗口添加&#x2F;移除以及输入事件处理等环节。即使这些环节出现问题（如主线程阻塞），通常也会触发常规 ANR，而非 No Focused Window ANR。因此，在遇到此类问题时，更应关注系统整体资源使用状态、 <code>system_server</code> 进程的 CPU 负载以及系统服务间 <code>Binder</code> 调用延迟等系统级指标，而不是单纯聚焦于某个应用的代码优化。这也是为什么 No Focused Window ANR 常被视为系统性能问题而非应用质量问题的根本原因。</p>
+<hr>
+<h2 id="系统设计的统一性原则"><a href="#系统设计的统一性原则" class="headerlink" title="系统设计的统一性原则"></a>系统设计的统一性原则</h2><p>无论是组件类 ANR 还是 Input 类 ANR，其监控机制均遵循以下核心原则：</p>
+<ol>
+<li><strong>状态可追踪性</strong><br>通过队列（如 <code>waitQueue</code>）和定时器（例如 AMS 中的 <code>Handler</code>）精确追踪任务进度，确保系统始终掌握应用行为的最新状态。</li>
+<li><strong>故障隔离性</strong><br>在超时后迅速终止问题进程，防止局部故障扩散成系统级雪崩。</li>
+<li><strong>用户控制权兜底</strong><br>通过弹窗提示与进程终止机制，确保用户始终拥有最终的操作权，即使应用内部已完全失控。</li>
+<li><strong>开发者约束性</strong><br>强制要求主线程保持轻量与异步设计，促使应用架构更贴合系统设计哲学。</li>
+</ol>
+<p>从架构角度来看，ANR 机制是 Android 系统对 <strong>开放生态可控性</strong> 的最终回答——它既允许开发者自由创新，又通过刚性规则划定行为边界。这种平衡不仅体现在技术实现上，也深刻影响了整个 Android 应用的性能优化文化。</p>
+<h1 id="ANR-问题的全局解析与主动防御"><a href="#ANR-问题的全局解析与主动防御" class="headerlink" title="ANR 问题的全局解析与主动防御"></a>ANR 问题的全局解析与主动防御</h1><p>ANR 问题的复杂性要求我们在分析框架中同时具备 <strong>技术纵深感</strong> 与 <strong>系统全局观</strong>，并通过递进逻辑将碎片化的现象转化为一个可演进的认知体系。这种方法不仅仅是简单的目录分层，而是利用多维视角的交叉验证，建立从微观代码缺陷到宏观系统约束的完整映射关系。</p>
+<hr>
+<h2 id="从现象到根源：逐层解剖-ANR-问题"><a href="#从现象到根源：逐层解剖-ANR-问题" class="headerlink" title="从现象到根源：逐层解剖 ANR 问题"></a>从现象到根源：逐层解剖 ANR 问题</h2><p>构建纵向分析路径遵循 <strong>“现象 → 机制 → 支撑 → 资源”</strong> 的链条式逻辑，其目标在于厘清从用户看到的 ANR 弹窗到硬件资源问题之间的完整链条：</p>
+<ol>
+<li><p><strong>机制表象（ANR 弹窗）</strong><br>作为用户可见的最外层现象，ANR 弹窗实际上是系统对故障的最终裁决——它并不揭示具体根因，而只是展示结果。开发者往往仅停留在查看堆栈日志、寻找主线程阻塞点的层面，但这就如同只观察火山喷发而忽略了地壳运动的根本驱动因素。</p>
+</li>
+<li><p><strong>系统实现（AMS&#x2F;InputDispatcher）</strong><br>深入系统服务层，ANR 弹窗背后隐藏着 AMS 的 <code>appNotResponding</code> 触发流程。AMS 通过 <code>Binder</code> 事务状态机追踪组件的生命周期，而 <code>InputDispatcher</code> 则利用 <code>socket</code> 事件流监控输入响应。此层分析揭示了 <strong>超时判定逻辑的差异性</strong>：AMS 采用同步阻塞式检测（例如 <code>BroadcastQueue</code> 的超时计算），而 <code>InputDispatcher</code> 则利用基于 <code>epoll</code> 的异步非阻塞模型实现事件循环监控。</p>
+</li>
+<li><p><strong>底层支撑（Binder&#x2F;调度器）</strong><br>系统服务的高效运行依赖于 Linux 内核的核心机制。<code>Binder</code> 驱动通过内存映射实现跨进程通信，其线程池调度策略（例如 <code>BINDER_MAX_POOL_THREADS</code> 阈值限制）直接影响事务处理能力；而系统的公平调度机制则通过动态分配 CPU 时间片决定主线程是否能够及时获得执行资源。此层的关键在于解析资源分配公平性与实时性之间的矛盾——例如，为了保障多任务的公平性，系统可能允许后台进程的 CPU 密集型任务抢占前台应用的响应时间。</p>
+</li>
+<li><p><strong>硬件资源（CPU&#x2F;IO&#x2F;Memory）</strong><br>最终，所有软件行为都受限于物理硬件。CPU 的乱序执行可能导致锁竞争问题的随机性；磁盘 I&#x2F;O 延迟会放大主线程在 <code>SharedPreferences</code> 写入时的阻塞；内存带宽争抢则可能使 <code>RenderThread</code> 无法及时获取纹理数据。此层要求建立 <strong>硬件指标与软件行为的关联模型</strong>，例如利用 <code>perf</code> 工具分析 CPU 缓存命中率与 ANR 触发频率的相关性。</p>
+</li>
+</ol>
+<p>这种纵向深入并非线性递进，而是一个 <strong>循环验证</strong> 的过程：当硬件层分析发现内存带宽瓶颈时，需要回溯到 <code>Binder</code> 驱动层，检查是否因频繁跨进程通信引发内存拷贝风暴，最终在系统服务层进行数据传输机制的优化。</p>
+<hr>
+<h2 id="从被动应对到主动防御：ANR-治理的三步走"><a href="#从被动应对到主动防御：ANR-治理的三步走" class="headerlink" title="从被动应对到主动防御：ANR 治理的三步走"></a>从被动应对到主动防御：ANR 治理的三步走</h2><p>方法论的演进路径——<strong>“诊断 → 追踪 → 预测 → 设计”</strong>，反映了技术认知成熟度的跃迁，具体步骤包括：</p>
+<ol>
+<li><p><strong>堆栈分析</strong><br>传统 ANR 分析依赖于 <code>traces.txt</code> 中的线程堆栈，这本质上是故障发生时的静态快照。当问题由偶发竞争条件（如 <code>Binder</code> 线程池瞬时饱和）引起时，堆栈可能显示为正常的 <code>NativePollOnce</code> 状态，而无法揭示真实的资源争抢过程。此时，需要引入 <strong>多时间点堆栈对比技术</strong>，通过比较 ANR 前后 5 秒内的堆栈变化，识别线程状态迁移模式。</p>
+</li>
+<li><p><strong>动态追踪</strong><br>利用 <code>systrace</code> 和 <code>perfetto</code> 等工具提供的毫秒级事件追踪能力，可以监控主线程 <code>Looper</code> 的事件处理周期，量化 <code>dispatchMessage</code> 的执行耗时；同时结合 <code>Binder</code> 驱动中的 <code>binder_transaction</code> 事件，可以绘制跨进程调用的热力图。动态追踪的核心价值在于 <strong>揭示隐藏的时间相关性</strong>，例如发现输入事件延迟往往紧随 <code>SharedPreferences</code> 磁盘写入操作出现。</p>
+</li>
+<li><p><strong>机器学习预测</strong><br>当 ANR 的根因涉及多个子系统交互（如 CPU 调度、内存回收和 I&#x2F;O 负载的耦合效应）时，传统方法难以处理高维数据。通过收集线程状态、<code>Binder</code> 交互数据以及 CPU 争夺情况等 20 多项指标，利用机器学习算法建立分析模型，可以自动识别 ANR 类型（例如主线程阻塞、IPC 死锁或资源竞争）。Google 已在 Android Vitals 中应用类似技术，实现了 ANR 根因的云端聚合分析。</p>
+</li>
+<li><p><strong>架构预防性设计</strong><br>终极目标是从代码设计阶段就内化系统约束，例如：</p>
+<ul>
+<li><strong>通信拓扑约束</strong>：限制跨进程调用层级，避免 <code>A → B → C</code> 的链式调用，改用事件总线广播模式。</li>
+<li><strong>资源预算管理</strong>：为每个业务模块分配 <code>Binder</code> 事务配额，超出阈值时自动降级。</li>
+<li><strong>异步边界强化</strong>：利用 <code>HandlerThread</code> 和 <code>Executor</code> 严格隔离同步与异步操作，防止线程模型出现混乱。</li>
+</ul>
+</li>
+</ol>
+<p>这种从被动应对到主动防御的方法论进化路径，不仅为系统从根源上预防 ANR 提供了有效策略，也为开发者提供了丰富的诊断工具和优化思路。</p>
+<h1 id="ANR-相关资料分享"><a href="#ANR-相关资料分享" class="headerlink" title="ANR 相关资料分享"></a>ANR 相关资料分享</h1><ol>
+<li><a target="_blank" rel="noopener" href="https://juejin.cn/post/6864555867023343623">反思｜Android 输入系统 &amp; ANR机制的设计与实现</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s?__biz=MzI1MzYzMjE0MQ==&mid=2247487203&idx=1&sn=182584b69910c843ae95f60e74127249&chksm=e9d0c501dea74c178e16f95a2ffc5007c5dbca89a02d56895ed9b05883cf0562da689ac6146b&token=2044639920&lang=zh_CN&scene=21#wechat_redirect">西瓜视频稳定性治理体系建设一：Tailor 原理及实践</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s/RF3m9_v5bYTYbwY-d1RloQ">西瓜视频稳定性治理体系建设二：Raphael 原理及实践</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s?__biz=MzI1MzYzMjE0MQ==&mid=2247489902&idx=1&sn=bfdf9f48dc6dc973722b5dcab9cd5882&chksm=e9d0d28cdea75b9ad255eb5de227240d2e6f0e9d66e562d3f49cf69f8ed4127c9954ef21bb6d&scene=178&cur_album_id=1833937688379310087#rd">西瓜视频稳定性治理体系建设三：Sliver 原理及实践</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s?__biz=MzI1MzYzMjE0MQ==&mid=2247489949&idx=1&sn=01948c047c0ce203956a3cf81dd20e83&chksm=e9d0d27fdea75b697e70a665b4c6912a8081649700766cf007a7b75d420a57089fe06d2e85b0&scene=178&cur_album_id=1833937688379310087#rd">西瓜卡顿 &amp; ANR 优化治理及监控体系建设</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s?__biz=MzI1MzYzMjE0MQ==&mid=2247488116&idx=1&sn=fdf80fa52c57a3360ad1999da2a9656b&chksm=e9d0d996dea750807aadc62d7ed442948ad197607afb9409dd5a296b16fb3d5243f9224b5763&scene=178&cur_album_id=1780091311874686979#rd">今日头条 ANR 优化实践系列 - 设计原理及影响因素</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s?__biz=MzI1MzYzMjE0MQ==&mid=2247488182&idx=1&sn=6337f1b51d487057b162064c3e24c439&chksm=e9d0d954dea75042193ed09f30eb8ba0acd93870227c5d33b33361b739a03562afb685df9215&scene=178&cur_album_id=1780091311874686979#rd">今日头条 ANR 优化实践系列 - 监控工具与分析思路</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s?__biz=MzI1MzYzMjE0MQ==&mid=2247488243&idx=1&sn=1f948e0ef616c6dfe54513a2a94357be&chksm=e9d0d911dea75007f36b3701b51842b9fa40969fe8175c2cb4aecf96793504602c574945d636&scene=178&cur_album_id=1780091311874686979#rd">今日头条 ANR 优化实践系列分享 - 实例剖析集锦</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s?__biz=MzI1MzYzMjE0MQ==&mid=2247488314&idx=1&sn=559e52288ae2730a580fcd550f22d895&chksm=e9d0d8d8dea751ceecb715d472796f0c678a9358abf91eb279cdb0576329595e87531e221438&scene=178&cur_album_id=1780091311874686979#rd">今日头条 ANR 优化实践系列 - Barrier 导致主线程假死</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s?__biz=MzI1MzYzMjE0MQ==&mid=2247488558&idx=1&sn=27dda3c3630116d37ab56a8c7bdf1382&chksm=e9d0dfccdea756daed46b340fb8021b57ea8cc300e58bdb59f0305f8290704984308a089bf2d&scene=178&cur_album_id=1780091311874686979#rd">今日头条 ANR 优化实践系列 - 告别 SharedPreference 等待</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s/40T6ITvJNWR8F42530k4DA">Android ANR|原理解析及常见案例</a></li>
+</ol>
+<h1 id="参考资料"><a href="#参考资料" class="headerlink" title="参考资料"></a>参考资料</h1><ol>
+<li><a target="_blank" rel="noopener" href="https://duanqz.github.io/2015-10-12-ANR-Analysis#1-%E6%A6%82%E8%A7%88">https://duanqz.github.io/2015-10-12-ANR-Analysis#1-%E6%A6%82%E8%A7%88</a></li>
+<li><a target="_blank" rel="noopener" href="https://duanqz.github.io/2015-10-12-ANR-Analysis">https://duanqz.github.io/2015-10-12-ANR-Analysis</a></li>
+<li><a target="_blank" rel="noopener" href="http://gityuan.com/2016/12/02/app-not-response/">http://gityuan.com/2016/12/02/app-not-response/</a></li>
+<li><a target="_blank" rel="noopener" href="http://gityuan.com/2017/01/01/input-anr/">http://gityuan.com/2017/01/01/input-anr/</a></li>
+<li><a target="_blank" rel="noopener" href="https://xiaozhuanlan.com/topic/5097486132">https://xiaozhuanlan.com/topic/5097486132</a></li>
+</ol>
+<h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p>
+<ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li>
+<li><a href="https://androidperformance.com/2019/12/01/BlogMap/">本博客内容导航</a> ：个人博客内容的一个导航。</li>
+<li><a href="https://androidperformance.com/2018/05/07/Android-performance-optimization-skills-and-tools/">个人整理和搜集的优秀博客文章 - Android 性能优化必知必会</a> ：欢迎大家自荐和推荐 （微信私聊即可）</li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a> ： 欢迎加入，多谢支持～</li>
+</ol>
+<blockquote>
+<p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p>
+</blockquote>
+
+    </article>
+    <!-- license -->
+        <div class="license-wrapper">
+            <p>Author：<a href="https://androidperformance.com">Gracker</a>
+            <p>Link：<a href="https://androidperformance.com/2025/02/08/Android-ANR-01-ANR-Design/">https://androidperformance.com/2025/02/08/Android-ANR-01-ANR-Design/</a>
+            <p>Publish date：<a href="https://androidperformance.com/2025/02/08/Android-ANR-01-ANR-Design/">February 8th 2025, 4:28:17 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/2025/02/08/Android-ANR-01-ANR-Design/">January 11th 2026, 1:36:33 pm</a>
+            <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
+        </div>
+    <!-- paginator -->
+    <ul class="post-paginator">
+        <li class="next">
+                <div class="nextSlogan">Next Post</div>
+                <a href="/2025/02/08/Android-ANR-02-How-to-analysis-ANR/" title="Android ANR 系列 2 ：ANR 分析套路和关键 Log 介绍">
+                    <div class="nextTitle">Android ANR 系列 2 ：ANR 分析套路和关键 Log 介绍</div>
+                </a>
+        </li>
+        <li class="previous">
+                <div class="prevSlogan">Previous Post</div>
+                <a href="/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/" title="Android Perfetto 系列 3：熟悉 Perfetto View">
+                    <div class="prevTitle">Android Perfetto 系列 3：熟悉 Perfetto View</div>
+                </a>
+        </li>
+    </ul>
+    <!-- comment -->
+        <div class="post-comment">
+            <!-- 来必力 City 版安装代码 -->
+
+            
+            
+            
+            <!-- utteranc评论 -->
+
+            <!-- partial('_partial/comment/changyan') -->
+            <!--PC版-->
+
+            
+            
+            
+        </div>
+    <!-- timeliness note -->
+    <!-- idea from: https://hexo.fluid-dev.com/posts/hexo-injector/#%E6%96%87%E7%AB%A0%E6%97%B6%E6%95%88%E6%80%A7%E6%8F%90%E7%A4%BA -->
+    <!-- Mathjax -->
+</main>
+
+                <!-- profile -->
+            </div>
+            <footer class="footer footer-unloaded">
+    <!-- social  -->
+        <div class="social">
+                            <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title="email" ></a>
+                <a href="https://github.com/gracker" class="iconfont-archer github" target="_blank" title="github"></a>
+                <span class="iconfont-archer wechat" title="wechat">
+                    <img class="profile-qr" src="/assets/Wechat.jpeg" />
+                </span>
+                <span class="iconfont-archer qq" title="qq">
+                    <img class="profile-qr" src="/553000664" />
+                </span>
+                <a href="https://weibo.com/gracker520" class="iconfont-archer weibo" target="_blank" title="weibo"></a>
+                <a href="https://www.zhihu.com/people/gracker" class="iconfont-archer zhihu" target="_blank" title="zhihu"></a>
+                <a href="https://twitter.com/Gracker_Gao" class="iconfont-archer twitter" target="_blank" title="twitter"></a>
+                <a href="https://juejin.im/user/557b0590e4b052e031453d76" class="iconfont-archer juejin" target="_blank" title="juejin"></a>
+                <a href="/atom.xml" class="iconfont-archer rss" target="_blank" title="rss"></a>
+
+        </div>
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- website approve for Chinese user -->
+        <div class="website-approve">
+                <span id="icp-approve" class="icp-approve">
+                    <a href="https://beian.miit.gov.cn/" target="_blank">蜀 ICP 备 20016190 号</a>
+                </span>
+        </div>
+</footer>
+
+        </div>
+        <!-- toc -->
+            <div class="toc-wrapper toc-wrapper-loding" style=    top:50vh;
+>
+                <div class="toc-catalog">
+                    <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+                </div>
+                <ol class="toc"><li class="toc-item toc-level-1"><a class="toc-link" href="#%E4%B8%80%E3%80%81ANR-%E7%9A%84%E6%99%AE%E9%81%8D%E6%80%A7%E4%B8%8E%E5%A4%8D%E6%9D%82%E6%80%A7"><span class="toc-number">1.</span> <span class="toc-text">一、ANR 的普遍性与复杂性</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E4%BA%8C%E3%80%81ANR-%E7%9A%84%E6%A0%B8%E5%BF%83%E8%AE%BE%E8%AE%A1%E5%93%B2%E5%AD%A6"><span class="toc-number">2.</span> <span class="toc-text">二、ANR 的核心设计哲学</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#ANR-%E7%9A%84%E6%9C%AC%E8%B4%A8%EF%BC%9A%E7%B3%BB%E7%BB%9F%E7%BA%A7%E7%9B%91%E6%8E%A7%E4%B8%8E%E5%BC%BA%E5%88%B6%E5%B9%B2%E9%A2%84"><span class="toc-number">2.1.</span> <span class="toc-text">ANR 的本质：系统级监控与强制干预</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%BB%84%E4%BB%B6%E7%B1%BB-ANR%EF%BC%9A%E5%BC%82%E6%AD%A5%E4%BB%BB%E5%8A%A1%E7%9A%84%E5%85%A8%E5%B1%80%E9%98%B2%E6%8A%A4%E9%80%BB%E8%BE%91"><span class="toc-number">2.2.</span> <span class="toc-text">组件类 ANR：异步任务的全局防护逻辑</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Input-%E7%B1%BB-ANR%EF%BC%9A%E8%BE%93%E5%85%A5%E4%BA%8B%E4%BB%B6%E5%88%86%E5%8F%91%E7%9A%84%E5%8A%A8%E6%80%81%E7%86%94%E6%96%AD%E4%BD%93%E7%B3%BB"><span class="toc-number">2.3.</span> <span class="toc-text">Input 类 ANR：输入事件分发的动态熔断体系</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#No-Focused-Window-%E7%B1%BB-ANR"><span class="toc-number">2.4.</span> <span class="toc-text">No Focused Window 类 ANR</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%B3%BB%E7%BB%9F%E8%AE%BE%E8%AE%A1%E7%9A%84%E7%BB%9F%E4%B8%80%E6%80%A7%E5%8E%9F%E5%88%99"><span class="toc-number">2.5.</span> <span class="toc-text">系统设计的统一性原则</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#ANR-%E9%97%AE%E9%A2%98%E7%9A%84%E5%85%A8%E5%B1%80%E8%A7%A3%E6%9E%90%E4%B8%8E%E4%B8%BB%E5%8A%A8%E9%98%B2%E5%BE%A1"><span class="toc-number">3.</span> <span class="toc-text">ANR 问题的全局解析与主动防御</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BB%8E%E7%8E%B0%E8%B1%A1%E5%88%B0%E6%A0%B9%E6%BA%90%EF%BC%9A%E9%80%90%E5%B1%82%E8%A7%A3%E5%89%96-ANR-%E9%97%AE%E9%A2%98"><span class="toc-number">3.1.</span> <span class="toc-text">从现象到根源：逐层解剖 ANR 问题</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BB%8E%E8%A2%AB%E5%8A%A8%E5%BA%94%E5%AF%B9%E5%88%B0%E4%B8%BB%E5%8A%A8%E9%98%B2%E5%BE%A1%EF%BC%9AANR-%E6%B2%BB%E7%90%86%E7%9A%84%E4%B8%89%E6%AD%A5%E8%B5%B0"><span class="toc-number">3.2.</span> <span class="toc-text">从被动应对到主动防御：ANR 治理的三步走</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#ANR-%E7%9B%B8%E5%85%B3%E8%B5%84%E6%96%99%E5%88%86%E4%BA%AB"><span class="toc-number">4.</span> <span class="toc-text">ANR 相关资料分享</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E8%B5%84%E6%96%99"><span class="toc-number">5.</span> <span class="toc-text">参考资料</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number">6.</span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a></li></ol>
+            </div>
+        <!-- sidebar -->
+        <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+        <div class="sidebar-panel-archives">
+    <!-- 在 ejs 中将 archive 按照时间排序 -->
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 118
+        </div>
+        <!-- search  -->
+    </div>
+    <div class="post-archive">
+            <div class="archive-year"> 2025 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 9 - CPU 信息解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/02</span>
+            <a class="archive-post-title" href="/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7 - MainThread 和 RenderThread 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/26</span>
+            <a class="archive-post-title" href="/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/26</span>
+            <a class="archive-post-title" href="/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto 系列 5：Android App 基于 Choreographer 的渲染流程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto 系列 4：使用命令行在本地打开超大 Trace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR 系列 3 ：ANR 案例分享</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR 系列 2 ：ANR 分析套路和关键 Log 介绍</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-01-ANR-Design/">Android ANR 系列 1 ：理解 Android ANR 设计思想</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2024 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto 系列 3：熟悉 Perfetto View</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto 系列 2：Perfetto Trace 抓取</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto 系列 1：Perfetto 工具简介</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/2024/03/27/Android-Perfetto-101/">Android Perfetto 系列目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/01</span>
+            <a class="archive-post-title" href="/2024/01/01/2023-review/">2023 年的方方面面</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2023 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/30</span>
+            <a class="archive-post-title" href="/2023/12/30/the-performance/">关于 The Android Performance 知识星球介绍</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/15</span>
+            <a class="archive-post-title" href="/2023/10/15/the-performance-design-of-os-en/">The Performance Design Of OS</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/2023/08/21/the-performance-design-of-os/">OS 设计之性能设计</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/2023/05/14/bad-android-app-with-system-permissions/">当 App 有了系统权限，真的可以为所欲为？</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2022 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/2022/03/27/the-performance-tea-part-01/">The Performance 星球茶话会 - 第一期</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/2022/03/13/android-systrace-cpu-state-running/">Systrace 线程 CPU 运行状态分析技巧 - Running 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/2022/01/21/android-systrace-cpu-state-runnable/">Systrace 线程 CPU 运行状态分析技巧 - Runnable 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/03</span>
+            <a class="archive-post-title" href="/2022/01/03/2021-Review/">回顾 2021</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2021 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/27</span>
+            <a class="archive-post-title" href="/2021/10/27/if-i-write-a-book-about-performance/">一本讲 Android 流畅性的书，应该有什么内容？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/26</span>
+            <a class="archive-post-title" href="/2021/10/26/build-android-12/">Android 系统开发系列（1）：Android 12 源代码下载、编译和刷机</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace 响应速度实战 3 ：响应速度延伸知识</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace 响应速度实战 2 ：响应速度实战分析-以启动速度为例</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace 响应速度实战 1 ：了解响应速度原理</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace 流畅性实战 3 ：卡顿分析过程中的一些疑问</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace 流畅性实战 2 ：案例分析 - MIUI 桌面滑动卡顿分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace 流畅性实战 1 ：了解卡顿原理</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2020 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span>
+            <a class="archive-post-title" href="/2020/08/20/weibo-imageload-opt-on-huawei/">华为手机刷微博体验更好？技术角度的一些分析和思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/2020/05/26/samsung_crash/">一个「闰」字引发的事故 - 三星系统重启分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/2020/05/07/Android-App-Chain-Wakeup/">Android App 链式唤醒分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/14</span>
+            <a class="archive-post-title" href="/2020/02/14/Android-Systrace-SurfaceFlinger/">Android Systrace 基础知识 - SurfaceFlinger 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/03</span>
+            <a class="archive-post-title" href="/2020/02/03/android-development-learning-path-2020-edition/">Android 开发者学习路线(2020 版本)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span>
+            <a class="archive-post-title" href="/2020/01/28/2020-read/">我的 2020 年读书单</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2019 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/21</span>
+            <a class="archive-post-title" href="/2019/12/21/Android-Systrace-CPU/">Android Systrace 基础知识 - CPU Info 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/15</span>
+            <a class="archive-post-title" href="/2019/12/15/Android-Systrace-Triple-Buffer/">Android Systrace 基础知识 - Triple Buffer 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/06</span>
+            <a class="archive-post-title" href="/2019/12/06/Android-Systrace-Binder/">Android Systrace 基础知识 - Binder 和锁竞争解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/2019/12/01/BlogMap/">「置顶」博客文章目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/2019/12/01/Android-Systrace-Vsync/">Android Systrace 基础知识 - Vsync 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/2019/11/18/Android-App-Lunch-Optimize/">Android App 启动优化全记录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/06</span>
+            <a class="archive-post-title" href="/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Android Systrace 基础知识 - MainThread 和 RenderThread 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/04</span>
+            <a class="archive-post-title" href="/2019/11/04/Android-Systrace-Input/">Android Systrace 基础知识 - Input 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/24</span>
+            <a class="archive-post-title" href="/2019/10/24/Android-Background-Animation/">Android 中的“后台无效动画“行为分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/22</span>
+            <a class="archive-post-title" href="/2019/10/22/Android-Choreographer/">Android 基于 Choreographer 的渲染机制详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/2019/09/18/Android-Jank-Due-To-Low-Memory/">Android 中的卡顿丢帧原因概述 - 低内存篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/17</span>
+            <a class="archive-post-title" href="/2019/09/17/Android-Kill-Background-App-Debug/">Android 桌面被杀问题分析案例</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Due-To-App/">Android 中的卡顿丢帧原因概述 - 应用篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Due-To-System/">Android 中的卡顿丢帧原因概述 - 系统篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Debug/">Android 中的卡顿丢帧原因概述 - 方法论</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/2019/09/01/Android-Activity-Lunch-Mode/">Android 中的 Activity Launch Mode 详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/2019/07/27/Android-Hardware-Layer/">Android 中的 Hardware Layer 详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/23</span>
+            <a class="archive-post-title" href="/2019/07/23/Android-Systrace-Pre/">Android Systrace 基础知识 -- 分析 Systrace 预备知识</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/29</span>
+            <a class="archive-post-title" href="/2019/06/29/Android-Systrace-SystemServer/">Android Systrace 基础知识 - SystemServer 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/2019/05/28/Android-Systrace-About/">Android Systrace 基础知识 -- Systrace 简介</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/27</span>
+            <a class="archive-post-title" href="/2019/05/27/why-60-fps/">Android Systrace 基础知识 -- Why 60 fps ？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/2019/05/26/Android_Systrace_0/">Android Systrace -- 系列文章目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/15</span>
+            <a class="archive-post-title" href="/2019/05/15/90hz-on-android/">Android 新的流畅体验，90Hz 漫谈</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/2019/04/07/liqi/">利器 - 高效工具推荐</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/2019/01/21/android-performance-case-jank-accessbility/">Android 无障碍服务导致的整机卡顿案例分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/12</span>
+            <a class="archive-post-title" href="/2019/01/12/recommend-of-2018/">2018 年度好物推荐 - 给辛勤工作的自己一点奖励</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2018 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span>
+            <a class="archive-post-title" href="/2018/11/01/android-system-develop-0/">Android 系统开发源码环境搭建</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/25</span>
+            <a class="archive-post-title" href="/2018/10/25/How-do-engineers-count-well/">陆奇：除了好代码，工程师怎样才算优秀？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/01</span>
+            <a class="archive-post-title" href="/2018/10/01/how-to-stop-sucking-and-be-awesome-instead-8/">程序员的修炼-08-阅读之美</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/30</span>
+            <a class="archive-post-title" href="/2018/09/30/how-to-stop-sucking-and-be-awesome-instead-7/">程序员的修炼-07-游戏与编程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/29</span>
+            <a class="archive-post-title" href="/2018/09/29/how-to-stop-sucking-and-be-awesome-instead-6/">程序员的修炼-06-互联网那些事</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/28</span>
+            <a class="archive-post-title" href="/2018/09/28/how-to-stop-sucking-and-be-awesome-instead-5/">程序员的修炼-05-了解你的用户</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/27</span>
+            <a class="archive-post-title" href="/2018/09/27/how-to-stop-sucking-and-be-awesome-instead-4/">程序员的修炼-04-关于测试的一些思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/26</span>
+            <a class="archive-post-title" href="/2018/09/26/how-to-stop-sucking-and-be-awesome-instead-3/">程序员的修炼-03-Web 设计原则</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/20</span>
+            <a class="archive-post-title" href="/2018/09/20/how-to-stop-sucking-and-be-awesome-instead-2/">程序员的修炼-02-编程之道</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/2018/09/19/how-to-stop-sucking-and-be-awesome-instead-1/">程序员的修炼-01-绝地反击之术</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2018/09/13/android-memory/">Android 系统不释放内存吗？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/13</span>
+            <a class="archive-post-title" href="/2018/08/13/Some-Thoughts-on-the-Fluency-of-Android/">关于 Android 系统流畅性的一些思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/20</span>
+            <a class="archive-post-title" href="/2018/05/20/zhihu-startingwindow/">知乎 救救你的 StartingWindow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/2018/05/07/Android-performance-optimization-skills-and-tools/">「置顶」Android 性能优化必知必会</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/2018/01/06/2017%E5%B9%B4%E5%BA%A6%E6%9C%80%E6%8E%A8%E8%8D%90/">2017 年度好物推荐 - 给辛勤工作的自己一点奖励</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2017 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/23</span>
+            <a class="archive-post-title" href="/2017/04/23/About-work/">2017</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2016 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/2016/04/05/android-bottom-bar-2/">Android Bottom navigation 规范二：样式、行为与规格</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/2016/04/05/android-bottom-bar-1/">Android Bottom Navigation 规范一：使用方法</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2015 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/31</span>
+            <a class="archive-post-title" href="/2015/12/31/How-to-calculation-android-app-lunch-time/">Android 中如何计算 App 的启动时间？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/29</span>
+            <a class="archive-post-title" href="/2015/12/29/Android%E5%BA%94%E7%94%A8%E5%90%AF%E5%8A%A8%E4%BC%98%E5%8C%96-%E4%B8%80%E7%A7%8DDelayLoad%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%92%8C%E5%8E%9F%E7%90%86-%E4%B8%8B%E7%AF%87/">Android 应用启动优化:一种 DelayLoad 的实现和原理(下篇)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/2015/11/18/Android-app-lunch-optimize-delay-load/">Android 应用启动优化 - 一种 DelayLoad 的实现和原理(上篇)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/12</span>
+            <a class="archive-post-title" href="/2015/08/12/AndroidL-hwui-RenderThread-workflow/">Android hwui 中 RenderThread 工作流程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/2015/08/05/HashMap/">Java7 HashMap 源码分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-onTrimMemory/">Android 代码内存优化建议 - OnTrimMemory 优化</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-AndroidResource/">Android 代码内存优化建议 - Android 资源篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-Google/">Android 代码内存优化建议 - Android 官方篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-Java/">Android 代码内存优化建议 - Java 官方篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/29</span>
+            <a class="archive-post-title" href="/2015/05/29/Nexus6-with-Android-M/">Nexus6 with Android M 开启多窗口模式</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/06</span>
+            <a class="archive-post-title" href="/2015/05/06/Java-Singleton/">细说 Java 单例模式</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-4/">Android 性能优化典范 - Profile GPU Rendering</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-3/">Android 性能优化典范 - Understanding VSYNC</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-2/">Android 性能优化典范之 Understanding Overdraw</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-1/">Android 性能优化典范 - Render Performance</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns/">Android 性能优化典范综述</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/">Android 内存优化之三 - 打开 MAT 中的 Bitmap 原图</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android 内存优化之二 - MAT使用进阶</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android 内存优化(1) - MAT 使用入门</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/31</span>
+            <a class="archive-post-title" href="/2015/03/31/android-performance-case-study-follow-up/">Android性能优化后续</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-5/">Android 小技巧 - 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-4/">Android 小技巧 - 4</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-3/">Android 小技巧 -3</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/04</span>
+            <a class="archive-post-title" href="/2015/02/04/build-rom-for-nexus5/">为 Nexus5 编译 AndroidL 固件</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/30</span>
+            <a class="archive-post-title" href="/2015/01/30/android-performance-tools-systrace-1/">Android 性能优化之 Systrace 工具介绍(一)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/16</span>
+            <a class="archive-post-title" href="/2015/01/16/view-android-source-code-with-androidstudio/">使用 Android Studio 查看 Android Lollipop 源码</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/13</span>
+            <a class="archive-post-title" href="/2015/01/13/android-performance-optimization-overdraw-2/">Android 性能优化之过渡绘制 - 实战篇</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2014 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/2014/10/20/android-performance-optimization-overdraw-1/">Android 性能优化之过渡绘制 - 理论篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/03</span>
+            <a class="archive-post-title" href="/2014/06/03/android-edittext-do-not-auto-get-focus/">Android 小技巧 - 如何让EditText不自动获取焦点</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/31</span>
+            <a class="archive-post-title" href="/2014/05/31/android-tips-round-up-2/">Android 小技巧 -2</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/2014/05/28/android-tips-round-up-1/">Android 小技巧 - 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/02</span>
+            <a class="archive-post-title" href="/2014/05/02/android_log_to_file/">Android Tools - Log2File</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/01</span>
+            <a class="archive-post-title" href="/2014/04/01/android-service-build-your-own-notification-servers-app/">Android Service：开发自己的通知中心(2):辅助性服务实战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/25</span>
+            <a class="archive-post-title" href="/2014/03/25/ubuntu-adb-can-not-find-devices/">Android:Ubuntu 下执行 Adb 命令找不到设备</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/17</span>
+            <a class="archive-post-title" href="/2014/03/17/android-build-your-own-android-notification-service-app/">Android Service：开发自己的通知中心(1):辅助性服务介绍</a>
+        </li>
+            </ul>
+    </div>
+</div>
+
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="年度推荐">
+                <span class="iconfont-archer">&#xe606;</span>
+                年度推荐
+            </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="随笔">
+                <span class="iconfont-archer">&#xe606;</span>
+                随笔
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="年终总结">
+                <span class="iconfont-archer">&#xe606;</span>
+                年终总结
+            </span>
+            <span class="sidebar-tag-name" data-tags="知识星球">
+                <span class="iconfont-archer">&#xe606;</span>
+                知识星球
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="性能优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                性能优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="线程优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                线程优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR分析">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR分析
+            </span>
+            <span class="sidebar-tag-name" data-tags="页面响应">
+                <span class="iconfont-archer">&#xe606;</span>
+                页面响应
+            </span>
+            <span class="sidebar-tag-name" data-tags="电量优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                电量优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Kotlin">
+                <span class="iconfont-archer">&#xe606;</span>
+                Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="程序员">
+                <span class="iconfont-archer">&#xe606;</span>
+                程序员
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计规范">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计规范
+            </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿
+            </span>
+            <span class="sidebar-tag-name" data-tags="读书笔记">
+                <span class="iconfont-archer">&#xe606;</span>
+                读书笔记
+            </span>
+            <span class="sidebar-tag-name" data-tags="程序员的修炼">
+                <span class="iconfont-archer">&#xe606;</span>
+                程序员的修炼
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计原则">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计原则
+            </span>
+            <span class="sidebar-tag-name" data-tags="测试">
+                <span class="iconfont-archer">&#xe606;</span>
+                测试
+            </span>
+            <span class="sidebar-tag-name" data-tags="了解你的用户">
+                <span class="iconfont-archer">&#xe606;</span>
+                了解你的用户
+            </span>
+            <span class="sidebar-tag-name" data-tags="游戏与编程">
+                <span class="iconfont-archer">&#xe606;</span>
+                游戏与编程
+            </span>
+            <span class="sidebar-tag-name" data-tags="互联网那些事">
+                <span class="iconfont-archer">&#xe606;</span>
+                互联网那些事
+            </span>
+            <span class="sidebar-tag-name" data-tags="阅读之美">
+                <span class="iconfont-archer">&#xe606;</span>
+                阅读之美
+            </span>
+            <span class="sidebar-tag-name" data-tags="利器">
+                <span class="iconfont-archer">&#xe606;</span>
+                利器
+            </span>
+            <span class="sidebar-tag-name" data-tags="iOS">
+                <span class="iconfont-archer">&#xe606;</span>
+                iOS
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design
+            </span>
+            <span class="sidebar-tag-name" data-tags="Smooth">
+                <span class="iconfont-archer">&#xe606;</span>
+                Smooth
+            </span>
+            <span class="sidebar-tag-name" data-tags="体验优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                体验优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="用户体验">
+                <span class="iconfont-archer">&#xe606;</span>
+                用户体验
+            </span>
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+        缺失模块，请参考主题文档进行安装配置：https://github.com/fi3ework/hexo-theme-archer#%E5%AE%89%E8%A3%85%E4%B8%BB%E9%A2%98
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="随笔">
+            <span class="iconfont-archer">&#xe60a;</span>
+            随笔
+        </span>
+        <span class="sidebar-category-name" data-categories="读书笔记">
+            <span class="iconfont-archer">&#xe60a;</span>
+            读书笔记
+        </span>
+        <span class="sidebar-category-name" data-categories="Android">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
+        </span>
+        <span class="sidebar-category-name" data-categories="iOS">
+            <span class="iconfont-archer">&#xe60a;</span>
+            iOS
+        </span>
+        <span class="sidebar-category-name" data-categories="Android性能优化">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android性能优化
+        </span>
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+
+    </div>
+</div>
+
+        <!-- site-meta -->
+        <script>
+    var siteMetaRoot = "/"
+    if (siteMetaRoot === "undefined") {
+        siteMetaRoot = '/'
+    }
+    var siteMeta = {
+        url: "https://androidperformance.com",
+        root: siteMetaRoot,
+        author: "Gracker"
+    }
+</script>
+
+        <!-- import experimental options here -->
+        <!-- Custom Font -->
+
+        <!-- jquery (must load before main.js) -->
+        <script defer src="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+        <!-- main func (depends on jQuery) -->
+        <script src="/scripts/main.js" defer></script>
+        <!-- fancybox -->
+        <script>
+            (function(){
+              var urls = [
+                'https://cdn.bootcdn.net/ajax/libs/fancyapps-ui/5.0.36/fancybox/fancybox.umd.js',
+                'https://cdn.jsdelivr.net/npm/@fancyapps/ui@5.0.36/dist/fancybox/fancybox.umd.js'
+              ];
+              function loadNext(){
+                var u = urls.shift();
+                if(!u) return;
+                var s = document.createElement('script');
+                s.src = u; s.defer = true;
+                s.onload = function(){ if (window.Fancybox) { window.Fancybox.bind('[data-fancybox]'); } };
+                s.onerror = loadNext;
+                document.head.appendChild(s);
+              }
+              loadNext();
+            })();
+        </script>
+        <!-- algolia -->
+        <!-- busuanzi (delay load + silent fail) -->
+        <!-- async load share.js on first click -->
+            <script>
+                (function(){
+                  var loaded = false
+                  function loadShare(){
+                    if (loaded) return
+                    loaded = true
+                    var s = document.createElement('script')
+                    s.src = '/scripts/share.js'
+                    s.async = true
+                    document.head.appendChild(s)
+                  }
+                  document.addEventListener('click', function(e){
+                    var t = e.target
+                    if (!t) return
+                    if (t.closest && t.closest('.share-wrapper')) { loadShare() }
+                    else if (t.classList && t.classList.contains('share-wrapper')) { loadShare() }
+                  }, true)
+                })();
+            </script>
+        <!-- mermaid -->
+    </body>
+</html>

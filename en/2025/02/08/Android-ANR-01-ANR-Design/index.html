@@ -1,0 +1,1785 @@
+<!DOCTYPE html>
+<html lang="en">
+    <!-- title -->
+            <!-- keywords -->
+
+                  <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <meta name="author" content="Gracker">
+                    <meta name="renderer" content="webkit">
+                    <meta name="copyright" content="Gracker">
+                      <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,Optimization,Startup,Perfetto,Systrace,RenderThread,Java,Responsiveness,Smoothness">
+                          <meta name="description" content="Technical blog about Android system performance optimization">
+                          <meta name="description" content="This is the first article in the Android App ANR series, mainly analyzing the design philosophy of Android ANR from a system perspective. The series directory is as follows:  Android App ANR Series 1:">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Android ANR Series 1: Understanding Android ANR Design Philosophy">
+<meta property="og:url" content="https://androidperformance.com/en/2025/02/08/Android-ANR-01-ANR-Design/index.html">
+<meta property="og:site_name" content="Android Performance">
+<meta property="og:description" content="This is the first article in the Android App ANR series, mainly analyzing the design philosophy of Android ANR from a system perspective. The series directory is as follows:  Android App ANR Series 1:">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://androidperformance.com/en/images/WechatIMG581.png">
+<meta property="article:published_time" content="2025-02-08T08:28:17.000Z">
+<meta property="article:modified_time" content="2026-01-11T13:06:42.366Z">
+<meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Startup">
+<meta property="article:tag" content="Memory">
+<meta property="article:tag" content="Android">
+<meta property="article:tag" content="Perfetto">
+<meta property="article:tag" content="ANR">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://androidperformance.com/en/images/WechatIMG581.png">
+                            <meta http-equiv="Cache-control" content="no-cache">
+                            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+                            <link rel="icon" href="/en/assets/favicon.ico">
+                                <title>
+                                  Android ANR Series 1: Understanding Android ANR Design Philosophy · Android Performance
+                                </title>
+                                <!-- /*! loadCSS. [c]2017 Filament Group, Inc. MIT License */
+/* This file is meant as a standalone workflow for
+- testing support for link[rel=preload]
+- enabling async CSS loading in browsers that do not support rel=preload
+- applying rel preload css once loaded, whether supported or not.
+*/ -->
+<script>
+    (function (w) {
+        'use strict'
+        // rel=preload support test
+        if (!w.loadCSS) {
+            w.loadCSS = function () {}
+        }
+        // define on the loadCSS obj
+        var rp = (loadCSS.relpreload = {})
+        // rel=preload feature support test
+        // runs once and returns a function for compat purposes
+        rp.support = (function () {
+            var ret
+            try {
+                ret = w.document.createElement('link').relList.supports('preload')
+            } catch (e) {
+                ret = false
+            }
+            return function () {
+                return ret
+            }
+        })()
+
+        // if preload isn't supported, get an asynchronous load by using a non-matching media attribute
+        // then change that media back to its intended value on load
+        rp.bindMediaToggle = function (link) {
+            // remember existing media attr for ultimate state, or default to 'all'
+            var finalMedia = link.media || 'all'
+
+            function enableStylesheet() {
+                link.media = finalMedia
+            }
+
+            // bind load handlers to enable media
+            if (link.addEventListener) {
+                link.addEventListener('load', enableStylesheet)
+            } else if (link.attachEvent) {
+                link.attachEvent('onload', enableStylesheet)
+            }
+
+            // Set rel and non-applicable media type to start an async request
+            // note: timeout allows this to happen async to let rendering continue in IE
+            setTimeout(function () {
+                link.rel = 'stylesheet'
+                link.media = 'only x'
+            })
+            // also enable media after 3 seconds,
+            // which will catch very old browsers (android 2.x, old firefox) that don't support onload on link
+            setTimeout(enableStylesheet, 3000)
+        }
+
+        // loop through link elements in DOM
+        rp.poly = function () {
+            // double check this to prevent external calls from running
+            if (rp.support()) {
+                return
+            }
+            var links = w.document.getElementsByTagName('link')
+            for (var i = 0; i < links.length; i++) {
+                var link = links[i]
+                // qualify links to those with rel=preload and as=style attrs
+                if (
+                    link.rel === 'preload' &&
+                    link.getAttribute('as') === 'style' &&
+                    !link.getAttribute('data-loadcss')
+                ) {
+                    // prevent rerunning on link
+                    link.setAttribute('data-loadcss', true)
+                    // bind listeners to toggle media back
+                    rp.bindMediaToggle(link)
+                }
+            }
+        }
+
+        // if unsupported, run the polyfill
+        if (!rp.support()) {
+            // run once at least
+            rp.poly()
+
+            // rerun poly on an interval until onload
+            var run = w.setInterval(rp.poly, 500)
+            if (w.addEventListener) {
+                w.addEventListener('load', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            } else if (w.attachEvent) {
+                w.attachEvent('onload', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            }
+        }
+
+        // commonjs
+        if (typeof exports !== 'undefined') {
+            exports.loadCSS = loadCSS
+        } else {
+            w.loadCSS = loadCSS
+        }
+    })(typeof global !== 'undefined' ? global : this)
+</script>
+
+                                  <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/en/font/Oswald-Regular.woff2") format('woff2'),
+             url("/en/font/Oswald-Regular.ttf") format('truetype');
+        font-display: swap;
+    }
+
+    body {
+        margin: 0;
+    }
+
+    /* Removed initial hide to show content immediately */
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(
+            -45deg,
+            #444 0,
+            #444 80px,
+            #333 80px,
+            #333 160px
+        );
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+</style>
+
+                                    <link id="stylesheet-base" rel="preload" href="/en/css/style.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <link id="stylesheet-mobile" rel="preload" href="/en/css/mobile.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet';this.media='screen and
+                                    (max-width: 960px)'">
+                                    <link id="stylesheet-theme-dark" rel="preload" href="/en/css/dark.css
+                                    " as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <!-- Font Awesome CSS (with CDN fallback) -->
+                                    <link id="stylesheet-fontawesome" rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+                                      as="style" onload="this.onload=null;this.rel='stylesheet'"
+                                      onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css';this.rel='stylesheet'">
+                                    <link rel="preconnect" href="https://cdn.bootcdn.net" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.bootcdn.net">
+                                    <link rel="preconnect" href="https://cdn.staticfile.org" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.staticfile.org">
+                                    <link rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js" as="script">
+                                    <link rel="preload" href="/en/scripts/main.js" as="script">
+                                    <!-- use compressed font format to reduce transfer size -->
+                                    <link rel="preload" href="/en/font/Source%5C%20Sans%5C%20Pro.woff2"
+                                      as="font" type="font/woff2" crossorigin>
+                                    <link rel="preload" href="/en/font/Source%5C%20Sans%5C%20Pro.woff" as="font"
+                                      type="font/woff" crossorigin>
+                                    <link rel="preload" href="https://at.alicdn.com/t/font_327081_1dta1rlogw17zaor.woff"
+                                      as="font" crossorigin>
+                                    <!-- algolia -->
+                                        <!-- 百度统计（延迟加载，失败静默）  -->
+                                            <!-- CNZZ（延迟加载，失败静默）  -->
+                                                <!-- Google tag (gtag.js) 延迟加载，失败静默 -->
+                                                  <script>
+                                                    (function () {
+                                                      function loadGtag() {
+                                                        try {
+                                                          window.dataLayer = window.dataLayer || []
+                                                          function gtag() { dataLayer.push(arguments) }
+                                                          window.gtag = gtag
+                                                          gtag('js', new Date())
+                                                          var s = document.createElement('script')
+                                                          s.async = true
+                                                          s.src = 'https://www.googletagmanager.com/gtag/js?id=UA-50993302-2'
+                                                          s.onerror = function () { }
+                                                          s.onload = function () { gtag('config', 'UA-50993302-2') }
+                                                          document.head.appendChild(s)
+                                                        } catch (e) { }
+                                                      }
+                                                      if (window.requestIdleCallback) {
+                                                        requestIdleCallback(loadGtag, { timeout: 5000 })
+                                                      } else {
+                                                        window.addEventListener('load', function () { setTimeout(loadGtag, 3000) })
+                                                      }
+                                                    })();
+                                                  </script>
+                                                    <!-- Hreflang Tags -->
+                                                    
+                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2025/02/08/Android-ANR-01-ANR-Design/" />
+                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2025/02/08/Android-ANR-01-ANR-Design/" />
+                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2025/02/08/Android-ANR-01-ANR-Design/" />
+                  <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/en/atom.xml" title="Android Performance" type="application/atom+xml">
+</head>
+        <body class="post-body">
+        <!-- header -->
+        <header class="header header-mobile">
+    <!-- top read progress line -->
+    <div class="header-element">
+        <div class="read-progress"></div>
+    </div>
+    <!-- sidebar menu button -->
+    <div class="header-element">
+        <div class="header-sidebar-menu">
+            <div style="padding-left: 1px;">&#xe775;</div>
+        </div>
+    </div>
+    <!-- header actions -->
+    <div class="header-actions">
+        <!-- theme mode switch button -->
+        <span class="header-theme-btn header-element">
+            <i class="fas fa-adjust"></i>
+        </span>
+        <!-- back to home page text -->
+        <span class="home-link header-element">
+            <a href="/en/">Android Performance</a>
+        </span>
+    </div>
+    <!-- toggle banner -->
+    <div class="banner">
+        <div class="blog-title header-element">
+            <a href="/en/">Android Performance</a>
+        </div>
+        <div class="post-title header-element">
+            <a href="#" class="post-name">Android ANR Series 1: Understanding Android ANR Design Philosophy</a>
+        </div>
+    </div>
+</header>
+
+        <!-- fixed footer -->
+        <footer class="footer-fixed">
+    <!-- donate button -->
+    <div class="donate-popup donate-popup--hidden">
+    <div class="donate-popup__title">Buy Me A Coffee</div>
+    <div class="donate-popup__content">
+        <div class="donate-popup__content-description">If you find this article helpful, consider buying me a coffee.</div>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Wechat"
+            alt="Wechat"
+            src="/en/assets/donate-wechat.png"
+        ></img>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Alipay"
+            alt="Alipay"
+            src="/en/assets/donate-alipay.png"
+        ></img>
+    </div>
+</div>
+
+    <div
+        title="Donate to the author"
+        class="footer-fixed-btn footer-fixed-btn--hidden donate-btn"
+    >
+        <i class="fas fa-donate"></i>
+    </div>
+
+    <!-- back to top button -->
+    <div class="footer-fixed-btn footer-fixed-btn--hidden back-top">
+        <div>&#xe639;</div>
+    </div>
+</footer>
+
+        <!-- wrapper -->
+        <div class="wrapper">
+            <div class="site-intro" style="    height:50vh;
+">
+    <!-- 主页  -->
+    <!-- 404页  -->
+    <div class="site-intro-placeholder"></div>
+    <picture>
+            <source type="image/webp" srcset="/en/intro/post-bg.webp">
+        <img class="site-intro-img"
+             src="/en/intro/post-bg.jpg"
+             alt=""
+loading="lazy"             decoding="async"
+             fetchpriority="auto"
+             sizes="100vw">
+    </picture>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+                Android ANR Series 1: Understanding Android ANR Design Philosophy
+            <!-- 404 -->
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            <!-- 404 -->
+        </p>
+        <!-- 文章页 meta -->
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                    <div class="post-intro-tags" >
+        <span class="post-category" data-categories="Android">
+            <i class="fas fa-folder post-category-icon"></i>
+            <span class="post-category-text">
+                Android
+            </span>
+        </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Startup">Startup</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Memory">Memory</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="ANR">ANR</a>
+</div>
+
+                <!-- 文章字数统计 -->
+                    <div class="post-intro-read">
+                        <span>Word count: <span class="post-count word-count">3.9k</span>Reading time: <span class="post-count reading-time">24 min</span></span>
+                    </div>
+                <div class="post-intro-meta">
+                    <!-- 撰写日期 -->
+                    <span class="iconfont-archer post-intro-calander">&#xe676;</span>
+                    <span class="post-intro-time">2025/02/08</span>
+                    <!-- 文章分享 -->
+                    <span class="share-wrapper">
+                        <span class="iconfont-archer share-icon">&#xe71d;</span>
+                        <span class="share-text">Share</span>
+                        <ul class="share-list">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+    </div>
+</div>
+
+            
+            <script>
+  // get user agent
+  function getBrowserVersions() {
+    var u = window.navigator.userAgent
+    return {
+      userAgent: u,
+      trident: u.indexOf('Trident') > -1, //IE内核
+      presto: u.indexOf('Presto') > -1, //opera内核
+      webKit: u.indexOf('AppleWebKit') > -1, //苹果、谷歌内核
+      gecko: u.indexOf('Gecko') > -1 && u.indexOf('KHTML') == -1, //火狐内核
+      mobile: !!u.match(/AppleWebKit.*Mobile.*/), //是否为移动终端
+      ios: !!u.match(/\(i[^;]+;( U;)? CPU.+Mac OS X/), //ios终端
+      android: u.indexOf('Android') > -1 || u.indexOf('Linux') > -1, //android终端或者uc浏览器
+      iPhone: u.indexOf('iPhone') > -1 || u.indexOf('Mac') > -1, //是否为iPhone或者安卓QQ浏览器
+      iPad: u.indexOf('iPad') > -1, //是否为iPad
+      webApp: u.indexOf('Safari') == -1, //是否为web应用程序，没有头部与底部
+      weixin: u.indexOf('MicroMessenger') == -1, //是否为微信浏览器
+      uc: u.indexOf('UCBrowser') > -1, //是否为android下的UC浏览器
+    }
+  }
+  var browser = {
+    versions: getBrowserVersions(),
+  }
+  console.log('userAgent: ' + browser.versions.userAgent)
+
+  // callback
+  function fontLoaded() {
+    console.log('font loaded')
+    if (document.getElementsByClassName('site-intro-meta')) {
+      document
+        .getElementsByClassName('intro-title')[0]
+        .classList.add('intro-fade-in')
+      document
+        .getElementsByClassName('intro-subtitle')[0]
+        .classList.add('intro-fade-in')
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+      if (postIntros) {
+        postIntros.classList.add('post-fade-in')
+      }
+    }
+  }
+
+  // UC不支持跨域，所以直接显示
+  function asyncCb() {
+    if (browser.versions.uc) {
+      console.log('UCBrowser')
+      fontLoaded()
+    } else {
+      WebFont.load({
+        custom: {
+          families: ['Oswald-Regular'],
+        },
+        loading: function () {
+          // 所有字体开始加载
+          // console.log('font loading');
+        },
+        active: function () {
+          // 所有字体已渲染
+          fontLoaded()
+        },
+        inactive: function () {
+          // 字体预加载失败，无效字体或浏览器不支持加载
+          console.log('inactive: timeout')
+          fontLoaded()
+        },
+        timeout: 5000, // Set the timeout to two seconds
+      })
+    }
+  }
+
+  function asyncErr() {
+    console.warn('script load from CDN failed, will load local script')
+  }
+
+  // load webfont-loader async, and add callback function
+  function async(u, cb, err) {
+    var d = document,
+      t = 'script',
+      o = d.createElement(t),
+      s = d.getElementsByTagName(t)[0]
+    o.src = u
+    if (cb) {
+      o.addEventListener(
+        'load',
+        function (e) {
+          cb(null, e)
+        },
+        false
+      )
+    }
+    if (err) {
+      o.addEventListener(
+        'error',
+        function (e) {
+          err(null, e)
+        },
+        false
+      )
+    }
+    s.parentNode.insertBefore(o, s)
+  }
+
+  var asyncLoadWithFallBack = function (arr, success, reject) {
+    var currReject = function () {
+      reject()
+      arr.shift()
+      if (arr.length) async(arr[0], success, currReject)
+    }
+
+    async(arr[0], success, currReject)
+  }
+
+  asyncLoadWithFallBack(
+    [
+      'https://cdn.bootcdn.net/ajax/libs/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.staticfile.org/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.jsdelivr.net/npm/webfontloader@1.6.28/webfontloader.min.js',
+      "/en/lib/webfontloader.min.js",
+    ],
+    asyncCb,
+    asyncErr
+  )
+</script>
+
+            <img class="loading" src="/en/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" alt="loading">
+            <div class="container container-unloaded">
+                <main class="main post-page">
+    <article class="article-entry">
+        <p>This is the first article in the Android App ANR series, mainly analyzing the design philosophy of Android ANR from a system perspective. The series directory is as follows:</p>
+<ol>
+<li><a href="/en/2025/02/08/Android-ANR-01-ANR-Design/">Android App ANR Series 1: Understanding Android ANR Design Philosophy</a></li>
+<li><a href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android App ANR Series 2: ANR Analysis Routines and Key Log Introduction</a></li>
+<li><a href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android App ANR Series 3: ANR Case Sharing</a></li>
+</ol>
+<span id="more"></span>
+
+<h1 id="1-Universality-and-Complexity-of-ANR"><a href="#1-Universality-and-Complexity-of-ANR" class="headerlink" title="1. Universality and Complexity of ANR"></a>1. Universality and Complexity of ANR</h1><p>In the Android ecosystem, Application Not Responding (<code>ANR</code>) is not only a common challenge for developers but also a core embodiment of system design philosophy. Although <code>ANR</code> is often simplified as a synonym for “time-consuming operations on the main thread,” this superficial understanding is far from enough to reveal the essence of the problem. In fact, the root cause of <code>ANR</code> lies in the complex synergy between Android’s multi-process architecture, event distribution, and resource scheduling mechanisms. Its essence is a comprehensive manifestation of strict constraints and monitoring imposed by the system on application behavior.</p>
+<p>Android explicitly characterizes <code>ANR</code> as an application-layer problem, which is in sharp contrast to <code>SNR</code> (System Not Responding). <code>SNR</code> refers to the loss of responsiveness of system processes (such as <code>system_server</code>), usually relying on the Watchdog mechanism to monitor the status of key system threads; while <code>ANR</code> relies on the message scheduling mechanism, where the system process uses a carefully designed timeout model to track the responsiveness of the application’s main thread. This distinction reflects the governance strategies adopted by the system for problems at different levels:</p>
+<ul>
+<li><strong>SNR</strong> focuses on ensuring the survival of core system services, adopting an active polling monitoring method;</li>
+<li><strong>ANR</strong> focuses on the real-time response of application processes, judging through an event-driven asynchronous detection mechanism.</li>
+</ul>
+<p>From the perspective of system architecture, the <code>ANR</code> mechanism is mainly implemented at the system layer (i.e., in the <code>system_server</code> process). Its core lies in building a cross-process event monitoring system. When an application process initiates an operation request (such as starting <code>Activity</code>, processing application broadcasts, etc.) to system services through <code>Binder</code>, the system will synchronize the start of a timeout timer; and for asynchronous operations such as input events, <code>InputDispatcher</code> will establish an event channel with the window through <code>socket</code>, and start timeout detection after the event is dispatched. This layered monitoring design fully reflects the differentiated processing strategies adopted by Android for different task types.</p>
+<p>The deep significance of the <code>ANR</code> mechanism lies in balancing openness and system controllability. As an open platform, Android allows applications to freely apply for hardware resources (such as <code>CPU</code>, <code>IO</code>, <code>memory</code>, etc.), but strict rules must be used to prevent the abnormal behavior of a single application from spreading to the entire system. When a timeout event is detected, the system initiates a multi-dimensional circuit breaker mechanism: first, force-terminate the problematic process to release key system resources (such as preventing it from occupying the <code>Binder</code> thread pool or file descriptors), thereby avoiding cascading failures; at the same time, the system will freeze the process state and collect key information such as <code>CPU</code> usage, thread stacks, and memory snapshots, writing this data to <code>/data/anr/traces.txt</code> to preserve the scene for subsequent problem analysis. Even more cleverly, the system hands over the final operation right to the user through a user-visible pop-up window, which not only avoids the risk of misjudgment caused by automated processing but also maintains the continuity of human-computer interaction. This design combining “fault isolation - scene protection - user decision” fully demonstrates Android’s wisdom in balancing technical rigor and user experience friendliness.</p>
+<hr>
+<h1 id="2-Core-Design-Philosophy-of-ANR"><a href="#2-Core-Design-Philosophy-of-ANR" class="headerlink" title="2. Core Design Philosophy of ANR"></a>2. Core Design Philosophy of ANR</h1><h2 id="Essence-of-ANR-System-Level-Monitoring-and-Mandatory-Intervention"><a href="#Essence-of-ANR-System-Level-Monitoring-and-Mandatory-Intervention" class="headerlink" title="Essence of ANR: System-Level Monitoring and Mandatory Intervention"></a>Essence of ANR: System-Level Monitoring and Mandatory Intervention</h2><p>The ANR mechanism constitutes a deep-seated stability defense system in the Android system architecture. Its core lies in building a global safety net independent of application status through <strong>cross-layer collaborative monitoring</strong> and <strong>asynchronous decision isolation</strong>. This design is far from simple timeout detection, but is deeply rooted in the organic combination of the Linux process sandbox mechanism and the Android component architecture. System processes (such as <code>system_server</code>) conduct comprehensive monitoring of component lifecycles and input event flows through two core modules: <code>ActivityManagerService</code> (AMS) and <code>InputManagerService</code> (IMS). Due to this layered architecture, monitoring logic is decoupled from business logic. Even if the main thread of the target application is completely blocked, the system can still rely on independent threads for timeout adjudication, fundamentally avoiding the risk of “monitor being dragged down by the monitored object.”</p>
+<p>At the implementation level, ANR fully embodies the essence of <strong>event-driven system design</strong>. For example, in component-type ANR scenarios, when AMS dispatches cross-process tasks to application processes through <code>Binder</code>, the system synchronizes the start of a countdown timer (such as a 20-second threshold for <code>Service</code> startup). This “bomb planting” mechanism essentially transforms asynchronous tasks into synchronous contracts with timeout constraints. After the application process completes the task, it must actively “defuse the bomb” through the <code>Binder</code> callback. Otherwise, the system will intervene to collect scene information (such as main thread stacks) and trigger user interaction. The entire process is dominated by the system process, and the application only exists as an event responder, ensuring the absolute authority of monitoring.</p>
+<p>Task dispatch relies on <code>Binder</code> synchronous calls to ensure atomicity. At the same time, AMS pushes timeout detection messages into the message queue through a dedicated <code>Handler</code>, thereby monitoring the execution of tasks within the specified time. This design not only ensures the integrity of tasks during cross-process communication but also quickly triggers circuit breaker processing after timeouts.</p>
+<hr>
+<h2 id="Component-Class-ANR-Global-Protection-Logic-for-Asynchronous-Tasks"><a href="#Component-Class-ANR-Global-Protection-Logic-for-Asynchronous-Tasks" class="headerlink" title="Component-Class ANR: Global Protection Logic for Asynchronous Tasks"></a>Component-Class ANR: Global Protection Logic for Asynchronous Tasks</h2><p>The monitoring logic of component-class ANR revolves around <code>ActivityManagerService</code> (AMS). Its essence is to realize full-link tracking of the asynchronous task lifecycle through the three-stage model of <strong>task dispatch – callback – circuit breaker</strong>. When the system dispatches a task to an application via <code>Binder</code> cross-process communication (such as starting a <code>Service</code>), AMS synchronizes the start of a timeout detection mechanism: using <code>MainHandler</code> to send delayed messages for precise timing. Taking <code>Service</code> startup as an example, when AMS calls <code>scheduleCreateService()</code> of <code>IApplicationThread</code>, it starts the corresponding timeout monitoring (default 20 seconds). If the application does not notify AMS via the <code>serviceDoneExecuting()</code> callback within the specific time, an ANR determination is triggered.</p>
+<p>Developers need to pay special attention to the <strong>timing trap of cross-process callbacks</strong>: even if the asynchronous task is completed in a sub-thread, if the <code>Binder</code> callback is delayed due to main thread message queue blocking (such as excessive calls to <code>runOnUiThread</code>), the system will still judge it as ANR.</p>
+<p><code>ProcessStateRecord</code> introduced in <strong>Android 14+</strong> has made a finer division of process states. It not only records the status of main thread message processing in detail but also monitors background tasks and suspended states in real-time, thereby reducing the false positive rate and providing developers with richer debugging information.</p>
+<p>The key to this design lies in the <strong>decoupling of synchronous transactions and asynchronous circuit breaking</strong>. Task dispatch relies on <code>Binder</code> synchronous calls to ensure atomicity, while timeout detection executes asynchronously via the <code>Handler</code> message mechanism, avoiding blocking the system main thread.</p>
+<p>When ANR is triggered, the system executes a multi-dimensional circuit breaker strategy:</p>
+<ol>
+<li><p><strong>Scene Collection</strong><br>The system collects key data such as main thread stack information, CPU usage, and process status, and writes this data to the <code>/data/anr/traces.txt</code> file. At the same time, the system uses <code>ProcessCpuTracker</code> to record detailed CPU usage statistics, providing a basis for subsequent problem analysis.</p>
+</li>
+<li><p><strong>Resource Isolation</strong><br>The system ensures the real-time nature of circuit breaker decisions through the scheduling priority adjustment mechanism of <code>ProcessRecord</code>, ensuring that ANR processing flows can be executed in a timely manner even under high system load.</p>
+</li>
+<li><p><strong>Diagnostic Data Collection</strong><br>The system provides the <code>ApplicationExitInfo</code> API, allowing developers to query historical ANR records, including occurrence time, process status, exception stacks, and other detailed information. These data are extremely important for problem reproduction and root cause analysis.</p>
+</li>
+</ol>
+<p>It is worth sensing that <strong>Android 15</strong> imposes stricter constraints on background services: foreground services must complete initialization and call <code>startForeground()</code> within 3 seconds, otherwise the system will directly trigger ANR. Specifically, the system manages this timeout mechanism via internal attributes (such as <code>persist.sys.fgs_timeout</code>) and API parameters (such as AMS internal parameters controlling foreground service startup timeouts). Developers can refer to the latest API documentation to understand these changes, ensuring that strictly response time limits are met when designing services.</p>
+<p>The system also provides a variety of tools to support the diagnosis and analysis of ANR problems:</p>
+<ul>
+<li><strong>System Log Collection</strong>: Developers can obtain ANR stack information and system reports via <code>adb</code> commands, which contain detailed system status at the time of the problem.</li>
+<li><strong>Performance Analysis Tools</strong>: Android Studio’s CPU Profiler can monitor application performance in real-time, helping developers discover potential performance issues.</li>
+<li><strong>System-Level Analysis</strong>: Perfetto provides powerful system-level performance analysis capabilities to help developers understand complex performance issues.</li>
+</ul>
+<p>Through this multi-level monitoring and protection mechanism, the Android system ensures the reliability of application response performance and provides developers with a complete problem diagnosis toolchain. Developers need to deeply understand these mechanisms, fully consider performance factors in application design, follow system lifecycle contracts, reasonably manage main thread load, and ensure timely response of key callbacks.</p>
+<p>This design philosophy reflects the Android platform’s strict requirements for application quality: promoting developers to build more reliable and responsive applications through clear timeout limits and perfect monitoring mechanisms. At the same time, rich diagnostic tools also provide necessary support for developers, helping them quickly locate and solve problems when they encounter them.</p>
+<hr>
+<h2 id="Input-Class-ANR-Dynamic-Circuit-Breaker-System-for-Event-Distribution"><a href="#Input-Class-ANR-Dynamic-Circuit-Breaker-System-for-Event-Distribution" class="headerlink" title="Input-Class ANR: Dynamic Circuit Breaker System for Event Distribution"></a>Input-Class ANR: Dynamic Circuit Breaker System for Event Distribution</h2><p>The monitoring mechanism for input-class ANR is more complex. Its core challenge lies in balancing <strong>high real-time requirements</strong> and <strong>resource efficiency</strong>. From hardware event generation to application main thread processing, the input system builds an efficient and controllable event distribution link through three major components: <code>EventHub</code>, <code>InputReader</code>, and <code>InputDispatcher</code>.</p>
+<ul>
+<li><p><strong>Event Reading Layer</strong> (<code>EventHub</code>)<br><code>EventHub</code> uses Linux’s <code>epoll</code> mechanism to listen to <code>/dev/input</code> device nodes, supporting concurrent listening of multiple devices, and implementing zero idle CPU consumption through an event-driven model (rather than polling). When a hardware interrupt is triggered, the system receives raw input data via inotify and encapsulates it as a <code>RawEvent</code>.</p>
+</li>
+<li><p><strong>Event Preprocessing</strong> (<code>InputReader</code>)<br><code>InputReader</code> performs device-related preprocessing (such as touch calibration) on raw data through specific <code>InputMappers</code> and converts it into standard input events (such as <code>MotionEvent</code> or <code>KeyEvent</code>). At the same time, necessary event filtering is performed based on device type and configuration to ensure data quality.</p>
+</li>
+<li><p><strong>Event Distribution Layer</strong> (<code>InputDispatcher</code>)<br>The core responsibility of <code>InputDispatcher</code> is to determine the current focus window and push events to the application process through <code>InputChannel</code> based on Unix Domain Socket. It uses a multiplexing mechanism to efficiently manage multiple <code>InputChannels</code> and relies on <code>WindowManagerService</code> to obtain the latest window focus information, ensuring events are accurately delivered to the target window.</p>
+</li>
+</ul>
+<p>The input ANR mechanism relies on continuous tracking and timeout determination of event status. Its core lies in the design of <strong>queue status management</strong> and <strong>cross-thread collaboration capability</strong>:</p>
+<ul>
+<li><code>inboundQueue</code>: Stores events to be distributed received from <code>InputReader</code></li>
+<li><code>outboundQueues</code>: Output queues maintained for each connection, tracking events that have been distributed but have not received completion responses via <code>waitQueue</code></li>
+<li><code>waitQueue</code>: Records events that have been distributed but have not yet received processing confirmation from the application side.</li>
+</ul>
+<p>After an event is distributed, the system tracks its processing status through the <code>MonitoredTimeout</code> mechanism. The default timeout includes 5000 milliseconds (adjustable via system properties). Timeout detection adopts an event-driven mode, triggered when new events arrive, application callbacks complete, or periodic heartbeat checks occur. Once a timeout is detected, the system notifies <code>ActivityManagerService</code> via <code>WindowManagerService</code> and collects diagnostic data including <code>InputDispatcher</code> status and application process information, subsequently potentially triggering ANR pop-ups and process restart flows.</p>
+<p>The entire input system adopts an optimized thread model design:</p>
+<ul>
+<li><code>InputReaderThread</code> focuses on event reading and preprocessing</li>
+<li><code>InputDispatcherThread</code> is responsible for event distribution and timeout monitoring</li>
+</ul>
+<p>The two achieve efficient inter-thread communication through lock-free queues, ensuring that even if the main thread of an application process is blocked, system-level input processing can still operate normally, thereby effectively preventing problem spread.</p>
+<p>For developers, special attention should be paid to the responsiveness of the main thread to avoid performing time-consuming operations in input event processing callbacks. At the same time, understanding the layered design of the input system helps to improve the efficiency of the event processing link from a holistic perspective during performance optimization.</p>
+<hr>
+<h2 id="No-Focused-Window-Class-ANR"><a href="#No-Focused-Window-Class-ANR" class="headerlink" title="No Focused Window Class ANR"></a>No Focused Window Class ANR</h2><p>No Focused Window ANR is another important unresponsive scenario in the input system. Its essence lies in the abnormal window focus state, leading to the correct distribution of input events being impossible. Unlike regular input timeouts, this type of ANR reflects coordination issues between the WindowManager subsystem and the input system.</p>
+<p>In the design of <code>WindowManagerService</code> (WMS), window focus management is an independent and complex subsystem. When the user interface changes (such as Activity switching or dialog popping up), the system triggers a series of window transaction operations: first execute <code>relayoutWindow</code> on the old window to remove the focus flag, then execute <code>addWindow</code> for the new window and grant focus. These state changes are synchronized in real-time via <code>WindowManagerPolicy</code> to <code>InputDispatcher</code>, ensuring input events can be routed to the current focus window.</p>
+<p>Acquisition and loss of focus are triggered by various system behaviors. For example:</p>
+<ul>
+<li><strong>Focus Acquisition</strong>: New Activity finishes starting and displays the first frame, <code>Dialog</code> or <code>PopupWindow</code> pops up, touching window area in split-screen mode, restoring application from background task switcher, foreground application resumes after unlocking.</li>
+<li><strong>Focus Loss</strong>: Activity covered by full-screen Activity, user presses <code>Home</code> key, system pops up key level <code>Dialog</code> such as permission request, application enters background, device lock screen, etc.</li>
+</ul>
+<p>No Focused Window ANR is often related to abnormal window lifecycle management. The most common situation is that during Activity switching, due to the delayed execution of <code>handleResumeActivity</code> of the target Activity, the system cannot determine a legal focus window within a certain period of time. Unlike input timeout ANR, input timeout means the target window exists but fails to process the event in time, while No Focused Window ANR means the system cannot find a suitable event receiver. Based on this difference, the system adopts different protection strategies for these two situations: for input timeout, the system triggers ANR after a default of 5 seconds; for no focus window situations, if the target window cannot be found after consecutive event distributions, the system will start the ANR process faster.</p>
+<p>From the perspective of application development, the code paths affecting focus switching are relatively limited, mainly involving links such as Activity lifecycle callbacks, window addition&#x2F;removal, and input event processing. Even if problems occur in these links (such as main thread blocking), they usually trigger regular ANR rather than No Focused Window ANR. Therefore, when encountering such problems, more attention should be paid to system-level indicators such as overall system resource usage status, CPU load of the <code>system_server</code> process, and <code>Binder</code> call delays between system services, rather than purely focusing on code optimization of a certain application. This is also the fundamental reason why No Focused Window ANR is often regarded as a system performance problem rather than an application quality problem.</p>
+<hr>
+<h2 id="Unifying-Principles-of-System-Design"><a href="#Unifying-Principles-of-System-Design" class="headerlink" title="Unifying Principles of System Design"></a>Unifying Principles of System Design</h2><p>Whether it is component-class ANR or Input-class ANR, their monitoring mechanisms follow the following core principles:</p>
+<ol>
+<li><strong>State Traceability</strong><br>Precisely track task progress through queues (such as <code>waitQueue</code>) and timers (such as <code>Handler</code> in AMS), ensuring the system always grasps the latest status of application behavior.</li>
+<li><strong>Fault Isolation</strong><br>Terminate the problematic process quickly after timeout to prevent local faults from spreading into system-level avalanches.</li>
+<li><strong>User Control Fallback</strong><br>Ensure users always have the final right of operation through pop-up prompts and process termination mechanisms, even if the application internals are completely out of control.</li>
+<li><strong>Developer Constraint</strong><br>Mandate that the main thread remains lightweight and asynchronous in design, promoting application architecture that fits the system design philosophy better.</li>
+</ol>
+<p>From an architectural perspective, the ANR mechanism is the Android system’s final answer to <strong>controllability of an open ecosystem</strong>—it allows developers to innovate freely while defining behavioral boundaries through rigid rules. This balance is not only reflected in technical implementation but also profoundly affects the performance optimization culture of the entire Android application.</p>
+<h1 id="Global-Resolution-and-Active-Defense-of-ANR-Problems"><a href="#Global-Resolution-and-Active-Defense-of-ANR-Problems" class="headerlink" title="Global Resolution and Active Defense of ANR Problems"></a>Global Resolution and Active Defense of ANR Problems</h1><p>The complexity of ANR problems requires us to have both <strong>technical depth</strong> and <strong>system global view</strong> within the analysis framework, and use progressive logic to transform fragmented phenomena into an evolvable cognitive system. This method is not just simple directory layering, but uses cross-validation of multi-dimensional perspectives to establish a complete mapping relationship from microscopic code defects to macroscopic system constraints.</p>
+<hr>
+<h2 id="From-Phenomenon-to-Root-Cause-Dissecting-ANR-Problems-Layer-by-Layer"><a href="#From-Phenomenon-to-Root-Cause-Dissecting-ANR-Problems-Layer-by-Layer" class="headerlink" title="From Phenomenon to Root Cause: Dissecting ANR Problems Layer by Layer"></a>From Phenomenon to Root Cause: Dissecting ANR Problems Layer by Layer</h2><p>Building a vertical analysis path follows the chain logic of <strong>“Phenomenon → Mechanism → Support → Resource”</strong>. Its goal is to clarify the complete chain from the ANR pop-up seen by users to hardware resource problems:</p>
+<ol>
+<li><p><strong>Mechanism Appearance (ANR Pop-up)</strong><br>As the outermost phenomenon visible to users, the ANR pop-up is actually the system’s final judgment on the fault—it does not reveal specific root causes, but only displays results. Developers often stop at the level of viewing stack logs and looking for main thread blocking points, but this is like only observing volcanic eruptions while ignoring the fundamental driving factors of crustal movement.</p>
+</li>
+<li><p><strong>System Implementation (AMS&#x2F;InputDispatcher)</strong><br>Delving into the system service layer, hidden behind the ANR pop-up is AMS’s <code>appNotResponding</code> trigger flow. AMS tracks component lifecycles through the <code>Binder</code> transaction state machine, while <code>InputDispatcher</code> monitors input response using <code>socket</code> event streams. Analysis at this layer reveals the <strong>difference in timeout determination logic</strong>: AMS adopts synchronous blocking detection (e.g., <code>BroadcastQueue</code> timeout calculation), while <code>InputDispatcher</code> utilizes an asynchronous non-blocking model based on <code>epoll</code> to implement event loop monitoring.</p>
+</li>
+<li><p><strong>Underlying Support (Binder&#x2F;Scheduler)</strong><br>Efficient operation of system services relies on core mechanisms of the Linux kernel. The <code>Binder</code> driver implements cross-process communication through memory mapping, and its thread pool scheduling strategy (e.g., <code>BINDER_MAX_POOL_THREADS</code> threshold limit) directly affects transaction processing capability; while the system’s fair scheduling mechanism determines whether the main thread can obtain execution resources in time through dynamic allocation of CPU time slices. The key at this layer is to analyze the contradiction between fairness and real-time performance of resource allocation—for example, to ensure fairness of multi-tasking, the system may allow CPU-intensive tasks of background processes to preempt the response time of foreground applications.</p>
+</li>
+<li><p><strong>Hardware Resources (CPU&#x2F;IO&#x2F;Memory)</strong><br>Ultimately, all software behaviors are limited by physical hardware. The out-of-order execution of the CPU may lead to randomness in lock contention problems; disk I&#x2F;O latency will amplify main thread blocking during <code>SharedPreferences</code> writing; memory bandwidth contention may prevent <code>RenderThread</code> from obtaining texture data in time. This layer requires establishing an <strong>association model between hardware indicators and software behaviors</strong>, such as using the <code>perf</code> tool to analyze the correlation between CPU cache hit rate and ANR trigger frequency.</p>
+</li>
+</ol>
+<p>This vertical deepening is not linear progression, but a process of <strong>cyclic verification</strong>: when hardware layer analysis finds memory bandwidth bottlenecks, it is necessary to backtrack to the <code>Binder</code> driver layer to check if frequent cross-process communication causes memory copy storms, and finally optimize data transmission mechanisms at the system service layer.</p>
+<hr>
+<h2 id="From-Passive-Response-to-Active-Defense-Three-Steps-for-ANR-Governance"><a href="#From-Passive-Response-to-Active-Defense-Three-Steps-for-ANR-Governance" class="headerlink" title="From Passive Response to Active Defense: Three Steps for ANR Governance"></a>From Passive Response to Active Defense: Three Steps for ANR Governance</h2><p>The evolution path of methodology—**”Diagnosis → Tracking → Prediction → Design”** reflects the transition of technical cognitive maturity. Specific steps include:</p>
+<ol>
+<li><p><strong>Stack Analysis</strong><br>Traditional ANR analysis relies on thread stacks in <code>traces.txt</code>, which is essentially a static snapshot when a fault occurs. When a problem is caused by sporadic race conditions (such as instantaneous saturation of the <code>Binder</code> thread pool), the stack may show a normal <code>NativePollOnce</code> state and cannot reveal the true resource contention process. At this time, <strong>multi-time point stack comparison technology</strong> needs to be introduced to identify thread state migration patterns by comparing stack changes within 5 seconds before and after ANR.</p>
+</li>
+<li><p><strong>Dynamic Tracking</strong><br>Using millisecond-level event tracking capabilities provided by tools such as <code>systrace</code> and <code>perfetto</code>, one can monitor the event processing cycle of the main thread <code>Looper</code> and quantify the execution time of <code>dispatchMessage</code>; combined with <code>binder_transaction</code> events in the <code>Binder</code> driver, heat maps of cross-process calls can be drawn. The core value of dynamic tracking lies in <strong>revealing hidden time correlations</strong>, such as discovering that input event delays often follow immediately after <code>SharedPreferences</code> disk write operations.</p>
+</li>
+<li><p><strong>Machine Learning Prediction</strong><br>When the root cause of ANR involves interaction of multiple subsystems (such as coupling effects of CPU scheduling, memory reclamation, and I&#x2F;O load), traditional methods struggle to handle high-dimensional data. By collecting over 20 indicators such as thread status, <code>Binder</code> interaction data, and CPU contention situations, and using machine learning algorithms to build analysis models, ANR types (such as main thread blocking, IPC deadlocks, or resource contention) can be automatically identified. Google has applied similar technology in Android Vitals to achieve cloud-based aggregated analysis of ANR root causes.</p>
+</li>
+<li><p><strong>Architectural Preventive Design</strong><br>The ultimate goal is to internalize system constraints from the code design stage, for example:</p>
+<ul>
+<li><strong>Communication Topology Constraints</strong>: Limit cross-process call levels, avoid chain calls of <code>A → B → C</code>, and use event bus broadcast patterns instead.</li>
+<li><strong>Resource Budget Management</strong>: Allocate <code>Binder</code> transaction quotas for each business module, and automatically downgrade when exceeding thresholds.</li>
+<li><strong>Asynchronous Boundary Reinforcement</strong>: Use <code>HandlerThread</code> and <code>Executor</code> to strictly isolate synchronous and asynchronous operations to prevent thread model confusion.</li>
+</ul>
+</li>
+</ol>
+<p>This evolutionary path from passive response to active defense not only provides effective strategies for preventing ANR from the root cause but also provides developers with rich diagnostic tools and optimization ideas.</p>
+<h1 id="ANR-Related-Material-Sharing"><a href="#ANR-Related-Material-Sharing" class="headerlink" title="ANR Related Material Sharing"></a>ANR Related Material Sharing</h1><ol>
+<li><a target="_blank" rel="noopener" href="https://juejin.cn/post/6864555867023343623">Reflection | Design and Implementation of Android Input System &amp; ANR Mechanism</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s/RF3m9_v5bYTYbwY-d1RloQ">Xigua Video Stability Governance System Construction 1: Tailor Principle and Practice</a> (Note: Links simplified&#x2F;corrected for formatting)</li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s/RF3m9_v5bYTYbwY-d1RloQ">Xigua Video Stability Governance System Construction 2: Raphael Principle and Practice</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s/RF3m9_v5bYTYbwY-d1RloQ">Xigua Video Stability Governance System Construction 3: Sliver Principle and Practice</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s/RF3m9_v5bYTYbwY-d1RloQ">Xigua Stutter &amp; ANR Optimization Governance and Monitoring System Construction</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s/RF3m9_v5bYTYbwY-d1RloQ">Toutiao ANR Optimization Practice Series - Design Principle and Influencing Factors</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s/RF3m9_v5bYTYbwY-d1RloQ">Toutiao ANR Optimization Practice Series - Monitoring Tools and Analysis Ideas</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s/RF3m9_v5bYTYbwY-d1RloQ">Toutiao ANR Optimization Practice Series - Instance Analysis Collection</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s/RF3m9_v5bYTYbwY-d1RloQ">Toutiao ANR Optimization Practice Series - Barrier Causes Main Thread Deadlock</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s/RF3m9_v5bYTYbwY-d1RloQ">Toutiao ANR Optimization Practice Series - Farewell to SharedPreference Waiting</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s/40T6ITvJNWR8F42530k4DA">Android ANR | Principle Analysis and Common Cases</a></li>
+</ol>
+<h1 id="References"><a href="#References" class="headerlink" title="References"></a>References</h1><ol>
+<li><a target="_blank" rel="noopener" href="https://duanqz.github.io/2015-10-12-ANR-Analysis#1-%E6%A6%82%E8%A7%88">https://duanqz.github.io/2015-10-12-ANR-Analysis#1-%E6%A6%82%E8%A7%88</a></li>
+<li><a target="_blank" rel="noopener" href="https://duanqz.github.io/2015-10-12-ANR-Analysis">https://duanqz.github.io/2015-10-12-ANR-Analysis</a></li>
+<li><a target="_blank" rel="noopener" href="http://gityuan.com/2016/12/02/app-not-response/">http://gityuan.com/2016/12/02/app-not-response/</a></li>
+<li><a target="_blank" rel="noopener" href="http://gityuan.com/2017/01/01/input-anr/">http://gityuan.com/2017/01/01/input-anr/</a></li>
+<li><a target="_blank" rel="noopener" href="https://xiaozhuanlan.com/topic/5097486132">https://xiaozhuanlan.com/topic/5097486132</a></li>
+</ol>
+<h1 id="About-Me-amp-amp-Blog"><a href="#About-Me-amp-amp-Blog" class="headerlink" title="About Me &amp;&amp; Blog"></a>About Me &amp;&amp; Blog</h1><p>Below are personal introduction and related links. I hope to communicate more with everyone in the industry. If three people walk together, there must be one who can be my teacher!</p>
+<ol>
+<li><a href="/en/about/">Blogger Personal Introduction</a>: There are personal WeChat and WeChat group links inside.</li>
+<li><a href="/en/2019/12/01/BlogMap/">This Blog Content Navigation</a>: A navigation of personal blog content.</li>
+<li><a href="/en/2018/05/07/Android-performance-optimization-skills-and-tools/">Excellent blog articles organized and collected by individuals - A must-know for Android efficiency optimization</a>: Everyone is welcome to recommend themselves and recommend others (WeChat private chat is fine)</li>
+<li><a href="/en/2023/12/30/the-performance/">Android Performance Optimization Knowledge Planet</a>: Welcome to join, thanks for your support~</li>
+</ol>
+<blockquote>
+<p><strong>One person can go faster, a group of people can go further</strong></p>
+</blockquote>
+<p><img src="/en/images/WechatIMG581.png" alt="WeChat Scan"></p>
+
+    </article>
+    <!-- license -->
+        <div class="license-wrapper">
+            <p>Author：<a href="https://androidperformance.com/en">Gracker</a>
+            <p>Link：<a href="https://androidperformance.com/en/2025/02/08/Android-ANR-01-ANR-Design/">https://androidperformance.com/en/2025/02/08/Android-ANR-01-ANR-Design/</a>
+            <p>Publish date：<a href="https://androidperformance.com/en/2025/02/08/Android-ANR-01-ANR-Design/">February 8th 2025, 4:28:17 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/en/2025/02/08/Android-ANR-01-ANR-Design/">January 11th 2026, 9:06:42 pm</a>
+            <p>License：This work is licensed under <a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a></p>
+        </div>
+    <!-- paginator -->
+    <ul class="post-paginator">
+        <li class="next">
+                <div class="nextSlogan">Next Post</div>
+                <a href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/" title="Android ANR Series 2: ANR Analysis Methodology and Key Logs">
+                    <div class="nextTitle">Android ANR Series 2: ANR Analysis Methodology and Key Logs</div>
+                </a>
+        </li>
+        <li class="previous">
+                <div class="prevSlogan">Previous Post</div>
+                <a href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/" title="Android Perfetto Series 3: Familiarizing with the Perfetto View">
+                    <div class="prevTitle">Android Perfetto Series 3: Familiarizing with the Perfetto View</div>
+                </a>
+        </li>
+    </ul>
+    <!-- comment -->
+        <div class="post-comment">
+            <!-- 来必力 City 版安装代码 -->
+
+            
+            
+            
+            <!-- utteranc评论 -->
+
+            <!-- partial('_partial/comment/changyan') -->
+            <!--PC版-->
+
+            
+            
+            
+        </div>
+    <!-- timeliness note -->
+    <!-- idea from: https://hexo.fluid-dev.com/posts/hexo-injector/#%E6%96%87%E7%AB%A0%E6%97%B6%E6%95%88%E6%80%A7%E6%8F%90%E7%A4%BA -->
+    <!-- Mathjax -->
+</main>
+
+                <!-- profile -->
+            </div>
+            <footer class="footer footer-unloaded">
+    <!-- social  -->
+        <div class="social">
+                            <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title="email" ></a>
+                <a href="https://github.com/gracker" class="iconfont-archer github" target="_blank" title="github"></a>
+                <span class="iconfont-archer wechat" title="wechat">
+                    <img class="profile-qr" src="/en/assets/Wechat.jpeg" />
+                </span>
+                <span class="iconfont-archer qq" title="qq">
+                    <img class="profile-qr" src="/en/553000664" />
+                </span>
+                <a href="https://weibo.com/gracker520" class="iconfont-archer weibo" target="_blank" title="weibo"></a>
+                <a href="https://www.zhihu.com/people/gracker" class="iconfont-archer zhihu" target="_blank" title="zhihu"></a>
+                <a href="https://twitter.com/Gracker_Gao" class="iconfont-archer twitter" target="_blank" title="twitter"></a>
+                <a href="https://juejin.im/user/557b0590e4b052e031453d76" class="iconfont-archer juejin" target="_blank" title="juejin"></a>
+                <a href="https://www.youtube.com/@grackers" class="iconfont-archer youtube" target="_blank" title="youtube"></a>
+                <a href="/en/atom.xml" class="iconfont-archer rss" target="_blank" title="rss"></a>
+
+        </div>
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- website approve for Chinese user -->
+        <div class="website-approve">
+                <span id="icp-approve" class="icp-approve">
+                    <a href="https://beian.miit.gov.cn/" target="_blank">蜀 ICP 备 20016190 号</a>
+                </span>
+        </div>
+</footer>
+
+        </div>
+        <!-- toc -->
+            <div class="toc-wrapper toc-wrapper-loding" style=    top:50vh;
+>
+                <div class="toc-catalog">
+                    <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+                </div>
+                <ol class="toc"><li class="toc-item toc-level-1"><a class="toc-link" href="#1-Universality-and-Complexity-of-ANR"><span class="toc-number">1.</span> <span class="toc-text">1. Universality and Complexity of ANR</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#2-Core-Design-Philosophy-of-ANR"><span class="toc-number">2.</span> <span class="toc-text">2. Core Design Philosophy of ANR</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#Essence-of-ANR-System-Level-Monitoring-and-Mandatory-Intervention"><span class="toc-number">2.1.</span> <span class="toc-text">Essence of ANR: System-Level Monitoring and Mandatory Intervention</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Component-Class-ANR-Global-Protection-Logic-for-Asynchronous-Tasks"><span class="toc-number">2.2.</span> <span class="toc-text">Component-Class ANR: Global Protection Logic for Asynchronous Tasks</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Input-Class-ANR-Dynamic-Circuit-Breaker-System-for-Event-Distribution"><span class="toc-number">2.3.</span> <span class="toc-text">Input-Class ANR: Dynamic Circuit Breaker System for Event Distribution</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#No-Focused-Window-Class-ANR"><span class="toc-number">2.4.</span> <span class="toc-text">No Focused Window Class ANR</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Unifying-Principles-of-System-Design"><span class="toc-number">2.5.</span> <span class="toc-text">Unifying Principles of System Design</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Global-Resolution-and-Active-Defense-of-ANR-Problems"><span class="toc-number">3.</span> <span class="toc-text">Global Resolution and Active Defense of ANR Problems</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#From-Phenomenon-to-Root-Cause-Dissecting-ANR-Problems-Layer-by-Layer"><span class="toc-number">3.1.</span> <span class="toc-text">From Phenomenon to Root Cause: Dissecting ANR Problems Layer by Layer</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#From-Passive-Response-to-Active-Defense-Three-Steps-for-ANR-Governance"><span class="toc-number">3.2.</span> <span class="toc-text">From Passive Response to Active Defense: Three Steps for ANR Governance</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#ANR-Related-Material-Sharing"><span class="toc-number">4.</span> <span class="toc-text">ANR Related Material Sharing</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#References"><span class="toc-number">5.</span> <span class="toc-text">References</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#About-Me-amp-amp-Blog"><span class="toc-number">6.</span> <span class="toc-text">About Me &amp;&amp; Blog</span></a></li></ol>
+            </div>
+        <!-- sidebar -->
+        <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+        <div class="sidebar-panel-archives">
+    <!-- 在 ejs 中将 archive 按照时间排序 -->
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 128
+        </div>
+        <!-- search  -->
+    </div>
+    <div class="post-archive">
+            <div class="archive-year"> 2025 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/16</span>
+            <a class="archive-post-title" href="/en/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto Series 10: Binder Scheduling and Lock Contention</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/en/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto Series 9: CPU Information Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/en/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto Series 8: Understanding Vsync Mechanism and Performance Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/02</span>
+            <a class="archive-post-title" href="/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto Series 7: MainThread and RenderThread Deep Dive</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/26</span>
+            <a class="archive-post-title" href="/en/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto Series 6: Why 120Hz? Advantages and Challenges</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/26</span>
+            <a class="archive-post-title" href="/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Choreographer-based Rendering Flow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto Series 4: Opening Large Traces via Command Line</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-01-ANR-Design/">Android ANR Series 1: Understanding Android ANR Design Philosophy</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR-NEW/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share-NEW/">Android ANR Series 3: ANR Case Studies</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2024 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto Series 1: Introduction to Perfetto</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/en/2024/03/27/Android-Perfetto-101/">Android Perfetto Series Catalog</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/01</span>
+            <a class="archive-post-title" href="/en/2024/01/01/2023-review/">Reflections on 2023: Health, Career, and the Future</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2023 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/30</span>
+            <a class="archive-post-title" href="/en/2023/12/30/the-performance/">Introduction to The Android Performance Knowledge Planet</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/en/2023/08/21/the-performance-design-of-os/">Performance Considerations in Operating System Design</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/en/2023/05/14/bad-android-app-with-system-permissions-NEW/">Can Apps with System Privileges Really Do Whatever They Want?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/en/2023/05/14/bad-android-app-with-system-permissions/">Can an App Really Do Whatever It Wants With System Permissions?</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2022 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/en/2022/03/27/the-performance-tea-part-01/">The Performance Community Tea Talk - Episode 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-running/">Systrace Thread CPU State Analysis Tips - Running</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-sleep/">Systrace Thread CPU State Analysis Tips - Sleep and Uninterruptible Sleep</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2022/01/21/android-systrace-cpu-state-runnable/">Systrace Thread CPU State Analysis Tips - Runnable</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/en/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/en/2022/01/07/The-Performace-1-Performance-Tools/">Android Performance Optimization: Techniques, Methods, and Tools</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/03</span>
+            <a class="archive-post-title" href="/en/2022/01/03/2021-Review/">2021 Year in Review: Baby, Career, and Growth</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2021 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/27</span>
+            <a class="archive-post-title" href="/en/2021/10/27/if-i-write-a-book-about-performance/">What Should Be in a Book About Android Smoothness?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/26</span>
+            <a class="archive-post-title" href="/en/2021/10/26/build-android-12/">Android System Development Series (1): Downloading, Compiling, and Flashing Android 12</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace Responsiveness in Action 1 - Understanding Responsiveness Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace Responsiveness in Action 2 - Responsiveness Analysis - Using App Startup as an Example</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace Responsiveness in Action 3 - Extended Knowledge on Responsiveness</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace Smoothness in Action 3 - FAQs During Jank Analysis</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2020 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span>
+            <a class="archive-post-title" href="/en/2020/08/20/weibo-imageload-opt-on-huawei/">Why is the Weibo Experience Better on Huawei? A Technical Analysis and Reflection</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/en/2020/05/26/samsung_crash/">An Incident Caused by a 'Leap' Month - Analysis of Samsung System Reboots</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/en/2020/05/07/Android-App-Chain-Wakeup/">Analysis of Android App Chain Wakeups</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/14</span>
+            <a class="archive-post-title" href="/en/2020/02/14/Android-Systrace-SurfaceFlinger/">Android Systrace Basics - SurfaceFlinger Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/03</span>
+            <a class="archive-post-title" href="/en/2020/02/03/android-development-learning-path-2020-edition/">Android Developer Learning Path (2020 Edition)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span>
+            <a class="archive-post-title" href="/en/2020/01/28/2020-read/">My 2020 Reading List</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2019 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/21</span>
+            <a class="archive-post-title" href="/en/2019/12/21/Android-Systrace-CPU/">Android Systrace Basics - CPU Info Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/15</span>
+            <a class="archive-post-title" href="/en/2019/12/15/Android-Systrace-Triple-Buffer/">Android Systrace Basics - Triple Buffer Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/06</span>
+            <a class="archive-post-title" href="/en/2019/12/06/Android-Systrace-Binder/">Android Systrace Basics - Binder and Lock Contention Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/en/2019/12/01/BlogMap/">[Sticky] Blog Article Directory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/en/2019/12/01/Android-Systrace-Vsync/">Android Systrace Basics - Vsync Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/06</span>
+            <a class="archive-post-title" href="/en/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Android Systrace Basics - MainThread and RenderThread Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/04</span>
+            <a class="archive-post-title" href="/en/2019/11/04/Android-Systrace-Input/">Android Systrace Basics - Input Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/24</span>
+            <a class="archive-post-title" href="/en/2019/10/24/Android-Background-Animation/">Analysis of 'Zombie Animations' in the Android Background</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/22</span>
+            <a class="archive-post-title" href="/en/2019/10/22/Android-Choreographer/">Detailed Explanation of Android Rendering Mechanism Based on Choreographer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/en/2019/09/18/Android-Jank-Due-To-Low-Memory-NEW/">Android Jank and Frame Drops Due to Low Memory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/en/2019/09/18/Android-Jank-Due-To-Low-Memory/">Overview of Jank and Frame Drops in Android - Low Memory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/17</span>
+            <a class="archive-post-title" href="/en/2019/09/17/Android-Kill-Background-App-Debug/">Case Study: Debugging the Android Launcher Kill Problem</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Debug/">Overview of Jank and Frame Drops in Android - Methodology</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/en/2019/09/01/Android-Activity-Lunch-Mode-NEW/">A Detailed Guide to Activity Launch Modes in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/en/2019/09/01/Android-Activity-Lunch-Mode/">A Detailed Guide to Activity Launch Modes in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/en/2019/07/27/Android-Hardware-Layer-NEW/">Detailed Explanation of Hardware Layer in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/en/2019/07/27/Android-Hardware-Layer/">A Deep Dive into Hardware Layers in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/23</span>
+            <a class="archive-post-title" href="/en/2019/07/23/Android-Systrace-Pre/">Android Systrace Basics - Prerequisites for Analyzing Systrace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/29</span>
+            <a class="archive-post-title" href="/en/2019/06/29/Android-Systrace-SystemServer/">Android Systrace Basics - SystemServer Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/en/2019/05/28/Android-Systrace-About/">Android Systrace Basics - Introduction to Systrace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/27</span>
+            <a class="archive-post-title" href="/en/2019/05/27/why-60-fps/">Android Systrace Basics - Why 60 FPS?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/en/2019/05/26/Android_Systrace_0/">Android Systrace -- Series Article Index</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/15</span>
+            <a class="archive-post-title" href="/en/2019/05/15/90hz-on-android/">A New Era of Smoothness: Thoughts on 90Hz on Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/en/2019/04/07/Sharp-Tools/">Sharp Tools - Efficient Tool Recommendations</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/en/2019/04/07/liqi/">Liqi - High-Efficiency Tools Recommendation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2019/01/21/android-performance-case-jank-accessbility-NEW/">Case Study: System-Wide Lag Caused by Android Accessibility Services</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2019/01/21/android-performance-case-jank-accessbility/">Case Analysis of System-wide Stutter Caused by Android Accessibility Service</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/12</span>
+            <a class="archive-post-title" href="/en/2019/01/12/recommend-of-2018/">2018 Best Items Recommendations - A Reward for Your Hard Work</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2018 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span>
+            <a class="archive-post-title" href="/en/2018/11/01/android-system-develop-0/">Setting Up the Android System Development Environment</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/25</span>
+            <a class="archive-post-title" href="/en/2018/10/25/How-do-engineers-count-well/">Lu Qi: Besides Good Code, What Makes an Engineer Excellent?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/01</span>
+            <a class="archive-post-title" href="/en/2018/10/01/how-to-stop-sucking-and-be-awesome-instead-8/">The Programmer's Apprenticeship - 08: The Beauty of Reading</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/30</span>
+            <a class="archive-post-title" href="/en/2018/09/30/how-to-stop-sucking-and-be-awesome-instead-7/">The Programmer's Apprenticeship - 07: Games and Programming</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/29</span>
+            <a class="archive-post-title" href="/en/2018/09/29/how-to-stop-sucking-and-be-awesome-instead-6/">The Programmer's Apprenticeship - 06: All About the Internet</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/28</span>
+            <a class="archive-post-title" href="/en/2018/09/28/how-to-stop-sucking-and-be-awesome-instead-5/">The Programmer's Apprenticeship - 05: Know Your Users</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/27</span>
+            <a class="archive-post-title" href="/en/2018/09/27/how-to-stop-sucking-and-be-awesome-instead-4/">The Programmer's Apprenticeship - 04: Reflections on Testing</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/26</span>
+            <a class="archive-post-title" href="/en/2018/09/26/how-to-stop-sucking-and-be-awesome-instead-3/">The Programmer's Apprenticeship - 03: Web Design Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/20</span>
+            <a class="archive-post-title" href="/en/2018/09/20/how-to-stop-sucking-and-be-awesome-instead-2/">The Programmer's Apprenticeship - 02: The Way of Programming</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2018/09/19/how-to-stop-sucking-and-be-awesome-instead-1/">The Programmer's Apprenticeship - 01: The Art of Fighting Back</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2018/09/13/android-memory/">Does the Android System Not Release Memory?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/13</span>
+            <a class="archive-post-title" href="/en/2018/08/13/Some-Thoughts-on-the-Fluency-of-Android/">Some Thoughts on Android System Fluency</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/20</span>
+            <a class="archive-post-title" href="/en/2018/05/20/zhihu-startingwindow/">Zhihu: Save Your StartingWindow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/en/2018/05/07/Android-performance-optimization-skills-and-tools/">[Sticky] Android Performance Optimization: Must-Know Skills and Tools</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/en/2018/01/06/2017-most-recommended/">2017 Best Recommendations - A Reward for Hard-Working Self</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/en/2018/01/06/Most-Recommended-of-2017/">2017 Annual Best Recommendations - Reward Yourself for Hard Work</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2017 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/23</span>
+            <a class="archive-post-title" href="/en/2017/04/23/About-work/">Reflections on Work and Growth (2017)</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2016 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/en/2016/04/05/android-bottom-bar-2/">Android Bottom Navigation Spec Part 2: Style, Behavior, and Dimensions</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/en/2016/04/05/android-bottom-bar-1/">Android Bottom Navigation Spec Part 1: Usage</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2015 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/31</span>
+            <a class="archive-post-title" href="/en/2015/12/31/How-to-calculation-android-app-lunch-time/">How to Calculate App Startup Time in Android?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/29</span>
+            <a class="archive-post-title" href="/en/2015/12/29/Android-App-Launch-Optimization-DelayLoad-Part-2/">Android App Launch Optimization: Implementation and Principles of DelayLoad (Part 2)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2015/11/18/Android-app-lunch-optimize-delay-load/">Android App Startup Optimization - DelayLoad Implementation and Principles (Part 1)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/12</span>
+            <a class="archive-post-title" href="/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/">RenderThread Workflow in Android hwui</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/en/2015/08/05/HashMap/">Java 7 HashMap Source Code Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-onTrimMemory/">Android Code Memory Optimization Suggestions - OnTrimMemory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-AndroidResource/">Android Code Memory Optimization Suggestions - Android Resources</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/29</span>
+            <a class="archive-post-title" href="/en/2015/05/29/Nexus6-with-Android-M/">Enabling Multi-Window Mode on Nexus 6 with Android M</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/06</span>
+            <a class="archive-post-title" href="/en/2015/05/06/Java-Singleton/">A Detailed Guide to Java Singleton Pattern</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-1/">Android Performance Patterns: Render Performance</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-2/">Android Performance Patterns: Understanding Overdraw</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-4/">Android Performance Patterns: Profile GPU Rendering</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-3/">Android Performance Patterns: Understanding VSYNC</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns/">Overview of Android Performance Patterns</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/">Android Memory Optimization (3) - Viewing Original Bitmaps in MAT</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/31</span>
+            <a class="archive-post-title" href="/en/2015/03/31/android-performance-case-study-follow-up/">Android Performance Case Study Follow-up</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-3/">Android Tips Round-Up, Part 3</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-4/">Android Tips Round-Up, Part 4</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/04</span>
+            <a class="archive-post-title" href="/en/2015/02/04/build-rom-for-nexus5/">Compiling Android Lollipop Firmware for Nexus 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/30</span>
+            <a class="archive-post-title" href="/en/2015/01/30/android-performance-tools-systrace-1/">Android Performance Optimization - Introduction to Systrace (Part 1)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/16</span>
+            <a class="archive-post-title" href="/en/2015/01/16/view-android-source-code-with-androidstudio/">Viewing Android Lollipop Source Code with Android Studio</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/13</span>
+            <a class="archive-post-title" href="/en/2015/01/13/android-performance-optimization-overdraw-2/">Android Performance Optimization: Overdraw - Practical Application</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2014 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/en/2014/10/20/android-performance-optimization-overdraw-1-NEW/">Android Performance Optimization: Overdraw - Theory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/en/2014/10/20/android-performance-optimization-overdraw-1/">Android Performance Optimization: Overdraw - Theory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/03</span>
+            <a class="archive-post-title" href="/en/2014/06/03/android-edittext-do-not-auto-get-focus/">Android Tips: How to Prevent EditText from Automatically Getting Focus</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/31</span>
+            <a class="archive-post-title" href="/en/2014/05/31/android-tips-round-up-2/">Android Tips Round-Up, Part 2</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/en/2014/05/28/android-tips-round-up-1/">Android Tips Round-Up, Part 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/02</span>
+            <a class="archive-post-title" href="/en/2014/05/02/android_log_to_file/">Android Tools - Log2File</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/25</span>
+            <a class="archive-post-title" href="/en/2014/03/25/ubuntu-adb-can-not-find-devices/">Ubuntu: Adb Command Cannot Find Device</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/17</span>
+            <a class="archive-post-title" href="/en/2014/03/17/android-build-your-own-android-notification-service-app/">Android Service: Building Your Own Notification Center (1) - Introduction to Accessibility Service</a>
+        </li>
+            </ul>
+    </div>
+</div>
+
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="Yearly Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Yearly Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Year in Review">
+                <span class="iconfont-archer">&#xe606;</span>
+                Year in Review
+            </span>
+            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Knowledge Planet
+            </span>
+            <span class="sidebar-tag-name" data-tags="Essays">
+                <span class="iconfont-archer">&#xe606;</span>
+                Essays
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Thread Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Thread Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Battery Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Battery Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR Analysis">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR Analysis
+            </span>
+            <span class="sidebar-tag-name" data-tags="Page Response">
+                <span class="iconfont-archer">&#xe606;</span>
+                Page Response
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="Locking">
+                <span class="iconfont-archer">&#xe606;</span>
+                Locking
+            </span>
+            <span class="sidebar-tag-name" data-tags="Scheduling">
+                <span class="iconfont-archer">&#xe606;</span>
+                Scheduling
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Kotlin">
+                <span class="iconfont-archer">&#xe606;</span>
+                Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
+            <span class="sidebar-tag-name" data-tags="Programmer">
+                <span class="iconfont-archer">&#xe606;</span>
+                Programmer
+            </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="Annual Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Annual Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="Sharp Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Sharp Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Specs">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Specs
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="Accessibility">
+                <span class="iconfont-archer">&#xe606;</span>
+                Accessibility
+            </span>
+            <span class="sidebar-tag-name" data-tags="Stutter">
+                <span class="iconfont-archer">&#xe606;</span>
+                Stutter
+            </span>
+            <span class="sidebar-tag-name" data-tags="Overdraw">
+                <span class="iconfont-archer">&#xe606;</span>
+                Overdraw
+            </span>
+            <span class="sidebar-tag-name" data-tags="Reading Notes">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading Notes
+            </span>
+            <span class="sidebar-tag-name" data-tags="The Programmer's Apprenticeship">
+                <span class="iconfont-archer">&#xe606;</span>
+                The Programmer's Apprenticeship
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Principles">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Principles
+            </span>
+            <span class="sidebar-tag-name" data-tags="Testing">
+                <span class="iconfont-archer">&#xe606;</span>
+                Testing
+            </span>
+            <span class="sidebar-tag-name" data-tags="Internet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Internet
+            </span>
+            <span class="sidebar-tag-name" data-tags="Game Programming">
+                <span class="iconfont-archer">&#xe606;</span>
+                Game Programming
+            </span>
+            <span class="sidebar-tag-name" data-tags="Reading">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading
+            </span>
+            <span class="sidebar-tag-name" data-tags="User Experience">
+                <span class="iconfont-archer">&#xe606;</span>
+                User Experience
+            </span>
+            <span class="sidebar-tag-name" data-tags="Liqi">
+                <span class="iconfont-archer">&#xe606;</span>
+                Liqi
+            </span>
+            <span class="sidebar-tag-name" data-tags="Community">
+                <span class="iconfont-archer">&#xe606;</span>
+                Community
+            </span>
+            <span class="sidebar-tag-name" data-tags="Smooth">
+                <span class="iconfont-archer">&#xe606;</span>
+                Smooth
+            </span>
+            <span class="sidebar-tag-name" data-tags="Experience Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Experience Optimization
+            </span>
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+        缺失模块，请参考主题文档进行安装配置：https://github.com/fi3ework/hexo-theme-archer#%E5%AE%89%E8%A3%85%E4%B8%BB%E9%A2%98
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="Casual Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Casual Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Essays">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Essays
+        </span>
+        <span class="sidebar-category-name" data-categories="Reading Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Reading Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Android">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
+        </span>
+        <span class="sidebar-category-name" data-categories="Android Performance Optimization">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android Performance Optimization
+        </span>
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+
+    </div>
+</div>
+
+        <!-- site-meta -->
+        <script>
+    var siteMetaRoot = "/en/"
+    if (siteMetaRoot === "undefined") {
+        siteMetaRoot = '/'
+    }
+    var siteMeta = {
+        url: "https://androidperformance.com/en",
+        root: siteMetaRoot,
+        author: "Gracker"
+    }
+</script>
+
+        <!-- import experimental options here -->
+        <!-- Custom Font -->
+
+        <!-- jquery (must load before main.js) -->
+        <script defer src="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+        <!-- main func (depends on jQuery) -->
+        <script src="/en/scripts/main.js" defer></script>
+        <!-- fancybox -->
+        <script>
+            (function(){
+              var urls = [
+                'https://cdn.bootcdn.net/ajax/libs/fancyapps-ui/5.0.36/fancybox/fancybox.umd.js',
+                'https://cdn.jsdelivr.net/npm/@fancyapps/ui@5.0.36/dist/fancybox/fancybox.umd.js'
+              ];
+              function loadNext(){
+                var u = urls.shift();
+                if(!u) return;
+                var s = document.createElement('script');
+                s.src = u; s.defer = true;
+                s.onload = function(){ if (window.Fancybox) { window.Fancybox.bind('[data-fancybox]'); } };
+                s.onerror = loadNext;
+                document.head.appendChild(s);
+              }
+              loadNext();
+            })();
+        </script>
+        <!-- algolia -->
+        <!-- busuanzi (delay load + silent fail) -->
+        <!-- async load share.js on first click -->
+            <script>
+                (function(){
+                  var loaded = false
+                  function loadShare(){
+                    if (loaded) return
+                    loaded = true
+                    var s = document.createElement('script')
+                    s.src = '/en/scripts/share.js'
+                    s.async = true
+                    document.head.appendChild(s)
+                  }
+                  document.addEventListener('click', function(e){
+                    var t = e.target
+                    if (!t) return
+                    if (t.closest && t.closest('.share-wrapper')) { loadShare() }
+                    else if (t.classList && t.classList.contains('share-wrapper')) { loadShare() }
+                  }, true)
+                })();
+            </script>
+        <!-- mermaid -->
+    </body>
+</html>

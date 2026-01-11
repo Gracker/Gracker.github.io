@@ -1,0 +1,1830 @@
+<!DOCTYPE html>
+<html lang="zh,en">
+    <!-- title -->
+            <!-- keywords -->
+
+                  <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <meta name="author" content="Gracker">
+                    <meta name="renderer" content="webkit">
+                    <meta name="copyright" content="Gracker">
+                      <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,启动优化,Startup,Perfetto,Systrace,RenderThread,Java">
+                          <meta name="description" content="Focus On Android Performance">
+                          <meta name="description" content="Perfetto 系列来到第十篇，聚焦 Binder 这一 Android 跨进程通信的核心机制。Binder 承载着大部分系统服务与应用的交互，也常常是性能瓶颈的源头。本文站在系统开发与性能调优的视角，结合 android.binder、sched、thread_state、android.java_hprof 等数据源，给出一套可直接落地的诊断流程，帮助初学者和进阶开发者定位耗时、线程池压力与">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Android Perfetto 系列 10 - Binder 调度与锁竞争">
+<meta property="og:url" content="https://androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/index.html">
+<meta property="og:site_name" content="Android Performance">
+<meta property="og:description" content="Perfetto 系列来到第十篇，聚焦 Binder 这一 Android 跨进程通信的核心机制。Binder 承载着大部分系统服务与应用的交互，也常常是性能瓶颈的源头。本文站在系统开发与性能调优的视角，结合 android.binder、sched、thread_state、android.java_hprof 等数据源，给出一套可直接落地的诊断流程，帮助初学者和进阶开发者定位耗时、线程池压力与">
+<meta property="og:locale">
+<meta property="og:image" content="https://androidperformance.com/images/WechatIMG581.png">
+<meta property="article:published_time" content="2025-11-16T07:33:30.000Z">
+<meta property="article:modified_time" content="2026-01-11T05:36:33.434Z">
+<meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Android">
+<meta property="article:tag" content="Perfetto">
+<meta property="article:tag" content="性能优化">
+<meta property="article:tag" content="Binder">
+<meta property="article:tag" content="线程优化">
+<meta property="article:tag" content="卡顿优化">
+<meta property="article:tag" content="ANR分析">
+<meta property="article:tag" content="页面响应">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://androidperformance.com/images/WechatIMG581.png">
+                            <meta http-equiv="Cache-control" content="no-cache">
+                            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+                            <link rel="icon" href="/assets/favicon.ico">
+                                <title>
+                                  Android Perfetto 系列 10 - Binder 调度与锁竞争 · Android Performance
+                                </title><meta name="robots" content="noindex">
+                                <!-- /*! loadCSS. [c]2017 Filament Group, Inc. MIT License */
+/* This file is meant as a standalone workflow for
+- testing support for link[rel=preload]
+- enabling async CSS loading in browsers that do not support rel=preload
+- applying rel preload css once loaded, whether supported or not.
+*/ -->
+<script>
+    (function (w) {
+        'use strict'
+        // rel=preload support test
+        if (!w.loadCSS) {
+            w.loadCSS = function () {}
+        }
+        // define on the loadCSS obj
+        var rp = (loadCSS.relpreload = {})
+        // rel=preload feature support test
+        // runs once and returns a function for compat purposes
+        rp.support = (function () {
+            var ret
+            try {
+                ret = w.document.createElement('link').relList.supports('preload')
+            } catch (e) {
+                ret = false
+            }
+            return function () {
+                return ret
+            }
+        })()
+
+        // if preload isn't supported, get an asynchronous load by using a non-matching media attribute
+        // then change that media back to its intended value on load
+        rp.bindMediaToggle = function (link) {
+            // remember existing media attr for ultimate state, or default to 'all'
+            var finalMedia = link.media || 'all'
+
+            function enableStylesheet() {
+                link.media = finalMedia
+            }
+
+            // bind load handlers to enable media
+            if (link.addEventListener) {
+                link.addEventListener('load', enableStylesheet)
+            } else if (link.attachEvent) {
+                link.attachEvent('onload', enableStylesheet)
+            }
+
+            // Set rel and non-applicable media type to start an async request
+            // note: timeout allows this to happen async to let rendering continue in IE
+            setTimeout(function () {
+                link.rel = 'stylesheet'
+                link.media = 'only x'
+            })
+            // also enable media after 3 seconds,
+            // which will catch very old browsers (android 2.x, old firefox) that don't support onload on link
+            setTimeout(enableStylesheet, 3000)
+        }
+
+        // loop through link elements in DOM
+        rp.poly = function () {
+            // double check this to prevent external calls from running
+            if (rp.support()) {
+                return
+            }
+            var links = w.document.getElementsByTagName('link')
+            for (var i = 0; i < links.length; i++) {
+                var link = links[i]
+                // qualify links to those with rel=preload and as=style attrs
+                if (
+                    link.rel === 'preload' &&
+                    link.getAttribute('as') === 'style' &&
+                    !link.getAttribute('data-loadcss')
+                ) {
+                    // prevent rerunning on link
+                    link.setAttribute('data-loadcss', true)
+                    // bind listeners to toggle media back
+                    rp.bindMediaToggle(link)
+                }
+            }
+        }
+
+        // if unsupported, run the polyfill
+        if (!rp.support()) {
+            // run once at least
+            rp.poly()
+
+            // rerun poly on an interval until onload
+            var run = w.setInterval(rp.poly, 500)
+            if (w.addEventListener) {
+                w.addEventListener('load', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            } else if (w.attachEvent) {
+                w.attachEvent('onload', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            }
+        }
+
+        // commonjs
+        if (typeof exports !== 'undefined') {
+            exports.loadCSS = loadCSS
+        } else {
+            w.loadCSS = loadCSS
+        }
+    })(typeof global !== 'undefined' ? global : this)
+</script>
+
+                                  <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/font/Oswald-Regular.woff2") format('woff2'),
+             url("/font/Oswald-Regular.ttf") format('truetype');
+        font-display: swap;
+    }
+
+    body {
+        margin: 0;
+    }
+
+    /* Removed initial hide to show content immediately */
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(
+            -45deg,
+            #444 0,
+            #444 80px,
+            #333 80px,
+            #333 160px
+        );
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+</style>
+
+                                    <link id="stylesheet-base" rel="preload" href="/css/style.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <link id="stylesheet-mobile" rel="preload" href="/css/mobile.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet';this.media='screen and
+                                    (max-width: 960px)'">
+                                    <link id="stylesheet-theme-dark" rel="preload" href="/css/dark.css
+                                    " as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <!-- Font Awesome CSS (with CDN fallback) -->
+                                    <link id="stylesheet-fontawesome" rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+                                      as="style" onload="this.onload=null;this.rel='stylesheet'"
+                                      onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css';this.rel='stylesheet'">
+                                    <link rel="preconnect" href="https://cdn.bootcdn.net" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.bootcdn.net">
+                                    <link rel="preconnect" href="https://cdn.staticfile.org" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.staticfile.org">
+                                    <link rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js" as="script">
+                                    <link rel="preload" href="/scripts/main.js" as="script">
+                                    <!-- use compressed font format to reduce transfer size -->
+                                    <link rel="preload" href="/font/Source%5C%20Sans%5C%20Pro.woff2"
+                                      as="font" type="font/woff2" crossorigin>
+                                    <link rel="preload" href="/font/Source%5C%20Sans%5C%20Pro.woff" as="font"
+                                      type="font/woff" crossorigin>
+                                    <link rel="preload" href="https://at.alicdn.com/t/font_327081_1dta1rlogw17zaor.woff"
+                                      as="font" crossorigin>
+                                    <!-- algolia -->
+                                        <!-- 百度统计（延迟加载，失败静默）  -->
+                                            <!-- CNZZ（延迟加载，失败静默）  -->
+                                                <!-- Google tag (gtag.js) 延迟加载，失败静默 -->
+                                                  <script>
+                                                    (function () {
+                                                      function loadGtag() {
+                                                        try {
+                                                          window.dataLayer = window.dataLayer || []
+                                                          function gtag() { dataLayer.push(arguments) }
+                                                          window.gtag = gtag
+                                                          gtag('js', new Date())
+                                                          var s = document.createElement('script')
+                                                          s.async = true
+                                                          s.src = 'https://www.googletagmanager.com/gtag/js?id=UA-50993302-2'
+                                                          s.onerror = function () { }
+                                                          s.onload = function () { gtag('config', 'UA-50993302-2') }
+                                                          document.head.appendChild(s)
+                                                        } catch (e) { }
+                                                      }
+                                                      if (window.requestIdleCallback) {
+                                                        requestIdleCallback(loadGtag, { timeout: 5000 })
+                                                      } else {
+                                                        window.addEventListener('load', function () { setTimeout(loadGtag, 3000) })
+                                                      }
+                                                    })();
+                                                  </script>
+                                                    <!-- Hreflang Tags -->
+                                                    
+                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/" />
+                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/" />
+                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/" />
+                  <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/atom.xml" title="Android Performance" type="application/atom+xml">
+</head>
+        <body class="post-body">
+        <!-- header -->
+        <header class="header header-mobile">
+    <!-- top read progress line -->
+    <div class="header-element">
+        <div class="read-progress"></div>
+    </div>
+    <!-- sidebar menu button -->
+    <div class="header-element">
+        <div class="header-sidebar-menu">
+            <div style="padding-left: 1px;">&#xe775;</div>
+        </div>
+    </div>
+    <!-- header actions -->
+    <div class="header-actions">
+        <!-- theme mode switch button -->
+        <span class="header-theme-btn header-element">
+            <i class="fas fa-adjust"></i>
+        </span>
+        <!-- back to home page text -->
+        <span class="home-link header-element">
+            <a href="/">Android Performance</a>
+        </span>
+    </div>
+    <!-- toggle banner -->
+    <div class="banner">
+        <div class="blog-title header-element">
+            <a href="/">Android Performance</a>
+        </div>
+        <div class="post-title header-element">
+            <a href="#" class="post-name">Android Perfetto 系列 10 - Binder 调度与锁竞争</a>
+        </div>
+    </div>
+</header>
+
+        <!-- fixed footer -->
+        <footer class="footer-fixed">
+    <!-- donate button -->
+    <div class="donate-popup donate-popup--hidden">
+    <div class="donate-popup__title">Buy Me A Coffee</div>
+    <div class="donate-popup__content">
+        <div class="donate-popup__content-description">如果觉得文章还不错，打赏一杯咖啡吧.</div>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Wechat"
+            alt="Wechat"
+            src="/assets/donate-wechat.png"
+        ></img>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Alipay"
+            alt="Alipay"
+            src="/assets/donate-alipay.png"
+        ></img>
+    </div>
+</div>
+
+    <div
+        title="Donate to the author"
+        class="footer-fixed-btn footer-fixed-btn--hidden donate-btn"
+    >
+        <i class="fas fa-donate"></i>
+    </div>
+
+    <!-- back to top button -->
+    <div class="footer-fixed-btn footer-fixed-btn--hidden back-top">
+        <div>&#xe639;</div>
+    </div>
+</footer>
+
+        <!-- wrapper -->
+        <div class="wrapper">
+            <div class="site-intro" style="    height:50vh;
+">
+    <!-- 主页  -->
+    <!-- 404页  -->
+    <div class="site-intro-placeholder"></div>
+    <picture>
+            <source type="image/webp" srcset="/intro/post-bg.webp">
+        <img class="site-intro-img"
+             src="/intro/post-bg.jpg"
+             alt=""
+loading="lazy"             decoding="async"
+             fetchpriority="auto"
+             sizes="100vw">
+    </picture>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+                Android Perfetto 系列 10 - Binder 调度与锁竞争
+            <!-- 404 -->
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            <!-- 404 -->
+        </p>
+        <!-- 文章页 meta -->
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                    <div class="post-intro-tags" >
+        <span class="post-category" data-categories="Android性能优化">
+            <i class="fas fa-folder post-category-icon"></i>
+            <span class="post-category-text">
+                Android性能优化
+            </span>
+        </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="性能优化">性能优化</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Binder">Binder</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="线程优化">线程优化</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="卡顿优化">卡顿优化</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="ANR分析">ANR分析</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="页面响应">页面响应</a>
+</div>
+
+                <!-- 文章字数统计 -->
+                    <div class="post-intro-read">
+                        <span>Word count: <span class="post-count word-count">9.4k</span>Reading time: <span class="post-count reading-time">35 min</span></span>
+                    </div>
+                <div class="post-intro-meta">
+                    <!-- 撰写日期 -->
+                    <span class="iconfont-archer post-intro-calander">&#xe676;</span>
+                    <span class="post-intro-time">2025/11/16</span>
+                    <!-- 文章分享 -->
+                    <span class="share-wrapper">
+                        <span class="iconfont-archer share-icon">&#xe71d;</span>
+                        <span class="share-text">Share</span>
+                        <ul class="share-list">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+    </div>
+</div>
+
+            
+            <script>
+  // get user agent
+  function getBrowserVersions() {
+    var u = window.navigator.userAgent
+    return {
+      userAgent: u,
+      trident: u.indexOf('Trident') > -1, //IE内核
+      presto: u.indexOf('Presto') > -1, //opera内核
+      webKit: u.indexOf('AppleWebKit') > -1, //苹果、谷歌内核
+      gecko: u.indexOf('Gecko') > -1 && u.indexOf('KHTML') == -1, //火狐内核
+      mobile: !!u.match(/AppleWebKit.*Mobile.*/), //是否为移动终端
+      ios: !!u.match(/\(i[^;]+;( U;)? CPU.+Mac OS X/), //ios终端
+      android: u.indexOf('Android') > -1 || u.indexOf('Linux') > -1, //android终端或者uc浏览器
+      iPhone: u.indexOf('iPhone') > -1 || u.indexOf('Mac') > -1, //是否为iPhone或者安卓QQ浏览器
+      iPad: u.indexOf('iPad') > -1, //是否为iPad
+      webApp: u.indexOf('Safari') == -1, //是否为web应用程序，没有头部与底部
+      weixin: u.indexOf('MicroMessenger') == -1, //是否为微信浏览器
+      uc: u.indexOf('UCBrowser') > -1, //是否为android下的UC浏览器
+    }
+  }
+  var browser = {
+    versions: getBrowserVersions(),
+  }
+  console.log('userAgent: ' + browser.versions.userAgent)
+
+  // callback
+  function fontLoaded() {
+    console.log('font loaded')
+    if (document.getElementsByClassName('site-intro-meta')) {
+      document
+        .getElementsByClassName('intro-title')[0]
+        .classList.add('intro-fade-in')
+      document
+        .getElementsByClassName('intro-subtitle')[0]
+        .classList.add('intro-fade-in')
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+      if (postIntros) {
+        postIntros.classList.add('post-fade-in')
+      }
+    }
+  }
+
+  // UC不支持跨域，所以直接显示
+  function asyncCb() {
+    if (browser.versions.uc) {
+      console.log('UCBrowser')
+      fontLoaded()
+    } else {
+      WebFont.load({
+        custom: {
+          families: ['Oswald-Regular'],
+        },
+        loading: function () {
+          // 所有字体开始加载
+          // console.log('font loading');
+        },
+        active: function () {
+          // 所有字体已渲染
+          fontLoaded()
+        },
+        inactive: function () {
+          // 字体预加载失败，无效字体或浏览器不支持加载
+          console.log('inactive: timeout')
+          fontLoaded()
+        },
+        timeout: 5000, // Set the timeout to two seconds
+      })
+    }
+  }
+
+  function asyncErr() {
+    console.warn('script load from CDN failed, will load local script')
+  }
+
+  // load webfont-loader async, and add callback function
+  function async(u, cb, err) {
+    var d = document,
+      t = 'script',
+      o = d.createElement(t),
+      s = d.getElementsByTagName(t)[0]
+    o.src = u
+    if (cb) {
+      o.addEventListener(
+        'load',
+        function (e) {
+          cb(null, e)
+        },
+        false
+      )
+    }
+    if (err) {
+      o.addEventListener(
+        'error',
+        function (e) {
+          err(null, e)
+        },
+        false
+      )
+    }
+    s.parentNode.insertBefore(o, s)
+  }
+
+  var asyncLoadWithFallBack = function (arr, success, reject) {
+    var currReject = function () {
+      reject()
+      arr.shift()
+      if (arr.length) async(arr[0], success, currReject)
+    }
+
+    async(arr[0], success, currReject)
+  }
+
+  asyncLoadWithFallBack(
+    [
+      'https://cdn.bootcdn.net/ajax/libs/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.staticfile.org/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.jsdelivr.net/npm/webfontloader@1.6.28/webfontloader.min.js',
+      "/lib/webfontloader.min.js",
+    ],
+    asyncCb,
+    asyncErr
+  )
+</script>
+
+            <img class="loading" src="/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" alt="loading">
+            <div class="container container-unloaded">
+                <main class="main post-page">
+    <article class="article-entry">
+        <p>Perfetto 系列来到第十篇，聚焦 Binder 这一 Android 跨进程通信的核心机制。Binder 承载着大部分系统服务与应用的交互，也常常是性能瓶颈的源头。本文站在系统开发与性能调优的视角，结合 <code>android.binder</code>、<code>sched</code>、<code>thread_state</code>、<code>android.java_hprof</code> 等数据源，给出一套可直接落地的诊断流程，帮助初学者和进阶开发者定位耗时、线程池压力与锁竞争等问题。</p>
+<span id="more"></span>
+
+<h2 id="本文目录"><a href="#本文目录" class="headerlink" title="本文目录"></a>本文目录</h2><ul>
+<li><a href="#series">Perfetto 系列文章</a></li>
+<li><a href="#basics">Binder 基础与案例</a></li>
+<li><a href="#setup">Perfetto 观测准备</a><ul>
+<li><a href="#other-tools">其他 Binder 分析工具</a></li>
+</ul>
+</li>
+<li><a href="#workflow">Binder 分析工作流</a><ul>
+<li><a href="#workflow-latency">步骤一：定位事务耗时</a></li>
+<li><a href="#workflow-threadpool">步骤二：评估线程池与 Oneway 队列</a></li>
+<li><a href="#workflow-lock">步骤三：排查锁竞争</a></li>
+</ul>
+</li>
+<li><a href="#case">案例演练</a><ul>
+<li><a href="#case-wm">案例一：窗口管理延迟</a></li>
+<li><a href="#case-threadpool">案例二：Binder 线程池饱和</a></li>
+</ul>
+</li>
+<li><a href="#platform-features">最新平台特性与优化建议</a></li>
+<li><a href="#summary">总结</a></li>
+<li><a href="#refs">参考</a></li>
+<li><a href="#attachments">附件</a></li>
+<li><a href="#about">关于我 &amp;&amp; 博客</a></li>
+</ul>
+<p><a id="series"></a></p>
+<h2 id="Perfetto-系列文章"><a href="#Perfetto-系列文章" class="headerlink" title="Perfetto 系列文章"></a>Perfetto 系列文章</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/03/27/Android-Perfetto-101/#/Perfetto-%E7%B3%BB%E5%88%97%E7%9B%AE%E5%BD%95">Android Perfetto 系列目录</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto 系列 1：Perfetto 工具简介</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto 系列 2：Perfetto Trace 抓取</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto 系列 3：熟悉 Perfetto View</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto 系列 4：使用命令行在本地打开超大 Trace</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto 系列 5：Android App 基于 Choreographer 的渲染流程</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</a></li>
+<li><a href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7 - MainThread 和 RenderThread 解读</a></li>
+<li><a href="https://androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 9 - CPU 信息解读</a></li>
+<li>Android Perfetto 系列 10 - Binder 调度与锁竞争（本文）</li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV1oi82efE4D/?vd_source=0c6d2191e785de0a36dc21a9da7e664e">视频(B站) - Android Perfetto 基础和案例分享</a></li>
+</ol>
+<p><a id="basics"></a></p>
+<h2 id="Binder-基础与案例"><a href="#Binder-基础与案例" class="headerlink" title="Binder 基础与案例"></a>Binder 基础与案例</h2><p>对于首次接触 Binder 的读者，理解它的角色和参与者至关重要。可以先把 Binder 粗暴地理解成“跨进程的函数调用”：你在一个进程里像调用本地接口一样写代码，真正的调用和数据传输则由 Binder 帮你完成。整体上它是 Android 的主力跨进程通信（IPC）机制，核心包含四个组件：</p>
+<ol>
+<li><strong>Client</strong>：应用线程通过 <code>IBinder.transact()</code> 发起调用，将 <code>Parcel</code> 序列化的数据写入内核。</li>
+<li><strong>Service（Server）</strong>：通常运行在 SystemServer 或其他进程中，通过 <code>Binder.onTransact()</code> 读取 <code>Parcel</code> 并执行业务逻辑。</li>
+<li><strong>Binder Driver</strong>：内核模块 <code>/dev/binder</code> 负责线程池调度、缓冲区管理、优先级继承等，是连接双方的“信使”。</li>
+<li><strong>Thread Pool</strong>：服务端通常维护一组 Binder 线程。需要注意的是，<strong>线程池并不是一开始就创建满的</strong>，而是按需创建。Java 层默认最大线程数约为 15 个 Binder 工作线程（不含主线程），Native 层通过 <code>ProcessState</code> 也可以配置最大线程数（默认值通常也是 15）。当所有 Binder 线程都忙碌时，新的请求就会在驱动层排队等待空闲线程。</li>
+</ol>
+<p><strong>为什么需要 Binder？</strong></p>
+<p>Android 采用多进程架构来隔离应用、提升安全性与稳定性。每个 APK 运行在独立的用户空间，当需要访问系统能力（相机、位置、通知等）时，必须跨进程调用 Framework 或 SystemServer。</p>
+<p>传统 IPC 方案的局限：</p>
+<table>
+<thead>
+<tr>
+<th>IPC 方式</th>
+<th>问题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Socket</td>
+<td>开销大，缺少身份校验</td>
+</tr>
+<tr>
+<td>Pipe</td>
+<td>仅支持父子进程，单向通信</td>
+</tr>
+<tr>
+<td>共享内存</td>
+<td>需要额外的同步机制，缺少访问控制</td>
+</tr>
+</tbody></table>
+<p>Binder 在内核层解决了这些问题，提供了三个关键能力：一是<strong>身份与权限</strong>（基于 UID&#x2F;PID 校验，确保调用方合法）；二是<strong>同步与异步调用</strong>（同步模式下 Client 等待 Server 返回，这是最常见的模式，而异步模式下 Client 发送后立即返回，适用于通知、状态上报等场景）；三是<strong>优先级继承</strong>（当高优先级 Client 调用低优先级 Server 时，Server 会临时提升优先级，避免优先级反转问题）。</p>
+<p>因此，当我们在应用里写 <code>locationManager.getCurrentLocation()</code> 这样的语句时，底层必然借助 Binder 把调用安全、可靠地传递给 SystemServer。</p>
+<h3 id="从-App-开发者视角的案例"><a href="#从-App-开发者视角的案例" class="headerlink" title="从 App 开发者视角的案例"></a>从 App 开发者视角的案例</h3><p>假设我们在应用中调用 <code>LocationManager#getCurrentLocation()</code>。这个 API 的真实实现位于 <code>system_server</code> 中的 <code>LocationManagerService</code>。调用路径可以概括为：首先，在 <strong>Proxy 侧</strong>，App 线程通过 <code>Context.getSystemService</code> 拿到一个 <code>ILocationManager</code> 的代理对象（<code>BinderProxy</code>）；然后进行<strong>序列化</strong>，调用 <code>getCurrentLocation()</code> 时，代理会把参数写入 <code>Parcel</code>，执行 <code>transact()</code>；接着是<strong>内核传输</strong>，Binder 驱动将该事务排入 <code>system_server</code> 的 Binder 线程队列，并<strong>唤醒</strong>一个空闲线程（例如 <code>Binder:1460_5</code>）；随后在 <strong>Stub 侧</strong>，<code>LocationManagerService</code>（Stub）所在的线程被唤醒，读取参数、执行定位逻辑（可能涉及 HAL 层交互）；最后是<strong>返回</strong>阶段，Service 执行完毕，将结果写入 <code>Parcel</code>，驱动唤醒原 App 线程，App 线程从 <code>waitForResponse()</code> 返回拿到数据。</p>
+<p>在 Perfetto 中，这条链路会显示为：<code>android.binder</code> 轨道上的 <code>service = android.location.ILocationManager</code> 事务；App 线程在 <code>thread_state</code> 里处于 <code>S</code> (Sleeping) 状态，且 <code>blocked_function</code> 通常涉及 <code>binder_thread_read</code> 或 <code>epoll</code>；SystemServer 的 Binder 线程出现 <code>Running</code> 切片；以及 <strong>Flow 箭头</strong>（Perfetto 会用箭头把 Client 的 <code>transact</code> 和 Server 的 <code>run</code> 连接起来）。</p>
+<!-- TODO: 插入截图 - Binder 调用链路在 Perfetto 中的表现（Flow 箭头连接 Client 和 Server） -->
+
+<p><a id="setup"></a></p>
+<h2 id="Perfetto-观测准备"><a href="#Perfetto-观测准备" class="headerlink" title="Perfetto 观测准备"></a>Perfetto 观测准备</h2><p>要在 Perfetto 中诊断 Binder，需要提前准备好数据源与 Trace 配置。</p>
+<h3 id="数据源与轨道总览"><a href="#数据源与轨道总览" class="headerlink" title="数据源与轨道总览"></a>数据源与轨道总览</h3><p>Perfetto 的 Binder 相关信号主要来自三个数据源，它们分别工作在不同层级，提供的信息粒度和适用场景也有所不同。</p>
+<p><strong><code>linux.ftrace</code>（内核层）</strong> 是最通用、最基础的数据源，兼容所有 Android 版本。它直接读取内核的 ftrace 事件，包括 <code>binder_transaction</code>（事务开始）、<code>binder_transaction_received</code>（服务端收到事务）、<code>binder_lock</code>（内核 Binder 锁，通常不用太关注，除非你在调试驱动本身）等。配合调度相关的事件（<code>sched_switch</code>、<code>sched_waking</code>），可以完整还原出”Client 发起调用 → 内核唤醒 Server 线程 → Server 处理 → 返回”这条链路。如果你手中的设备是 Android 12 或 13，基本上只需要依赖这个数据源就够了，Perfetto UI 会自动把 ftrace 的 binder 事件解析成直观的 “Transactions” 视图。</p>
+<p><strong><code>android.binder</code>（用户层）</strong> 是一个较新的数据源，主要完善于 Android 14&#x2F;15 及之后的版本。它利用内核的新接口或 tracepoint 提供了更丰富的语义信息，比如可以直接区分 <code>reply</code>（回复）和 <code>transaction</code>（请求），提供 <code>blocking_dur_ns</code>（客户端阻塞时长）这样的预计算指标，还能区分 <code>lazy_async</code>（延迟派发的异步事务）等。如果你的设备是 Android 14 以上，建议同时开启这个数据源，可以获得更详细的分析维度。</p>
+<p><strong><code>android.java_hprof</code>（锁竞争）</strong> 用于捕获 Java 层的 <code>Monitor Contention</code>（也就是 <code>synchronized</code> 关键字产生的锁竞争）。虽然名字里带 hprof，但在这个场景下它主要是通过 ART 虚拟机的 instrumentation 机制来记录锁等待事件，而不是做内存快照。需要注意的是，开启这个数据源会有一定的性能开销（因为每次锁竞争都要记录），所以建议只在问题可以稳定复现的情况下、在较短的时间窗口内启用，避免 Trace 文件过大或影响复现场景的真实性。</p>
+<h3 id="Trace-Config-推荐"><a href="#Trace-Config-推荐" class="headerlink" title="Trace Config 推荐"></a>Trace Config 推荐</h3><p>以下配置兼顾了兼容性与新特性，建议作为标准的 Binder 分析模板。将配置保存为 <code>binder_config.pbtx</code> 即可使用：</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br><span class="line">86</span><br><span class="line">87</span><br><span class="line">88</span><br><span class="line">89</span><br><span class="line">90</span><br></pre></td><td class="code"><pre><span class="line"># ============================================================</span><br><span class="line"># Binder 分析专用 Perfetto 配置</span><br><span class="line"># 适用范围：Android <span class="number">12</span>+ (部分数据源需要 Android <span class="number">14</span>+)</span><br><span class="line"># ============================================================</span><br><span class="line"></span><br><span class="line"># --- 缓冲区与时长设置 ---</span><br><span class="line">buffers &#123;</span><br><span class="line">  size_kb: <span class="number">65536</span>          # <span class="number">64</span>MB 缓冲区，适合中等复杂度场景</span><br><span class="line">  fill_policy: RING_BUFFER</span><br><span class="line">&#125;</span><br><span class="line">duration_ms: <span class="number">15000</span>        # <span class="number">15</span> 秒抓取时长，可根据需要调整</span><br><span class="line"></span><br><span class="line"># --- 数据源 <span class="number">1</span>：android.binder (Android <span class="number">14</span>+) ---</span><br><span class="line"># 提供用户层 Binder 语义，包括 reply/transaction 区分、blocking_dur_ns 等</span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;android.binder&quot;</span></span><br><span class="line">    android_binder_config &#123;</span><br><span class="line">      intercept_transactions: <span class="literal">true</span>   # 拦截事务</span><br><span class="line">      intercept_late_reply: <span class="literal">true</span>     # 捕获延迟回复</span><br><span class="line">      # 可选：过滤特定进程以减少 Trace 体积</span><br><span class="line">      # filter &#123; name: <span class="string">&quot;system_server&quot;</span> &#125;</span><br><span class="line">      # filter &#123; name: <span class="string">&quot;com.android.systemui&quot;</span> &#125;</span><br><span class="line">      # filter &#123; name: <span class="string">&quot;你的应用包名&quot;</span> &#125;</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"># --- 数据源 <span class="number">2</span>：linux.ftrace (内核层) ---</span><br><span class="line"># 最通用的数据源，兼容所有 Android 版本</span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      # Binder 核心事件</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_transaction&quot;</span>           # 事务开始</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_transaction_received&quot;</span>  # 服务端收到事务</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_transaction_alloc_buf&quot;</span> # 缓冲区分配（诊断 TransactionTooLarge）</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_set_priority&quot;</span>          # 优先级继承</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_lock&quot;</span>                  # 内核锁（通常可省略）</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_locked&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_unlock&quot;</span></span><br><span class="line"></span><br><span class="line">      # 调度事件（串联 Client/Server 线程）</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_wakeup&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_blocked_reason&quot;</span>          # 阻塞原因</span><br><span class="line"></span><br><span class="line">      # 可选：应用层 Trace 点（需要 atrace）</span><br><span class="line">      atrace_categories: <span class="string">&quot;binder_driver&quot;</span>   # Binder 驱动层</span><br><span class="line">      atrace_categories: <span class="string">&quot;sched&quot;</span>           # 调度</span><br><span class="line">      atrace_categories: <span class="string">&quot;am&quot;</span>              # ActivityManager</span><br><span class="line">      atrace_categories: <span class="string">&quot;wm&quot;</span>              # WindowManager</span><br><span class="line">      # atrace_categories: <span class="string">&quot;view&quot;</span>          # 如需分析 UI 可开启</span><br><span class="line"></span><br><span class="line">      # 符号化内核调用栈</span><br><span class="line">      symbolize_ksyms: <span class="literal">true</span></span><br><span class="line"></span><br><span class="line">      # 优化调度事件存储，减少 Trace 体积</span><br><span class="line">      compact_sched &#123;</span><br><span class="line">        enabled: <span class="literal">true</span></span><br><span class="line">      &#125;</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"># --- 数据源 <span class="number">3</span>：android.java_hprof (Java 锁竞争) ---</span><br><span class="line"># 捕获 synchronized 锁等待，有一定性能开销</span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;android.java_hprof&quot;</span></span><br><span class="line">    java_hprof_config &#123;</span><br><span class="line">      track_contended_locks: <span class="literal">true</span>        # 开启锁竞争追踪</span><br><span class="line">      track_allocation_contexts: <span class="literal">false</span>   # 关闭内存分配追踪（减少开销）</span><br><span class="line">      track_java_heap: <span class="literal">false</span>             # 关闭堆采样</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"># --- 数据源 <span class="number">4</span>：linux.process_stats (进程信息) ---</span><br><span class="line"># 提供进程名、PID 等基础信息</span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    process_stats_config &#123;</span><br><span class="line">      scan_all_processes_on_start: <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h4 id="配置项说明"><a href="#配置项说明" class="headerlink" title="配置项说明"></a>配置项说明</h4><table>
+<thead>
+<tr>
+<th>数据源</th>
+<th>作用</th>
+<th>Android 版本要求</th>
+<th>开销</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>android.binder</code></td>
+<td>用户层 Binder 语义（blocking_dur、reply 等）</td>
+<td>14+</td>
+<td>低</td>
+</tr>
+<tr>
+<td><code>linux.ftrace</code> (binder&#x2F;*)</td>
+<td>内核层 Binder 事件</td>
+<td>所有版本</td>
+<td>低</td>
+</tr>
+<tr>
+<td><code>linux.ftrace</code> (sched&#x2F;*)</td>
+<td>调度事件，串联线程唤醒</td>
+<td>所有版本</td>
+<td>中</td>
+</tr>
+<tr>
+<td><code>android.java_hprof</code></td>
+<td>Java 锁竞争（Monitor Contention）</td>
+<td>10+</td>
+<td>中-高</td>
+</tr>
+<tr>
+<td><code>linux.process_stats</code></td>
+<td>进程名称和 PID 映射</td>
+<td>所有版本</td>
+<td>极低</td>
+</tr>
+</tbody></table>
+<blockquote>
+<p><strong>提示</strong>：如果设备是 Android 12&#x2F;13，<code>android.binder</code> 数据源可能功能有限，主要依赖 <code>linux.ftrace</code> 即可。Perfetto UI 会自动把 ftrace 的 binder 事件解析成直观的 Transactions 视图。</p>
+</blockquote>
+<h3 id="快速上手：3-步抓取与查看-Binder-Trace"><a href="#快速上手：3-步抓取与查看-Binder-Trace" class="headerlink" title="快速上手：3 步抓取与查看 Binder Trace"></a>快速上手：3 步抓取与查看 Binder Trace</h3><ol>
+<li><p><strong>抓取 Trace</strong>：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 推送配置</span></span><br><span class="line">adb push binder_config.pbtx /data/local/tmp/</span><br><span class="line"></span><br><span class="line"><span class="comment"># 开始抓取</span></span><br><span class="line">adb shell perfetto --txt -c /data/local/tmp/binder_config.pbtx \</span><br><span class="line">    -o /data/misc/perfetto-traces/trace.pftrace</span><br><span class="line"></span><br><span class="line"><span class="comment"># ... 操作手机复现卡顿 ...</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># 取出文件</span></span><br><span class="line">adb pull /data/misc/perfetto-traces/trace.pftrace .</span><br></pre></td></tr></table></figure>
+</li>
+<li><p><strong>打开 Trace</strong>：访问 <a target="_blank" rel="noopener" href="https://ui.perfetto.dev/">ui.perfetto.dev</a>，拖入 trace 文件。</p>
+</li>
+<li><p><strong>添加关键视图</strong>：</p>
+<ul>
+<li>左侧点击 <strong>Tracks</strong> → <strong>Add new track</strong></li>
+<li>搜索 “Binder”，添加 <strong>Android Binder &#x2F; Transactions</strong> 和 <strong>Android Binder &#x2F; Oneway Calls</strong></li>
+<li>搜索 “Lock”，添加 <strong>Thread &#x2F; Lock contention</strong>（如果有数据）</li>
+</ul>
+</li>
+</ol>
+<p><a id="other-tools"></a></p>
+<h3 id="其他-Binder-分析工具"><a href="#其他-Binder-分析工具" class="headerlink" title="其他 Binder 分析工具"></a>其他 Binder 分析工具</h3><p>除了 Perfetto 外，还有一些工具可以辅助分析 Binder 问题。这里介绍两个比较实用的：<code>am trace-ipc</code>（Android 自带，无需额外安装）和 <code>binder-trace</code>（开源工具，功能更强但配置门槛较高）。</p>
+<h4 id="am-trace-ipc：Java-层-Binder-调用追踪"><a href="#am-trace-ipc：Java-层-Binder-调用追踪" class="headerlink" title="am trace-ipc：Java 层 Binder 调用追踪"></a>am trace-ipc：Java 层 Binder 调用追踪</h4><p><code>am trace-ipc</code> 是 Android 系统自带的命令行工具，用于追踪 Java 层的 Binder 调用堆栈。它的工作原理是在 <code>BinderProxy.transact()</code> 处插桩，记录所有经过这里的调用，并统计每种调用模式出现的次数。这个工具最大的优点是<strong>零配置、即开即用</strong>，不需要 root 权限，也不需要安装额外软件。</p>
+<p>基本用法很简单，就是”开始 → 操作 → 停止导出”三步：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 1. 开始追踪（此时系统开始记录所有进程的 Binder 调用）</span></span><br><span class="line">adb shell am trace-ipc start</span><br><span class="line"></span><br><span class="line"><span class="comment"># 2. 在手机上执行你要分析的操作（比如启动某个应用、触发卡顿场景等）</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># 3. 停止追踪并导出结果到文件</span></span><br><span class="line">adb shell am trace-ipc stop --dump-file /data/local/tmp/ipc-trace.txt</span><br><span class="line"></span><br><span class="line"><span class="comment"># 4. 把结果文件拉到电脑上查看</span></span><br><span class="line">adb pull /data/local/tmp/ipc-trace.txt</span><br></pre></td></tr></table></figure>
+
+<p>导出的文件是纯文本格式，内容类似这样：</p>
+<figure class="highlight stylus"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">Traces <span class="keyword">for</span> process: com<span class="selector-class">.example</span><span class="selector-class">.app</span></span><br><span class="line">Count: <span class="number">15</span></span><br><span class="line">java<span class="selector-class">.lang</span><span class="selector-class">.Throwable</span></span><br><span class="line">    at android<span class="selector-class">.os</span><span class="selector-class">.BinderProxy</span><span class="selector-class">.transact</span>(BinderProxy<span class="selector-class">.java</span>:xxx)</span><br><span class="line">    at android<span class="selector-class">.app</span>.IActivityManager<span class="variable">$Stub</span><span class="variable">$Proxy</span><span class="selector-class">.startActivity</span>(...)</span><br><span class="line">    at android<span class="selector-class">.app</span><span class="selector-class">.Instrumentation</span><span class="selector-class">.execStartActivity</span>(...)</span><br><span class="line">    ...</span><br></pre></td></tr></table></figure>
+
+<p>从输出可以看到，它会按进程分组，列出每种 Binder 调用的完整 Java 堆栈以及出现次数（Count）。这对于回答”我的应用在这个操作过程中到底调用了多少次 Binder、都调了哪些服务”这类问题非常直接。</p>
+<p><strong>与 Perfetto 配合使用</strong>：一个很有用的特性是，开启 <code>am trace-ipc</code> 后，Binder 调用信息也会同步输出到 Perfetto&#x2F;Systrace 的 trace events 中。这意味着你可以一边用 Perfetto 看时间线上的耗时分布，一边通过 trace-ipc 的输出确认具体是哪个 Java 方法发起的调用。两者结合，既有宏观的时间维度，又有微观的调用栈细节。</p>
+<p>这个工具特别适合以下场景：怀疑 ANR 或卡顿是由于频繁 IPC 调用引起时，可以用它快速验证；想统计某个用户操作（如启动、滑动）过程中总共发生了多少次 Binder 调用；需要拿到 Binder 调用的完整 Java 调用栈来定位代码位置。</p>
+<h4 id="binder-trace：实时-Binder-消息解析"><a href="#binder-trace：实时-Binder-消息解析" class="headerlink" title="binder-trace：实时 Binder 消息解析"></a>binder-trace：实时 Binder 消息解析</h4><p><a target="_blank" rel="noopener" href="https://github.com/foundryzero/binder-trace">binder-trace</a> 是一个开源的 Binder 分析工具，可以实时拦截和解析 Android Binder 消息。它的定位类似于”Wireshark for Binder”——就像 Wireshark 可以抓取和解析网络数据包一样，binder-trace 可以抓取和解析 Binder 事务的具体内容，包括接口名、方法名、甚至传递的参数值。</p>
+<p>这个工具基于 Frida 进行动态注入（Frida 是一个流行的动态插桩框架），因此使用前需要满足一些条件：设备需要已经 root（或者使用模拟器），并且要先在设备上部署 frida-server。另外本地电脑需要 Python 3.9 以上版本。配置好环境后，使用方式如下：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 追踪指定应用的 Binder 通信（-d 指定设备，-n 指定进程名，-a 指定 Android 版本）</span></span><br><span class="line">binder-trace -d emulator-5554 -n com.example.app -a 11</span><br></pre></td></tr></table></figure>
+
+<p>运行后会打开一个交互式界面，实时显示目标进程的所有 Binder 交互。你可以通过配置文件按接口、方法、事务类型等条件进行过滤（避免信息过载），也可以用快捷键暂停&#x2F;继续记录、清除屏幕等。工具内置了 Android 9 到 14 各版本的 AIDL 结构定义，能够自动解析大部分系统服务的调用参数。</p>
+<p>这个工具更适合安全研究和逆向工程场景，比如你想深入分析某个应用和系统服务之间具体传递了什么数据，或者想了解某个未公开 API 的调用细节。不过对于日常的性能分析来说，binder-trace 的配置门槛偏高（需要 root、需要部署 frida），而且它关注的是”消息内容”而非”耗时分布”，所以通常 Perfetto 配合 <code>am trace-ipc</code> 就足够了。如果你在做安全审计或者需要逆向分析某个应用的 IPC 行为，binder-trace 会是一个很强大的工具。</p>
+<p><a id="workflow"></a></p>
+<h2 id="Binder-分析工作流"><a href="#Binder-分析工作流" class="headerlink" title="Binder 分析工作流"></a>Binder 分析工作流</h2><p>拿到 Trace 后，不要直接在大海捞针。推荐按照“找目标 → 看耗时 → 查线程 → 找锁”的顺序进行。</p>
+<p><a id="workflow-latency"></a></p>
+<h3 id="步骤一：定位事务耗时"><a href="#步骤一：定位事务耗时" class="headerlink" title="步骤一：定位事务耗时"></a>步骤一：定位事务耗时</h3><p>分析的第一步是找到你关心的那次 Binder 调用。在 Perfetto 中有几种常用的定位方式：如果你已经知道是哪个进程发起的调用，可以直接在 <code>Transactions</code> 轨道里找到你的 App 进程作为 <code>Client</code> 的区域；如果你知道调用的接口名或方法名，可以按 <code>/</code> 键打开搜索框，输入 AIDL 接口名（如 <code>ILocationManager</code>）或方法名来快速定位；如果你是在排查 UI 卡顿问题，最直接的方式是先看 UI 线程的 <code>thread_state</code> 轨道，找到处于 <code>S</code>（Sleeping）状态且时长较长的片段——如果这段时间主线程几乎没有在执行代码，那很可能就是在等待 Binder 调用返回，这里就是分析的起点。</p>
+<p>选中一个 Transaction Slice 后，右侧的 Details 面板会显示这次事务的详细信息。其中有三个关键的耗时指标需要重点关注：<code>latency_ns</code> 表示总耗时，即客户端从发出请求到收到回复的完整时间；<code>server_latency_ns</code> 表示服务端处理耗时，即服务端线程实际执行业务代码的时间；<code>blocking_dur_ns</code> 表示客户端阻塞耗时，即客户端线程在内核里等待的时间。</p>
+<!-- TODO: 插入截图 - Transaction Slice 的 Details 面板，标注 latency_ns、server_latency_ns 等字段 -->
+
+<p>理解这几个指标之间的关系非常重要，因为它直接决定了你下一步应该往哪个方向深挖。如果 <code>latency_ns</code> 很长，但 <code>server_latency_ns</code> 很短，说明时间并没有花在服务端处理上，而是耗在了 Binder 驱动调度或服务端排队上（通常意味着 Service 的线程池很忙，新请求需要等待空闲线程）。这种情况下你需要去检查服务端的线程池状态，这就是步骤二要做的事情。如果 <code>latency_ns</code> 和 <code>server_latency_ns</code> 差不多且都很长，说明服务端处理本身就很慢，这时候你需要跳转到服务端的 Binder 线程，看它在这段时间里到底在干什么——是在跑业务代码、等锁、还是等 IO。</p>
+<p><a id="workflow-threadpool"></a></p>
+<h3 id="步骤二：评估线程池与-Oneway-队列"><a href="#步骤二：评估线程池与-Oneway-队列" class="headerlink" title="步骤二：评估线程池与 Oneway 队列"></a>步骤二：评估线程池与 Oneway 队列</h3><p>如果步骤一的分析发现耗时主要不在服务端处理，而是在”排队”上，那就需要进一步检查 Binder 线程池的状态了。在深入分析之前，先回答一个经常被问到的问题：**”每个进程大概会有多少个 Binder 线程？system_server 的 Binder 线程池规模大致是什么量级？什么情况下会’耗尽’？”**</p>
+<h4 id="system-server-的-Binder-线程池规模"><a href="#system-server-的-Binder-线程池规模" class="headerlink" title="system_server 的 Binder 线程池规模"></a>system_server 的 Binder 线程池规模</h4><p>在上游 AOSP（Android 14&#x2F;15）中，Binder 线程池的设计思路是：<strong>按需增长、可配置、没有单一固定数字</strong>。</p>
+<ul>
+<li><strong>线程池是按需增长的</strong>：每个服务端进程在 Binder 驱动中维护一个线程池，实际线程数会根据负载按需增减，上限由内核中的 <code>max_threads</code> 字段和用户态 <code>ProcessState#setThreadPoolMaxThreadCount()</code> 等配置共同决定。</li>
+<li><strong>典型上限在 15～16 个工作线程</strong>：大部分 AOSP 版本中，应用进程的 Java Binder 线程池上限约为 <strong>15～16 个工作线程</strong>；<code>system_server</code> 这类核心进程的 Binder 线程池默认也在这个数量级，处于“十几条线程”的范围内。<br>某些厂商 ROM 或定制内核会根据自身负载模型，把上限调大或调小（例如调到几十条线程），因此你在不同设备上通过 <code>ps -T system_server</code>、<code>top -H</code> 或 Perfetto 数 <code>Binder:</code> 线程时，看到的具体数字可能会有差异。</li>
+<li><strong>以实际观测为准，而不是死记一个数字</strong>：在 Perfetto 里，更推荐的做法是直接展开某个进程，看有多少个 <code>Binder:xxx_y</code> 线程轨道，以及它们在抓 Trace 期间的活跃程度，以此来评估线程池的“规模”和“繁忙度”。</li>
+</ul>
+<h4 id="Binder-线程数、缓冲区与“Binder-耗尽”"><a href="#Binder-线程数、缓冲区与“Binder-耗尽”" class="headerlink" title="Binder 线程数、缓冲区与“Binder 耗尽”"></a>Binder 线程数、缓冲区与“Binder 耗尽”</h4><p>在性能分析中，大家提到“Binder 个数”时，往往会混在一起谈三类不同的资源限制：</p>
+<p><strong>Binder 线程池耗尽</strong>是指某个进程内所有 Binder 工作线程都处于 <code>Running</code> &#x2F; <code>D</code> &#x2F; <code>S</code> 等忙碌状态，没有空闲线程可以被驱动唤醒处理新事务。其现象包括 Client 线程在 <code>thread_state</code> 轨道里长时间停留在 <code>S</code> 状态（调用栈停在 <code>ioctl(BINDER_WRITE_READ)</code> &#x2F; <code>epoll_wait</code>），以及 <code>android.binder</code> 轨道中对应服务的 <code>queue_len</code> 持续偏高（说明请求在排队）。对于 <code>system_server</code> 这类关键进程，线程池被打满意味着系统服务响应能力下降，很容易放大为<strong>全局卡顿或 ANR</strong>。</p>
+<p><strong>Binder 事务缓冲区耗尽</strong>涉及每个进程在 Binder 驱动里的一块有限大小的共享缓冲区（典型值约 <strong>1MB 量级</strong>），用于承载正在传输的 <code>Parcel</code> 数据。典型场景包括一次事务传输过大的对象（如大 Bitmap、超长字符串、大数组等），以及大量并发事务尚未被消费完，导致缓冲区中堆积了太多尚未释放的 <code>Parcel</code>。可能的结果包括内核日志中出现 <code>binder_transaction_alloc_buf</code> 失败、Java 层抛出 <code>TransactionTooLargeException</code>，以及后续事务在驱动层长时间排队甚至失败（看起来像是“Binder 被用光了”）。解决这类问题的思路<strong>不是</strong>通过“多开线程”，而是控制单次传输的数据量（拆包、分页、流式协议），并对大块数据优先使用 <code>SharedMemory</code> &#x2F; 文件 &#x2F; <code>ParcelFileDescriptor</code> 等机制。</p>
+<p><strong>Binder 引用表 &#x2F; 对象数量</strong>方面，Binder 驱动会为每个进程维护引用表和节点对象，这些也有上限，但在大多数实际场景中，很少首先撞到这里。常见风险是长时间持有大量 Binder 引用却不释放，更多体现为<strong>内存&#x2F;稳定性问题</strong>，而不是 UI 卡顿。</p>
+<p>在 Perfetto 里分析时，可以带着一个判断框架：<br><strong>“现在的慢，是因为线程池被打满，还是事务过大&#x2F;缓冲区被用光？”</strong><br>前者主要看 **Binder 线程数与它们的 <code>thread_state</code>**，以及 <code>queue_len</code>；后者则关注 <strong>单次事务的大小、并发事务数量和是否伴随 <code>TransactionTooLargeException</code> &#x2F; <code>binder_transaction_alloc_buf</code> 相关日志</strong>。</p>
+<hr>
+<p>现在回到我们的分析场景：</p>
+<p>Binder 线程池的繁忙程度直接决定了服务的并发处理能力。对于同步事务来说，如果服务端所有 Binder 线程都处于 <code>Running</code> 或 <code>Uninterruptible Sleep (D)</code> 状态，新的同步请求就会在内核里排队等待，客户端线程会长时间阻塞在 <code>ioctl(BINDER_WRITE_READ)</code> 或 <code>epoll_wait</code> 上。在 Perfetto 里的表现就是：主线程长时间处于 <code>S</code> 状态，但看它的 Java 代码执行情况却几乎是空白的——时间都花在等待上了。对于 Oneway（异步）事务，情况稍有不同：虽然客户端发完就返回、不会阻塞等待，但同一个 <code>IBinder</code> 对象上的 Oneway 请求在服务端往往是串行消费的（有一个队列）。如果某个 App 在短时间内发送了大量 Oneway 请求，这个队列就会被拉长，不仅这个 App 后续的 Oneway 执行会延迟，同一服务上其他调用者的响应也可能受到影响。</p>
+<p>在 Perfetto 中诊断线程池问题，有几个指标值得关注。首先是 <strong>Queue Length（队列长度）</strong>，在 <code>android.binder</code> 轨道中可以观察到 <code>queue_len</code> 这个指标，如果它持续偏高，说明请求的生产速度远大于消费速度，线程池处于饱和状态。其次要留意<strong>缓冲区相关的迹象</strong>（如前面提到的 <code>TransactionTooLargeException</code> 或内核日志中的 <code>binder_transaction_alloc_buf</code> 失败），这通常意味着单次事务过大或并发事务过多。最直观的方式是直接观察 <strong>Binder 线程状态</strong>：找到 <code>system_server</code> 进程并展开所有线程，如果发现以 <code>Binder:</code> 开头的线程大部分都处于忙碌状态（时间线上密密麻麻全是 Slice，几乎没有空隙），说明线程池已经饱和了。</p>
+<p><strong>关于 Oneway 调用在 Perfetto 中的识别</strong>：同步调用（Two-way）和异步调用（Oneway）在 Perfetto 中的表现有明显区别，学会区分它们对分析很有帮助。同步调用时，客户端会阻塞等待（<code>thread_state</code> 显示 <code>S</code>），Perfetto 会画出双向的 Flow 箭头（transaction → reply）；而 Oneway 调用客户端发完就返回、几乎无阻塞，Flow 箭头只有单向的 transaction，没有 reply 回来。另外，Oneway 调用的 Slice 名称后面可能会带 <code>[oneway]</code> 标记，它的 <code>latency_ns</code> 也只代表发送耗时，而不是往返时间。</p>
+<p>在分析 Oneway 相关问题时，重点关注两件事：一是服务端的队列深度（如果同一 <code>IBinder</code> 对象上的 Oneway 请求堆积，后续请求的实际执行时机会被不断延后）；二是是否存在批量发送的模式（短时间内大量 Oneway 调用会形成”尖峰”，在 Perfetto 中表现为服务端 Binder 线程上密集排列的短 Slice）。</p>
+<!-- TODO: 插入截图 - Oneway 调用在 Perfetto 中的表现（单向箭头、无 reply） -->
+
+<p>值得一提的是，SystemServer 的 Binder 线程不仅要处理来自各个 App 的请求，还要处理系统内部的调用（比如 AMS 调 WMS、WMS 调 SurfaceFlinger 等）。如果某个”行为不端”的 App 在短时间内疯狂发送 Oneway 请求，可能会把某个系统服务的 Oneway 队列塞满，进而影响到其他 App 的异步回调时延，造成全局性的卡顿感。</p>
+<p><a id="workflow-lock"></a></p>
+<h3 id="步骤三：排查锁竞争"><a href="#步骤三：排查锁竞争" class="headerlink" title="步骤三：排查锁竞争"></a>步骤三：排查锁竞争</h3><p>如果你跳转到服务端的 Binder 线程，发现它在处理你的请求期间长时间处于 <code>S</code>（Sleeping）或 <code>D</code>（Disk Sleep &#x2F; Uninterruptible Sleep）状态，那通常意味着它在等待某个资源——要么是在等锁，要么是在等 IO。锁竞争是 SystemServer 中非常常见的性能瓶颈来源，因为 SystemServer 里运行着大量服务，它们之间共享很多全局状态，而这些状态往往通过 <code>synchronized</code> 锁来保护。</p>
+<p><strong>Java 锁（Monitor Contention）</strong> 是最常见的情况。SystemServer 中有不少全局锁，比如 WindowManagerService 的 <code>mGlobalLock</code>、ActivityManagerService 的一些内部锁等。当多个线程同时需要访问被这些锁保护的资源时，就会产生竞争。在 Perfetto 中，如果你看到某个 Binder 线程状态为 <code>S</code>，并且 <code>blocked_function</code> 字段包含 <code>futex</code> 相关的符号（如 <code>futex_wait</code>），那基本可以确定是在等 Java 锁。要进一步确认是在等哪个锁、被谁持有，可以查看 <code>Lock contention</code> 轨道。Perfetto 会把锁竞争的关系可视化出来：用连接线标出 Owner（持有锁的线程，比如 <code>android.display</code> 线程）和 Waiter（等待锁的线程，比如处理你请求的 <code>Binder:123_1</code>）。点击 Contention Slice，还可以在 Details 面板里看到锁对象的类名（比如 <code>com.android.server.wm.WindowManagerGlobalLock</code>），这对于理解问题的根源非常有帮助。</p>
+<!-- TODO: 插入截图 - Lock contention 轨道，展示 Owner 和 Waiter 的连接线 -->
+
+<p><strong>Native 锁（Mutex &#x2F; RwLock）</strong> 的情况相对少见一些，但在某些场景下也会遇到。表现形式类似：线程状态为 <code>D</code> 或 <code>S</code>，但调用栈里出现的是 <code>__mutex_lock</code>、<code>pthread_mutex_lock</code>、<code>rwsem</code> 等 Native 层的符号，而不是 Java 的 <code>futex_wait</code>。分析这类问题通常需要结合 <code>sched_blocked_reason</code> 事件来看线程具体在等什么，属于比较进阶的内容，这里就不展开了。</p>
+<h4 id="使用-SQL-统计-system-server-中的锁竞争（可选）"><a href="#使用-SQL-统计-system-server-中的锁竞争（可选）" class="headerlink" title="使用 SQL 统计 system_server 中的锁竞争（可选）"></a>使用 SQL 统计 system_server 中的锁竞争（可选）</h4><p>如果你已经比较熟悉 Perfetto SQL，这里给出一个可以<strong>直接在 Perfetto UI 中运行</strong>的查询，用于统计 <code>system_server</code> 进程中 Java monitor 锁竞争（<code>Lock contention on a monitor lock</code>）的情况。<br>其中 <code>lock_depth</code> 表示发生锁竞争时，参与同一个对象锁竞争的线程个数。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">select</span> <span class="built_in">count</span>(<span class="number">1</span>) <span class="keyword">as</span> lock_depth, s.slice_id,s.track_id,s.ts,s.dur,s.dur<span class="operator">/</span><span class="number">1e6</span> <span class="keyword">as</span> dur_ms,ctn.otid,s.name</span><br><span class="line"></span><br><span class="line"><span class="keyword">from</span> slice s, (<span class="keyword">select</span> slice_id,track_id,ts,dur,name,substr(name, <span class="number">46</span>, instr(name,<span class="string">&#x27;)&#x27;</span>)<span class="number">-46</span>) <span class="keyword">as</span> otid </span><br><span class="line"><span class="keyword">from</span> slice t</span><br><span class="line"><span class="keyword">WHERE</span> name <span class="keyword">like</span> <span class="string">&#x27;Lock contention on a monitor lock %&#x27;</span></span><br><span class="line"><span class="keyword">order</span> <span class="keyword">by</span> dur) ctn</span><br><span class="line"><span class="keyword">JOIN</span> thread_track <span class="keyword">ON</span> s.track_id<span class="operator">=</span>thread_track.id <span class="keyword">JOIN</span> thread <span class="keyword">USING</span>(utid) <span class="keyword">JOIN</span> process <span class="keyword">USING</span>(upid)</span><br><span class="line"><span class="keyword">WHERE</span></span><br><span class="line">    process.name <span class="operator">=</span> <span class="string">&#x27;system_server&#x27;</span></span><br><span class="line"><span class="keyword">and</span> s.name <span class="keyword">like</span> <span class="string">&#x27;Lock contention on a monitor lock %&#x27;</span></span><br><span class="line">    <span class="keyword">and</span> substr(s.name, <span class="number">46</span>, instr(s.name,<span class="string">&#x27;)&#x27;</span>)<span class="number">-46</span>) <span class="operator">=</span> ctn.otid</span><br><span class="line">    <span class="keyword">and</span> ctn.slice_id <span class="operator">&lt;&gt;</span> s.slice_id</span><br><span class="line">    <span class="keyword">and</span> ctn.ts <span class="operator">&gt;=</span> s.ts <span class="keyword">and</span> (ctn.ts<span class="operator">+</span>ctn.dur) <span class="operator">&lt;=</span> (s.ts<span class="operator">+</span>s.dur)</span><br><span class="line"><span class="keyword">group</span> <span class="keyword">by</span> s.slice_id</span><br><span class="line"><span class="keyword">order</span> <span class="keyword">by</span> s.dur <span class="keyword">desc</span>;</span><br></pre></td></tr></table></figure>
+
+<p><a id="case"></a><br><a id="case-wm"></a></p>
+<h2 id="案例演练：窗口管理延迟"><a href="#案例演练：窗口管理延迟" class="headerlink" title="案例演练：窗口管理延迟"></a>案例演练：窗口管理延迟</h2><p>下面通过一个真实案例来演示前面介绍的分析流程。场景是：<strong>应用启动时出现明显的动画卡顿</strong>。</p>
+<p><strong>1. 发现异常</strong></p>
+<p>首先在 Perfetto 中打开 Trace，找到 App 的 <code>UI Thread</code> 轨道。观察发现有一帧的 <code>doFrame</code> 耗时达到了 30ms（正常情况下 60Hz 屏幕一帧应该在 16.6ms 以内）。放大看这一帧对应的 <code>thread_state</code>，发现主线程有 18ms 处于 <code>S</code>（Sleeping）状态，说明这段时间主线程并没有在执行代码，而是在等待什么。</p>
+<!-- TODO: 插入截图 - UI Thread 的 doFrame 耗时异常，thread_state 显示 S 状态 -->
+
+<p><strong>2. 追踪 Binder 调用</strong></p>
+<p>点击这 18ms 的 <code>S</code> 片段，查看右侧的 Details 面板，可以看到关联的 Slice 信息。从中发现主线程当时正在调用 <code>IActivityTaskManager.startActivity</code>——这是一个跨进程的 Binder 调用，调用方是 App，被调方是 system_server。Perfetto 的 Flow 箭头清晰地指向了 <code>system_server</code> 进程中的 <code>Binder:1605_2</code> 线程，说明这个请求是由这个 Binder 线程在处理。</p>
+<!-- TODO: 插入截图 - Flow 箭头从 App 主线程指向 system_server 的 Binder 线程 -->
+
+<p><strong>3. 服务端分析</strong></p>
+<p>沿着 Flow 箭头跳转到 <code>system_server</code> 的 <code>Binder:1605_2</code> 线程。观察发现，这个线程确实在运行（Running 状态），但它执行了整整 15ms 才结束。进一步观察这个 Binder 线程的 <code>Lock contention</code> 轨道（有些版本显示在线程轨道上方的小条里），发现有一段红色的锁竞争标记。</p>
+<p><strong>4. 锁定元凶</strong></p>
+<p>点击这段锁竞争标记，Details 面板显示了关键信息：这个线程在等待 <code>com.android.server.wm.WindowManagerGlobalLock</code> 这把锁，锁的持有者（Owner）是 <code>android.anim</code> 线程（系统动画线程），等待时长（Duration）是 12ms。</p>
+<!-- TODO: 插入截图 - Lock contention 的 Details 面板，显示锁对象和持有者 -->
+
+<p><strong>结论</strong>：App 启动时发起的 <code>startActivity</code> Binder 请求，在 SystemServer 端需要获取 <code>WindowManagerGlobalLock</code> 锁才能继续执行，但这把锁当时正被系统动画线程持有（用于更新窗口状态），导致 Binder 线程等了 12ms 才拿到锁、完成处理。这 12ms 的锁等待加上其他开销，就导致了 App 主线程被阻塞了 18ms，最终表现为一帧卡顿。</p>
+<p><strong>优化方向</strong>：这种情况属于系统层面的锁竞争，App 端很难直接修复。但 App 端可以做一些规避：避免在系统动画密集执行期间（比如启动动画、转场动画）发起复杂的 Window 操作，或者想办法减少冷启动阶段的 IPC 调用频率，降低撞上锁竞争的概率。</p>
+<hr>
+<p><a id="case-threadpool"></a></p>
+<h2 id="案例演练：Binder-线程池饱和"><a href="#案例演练：Binder-线程池饱和" class="headerlink" title="案例演练：Binder 线程池饱和"></a>案例演练：Binder 线程池饱和</h2><p>再来看另一个案例。场景是：<strong>多个应用同时启动，系统整体变得卡顿</strong>。</p>
+<p><strong>1. 发现异常</strong></p>
+<p>在 Perfetto 中观察发现，多个 App 的主线程在同一时间段内都处于 <code>S</code>（Sleeping）状态，而且从调用栈来看，它们都在等待各自的 Binder 调用返回。用户反馈是”点什么都没反应，过几秒才有动静”，整个系统响应迟缓。</p>
+<p><strong>2. 检查 system_server 的线程池状态</strong></p>
+<p>既然多个 App 都在等 Binder 返回，那问题很可能出在服务端。展开 <code>system_server</code> 进程，观察所有以 <code>Binder:</code> 开头的线程轨道。发现情况不妙：几乎所有 Binder 线程（从 <code>Binder:1460_1</code> 到 <code>Binder:1460_15</code>）都处于 <code>Running</code> 状态，每个线程的时间线上 Slice 密密麻麻、几乎没有间隙，完全没有空闲线程可以处理新请求。这是典型的线程池饱和现象。</p>
+<!-- TODO: 插入截图 - system_server 的 Binder 线程全部处于忙碌状态 -->
+
+<p><strong>3. 分析排队情况</strong></p>
+<p>在 <code>android.binder</code> 轨道中进一步观察，发现 <code>queue_len</code>（队列长度）指标持续偏高（大于 5，意味着始终有请求在排队），而且多个 Client 的 <code>blocking_dur_ns</code>（阻塞时长）远大于 <code>server_latency_ns</code>（服务端处理时长）——这说明请求大部分时间都花在排队等待上，而不是实际处理上。</p>
+<p><strong>4. 定位根因</strong></p>
+<p>进一步检查各个 Binder 线程具体在处理什么事务，发现一个有趣的现象：某个后台应用在短时间内发起了大量的 <code>IPackageManager</code> 查询请求。每次查询本身耗时不长（大约 5ms），但数量太多（几百次），这些请求把线程池占满了，导致其他应用（包括前台应用）的请求都要排队等待。</p>
+<p><strong>结论</strong>：某个”行为不端”的应用通过批量 Binder 调用”挤占”了 system_server 的线程池资源，导致其他应用的正常请求被大幅延迟，表现为全局性的卡顿。</p>
+<p><strong>优化方向</strong>：从应用侧来说，应该避免这种批量循环调用的模式——如果需要批量查询，应该使用系统提供的批量接口（比如用 <code>getPackagesForUid</code> 代替循环调用 <code>getPackageInfo</code>），或者把请求分散到不同时间点、异步执行。从系统侧来说，可以考虑对特定服务增加 rate limiting（限流），或者优化热点服务的处理效率，减少单次请求的耗时。</p>
+<p><a id="platform-features"></a></p>
+<h2 id="最新平台特性与优化建议"><a href="#最新平台特性与优化建议" class="headerlink" title="最新平台特性与优化建议"></a>最新平台特性与优化建议</h2><p>随着 Android 版本的迭代，Binder 机制本身也在不断进化，引入了一些新特性来改善性能和稳定性。了解这些特性有助于理解 Perfetto 中某些现象的成因，也能帮助你写出更”友好”的代码。</p>
+<p><strong>Binder Freeze（Android 12+）</strong> 是一个对减少 ANR 很有帮助的特性。当一个进程被系统判定为 Cached（缓存状态）并被”冻结”时，它的 Binder 接口也会随之冻结。此时如果有其他进程试图同步调用这个被冻结进程的 Binder，系统会更快地让这次调用直接失败（在 logcat 中会看到 <code>FROZEN</code> 相关的错误信息），而不是让调用方傻等着、最终走向 ANR。这个设计的好处是：与其让调用方挂在那里不知道何时能返回，不如快速失败、让调用方有机会做错误处理。</p>
+<p><strong>Lazy Async（Android 14&#x2F;15）</strong> 优化了异步事务（Oneway）的派发策略。在之前的版本中，系统一收到 Oneway 请求就会立刻尝试唤醒目标线程去处理，这在短时间内大量 Oneway 涌入时会造成”唤醒风暴”，带来不必要的功耗开销。Lazy Async 的做法是根据系统负载情况”攒一攒”再派发，让 Oneway 的处理节奏更加平滑。在 Perfetto 里，你会发现开启这个特性后，Oneway 队列长度的波动更小，服务端线程的唤醒频率也更加均匀。</p>
+<p><strong>Binder Heavy Hitter Watcher</strong> 是系统层面的一个监控机制，会自动检测那些过度使用 Binder 的”问题进程”。如果某个进程在短时间内发起了过多的 Binder 调用，系统会在 logcat 中打印警告信息。这对于发现潜在的性能问题很有帮助——如果你在日志里看到自己的应用被点名，就该检查一下是不是哪里的 IPC 调用太频繁了。</p>
+<p><strong>给开发者的一些建议</strong>：</p>
+<p>关于 <strong>Oneway 的使用</strong>，需要特别谨慎。Oneway 调用确实”看起来”更快（因为发完就返回、不用等结果），但它并不适用于所有场景。只有在你”明确不关心返回结果，也不需要知道操作何时完成”的情况下才应该使用 Oneway，比如日志上报、状态通知这类”发了就行”的场景。如果你把本该同步的调用改成 Oneway 只是为了”让 UI 线程更快返回”，可能会引入难以调试的时序问题——因为你无法确定服务端什么时候真正处理完，而且 Oneway 请求是在服务端排队串行处理的，大量 Oneway 可能会互相影响。</p>
+<p>关于 <strong>传输大数据</strong>，一定要避免通过 Binder 直接传输大对象（尤其是 Bitmap）。前面提到过，Binder 每个进程的共享缓冲区只有约 1MB，传一张稍大的图片就可能把缓冲区撑爆，触发 <code>TransactionTooLargeException</code>。正确的做法是使用 <code>SharedMemory</code>（底层通常基于 ashmem 或 memfd，可以在进程间高效共享大块内存）、通过文件传递，或者使用 <code>ParcelFileDescriptor</code> 传递文件描述符让对方自己读取。</p>
+<p>关于 <strong>主线程的 Binder 调用</strong>，基本原则是：不要在主线程调用那些你无法预估耗时的 Binder 服务。很多系统服务的响应时间是不确定的，它可能依赖网络、IO、甚至其他进程的状态。一旦对方卡住了，你的主线程就会跟着卡住，几秒钟之后就是 ANR。如果必须调用这类服务，应该放到后台线程去做，拿到结果后再切回主线程更新 UI。</p>
+<p><a id="summary"></a></p>
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>Perfetto 是分析 Binder 问题的重要工具。通过本文，你应该对以下几个方面有了基本的了解：如何配置 <code>ftrace</code> 和 <code>android.binder</code> 数据源来抓取 Binder 相关的事件；如何在 Perfetto UI 中利用 Flow 箭头把 Client 的请求和 Server 的处理串联起来，形成完整的调用链路；以及如何通过观察 <code>latency_ns</code>、<code>server_latency_ns</code>、线程状态、锁竞争等信息，区分”排队慢”（线程池饱和）、”处理慢”（服务端代码耗时）和”等锁”（锁竞争）这几种常见的性能瓶颈。</p>
+<p>在实际开发中，如果你遇到了难以解释的 UI 卡顿或 ANR，不妨用 Perfetto 抓一份 Trace 来看看：主线程是不是在等 Binder 调用返回？如果是，服务端在干什么？是在排队等线程、是在执行业务逻辑、还是在等锁？顺着这条思路一步步往下查，往往能找到问题的根源。当然，Binder 分析只是 Perfetto 功能的一部分，结合前面几篇文章介绍的 CPU、调度、渲染等方面的知识，你可以更全面地理解系统的运行状态，定位各种性能问题。</p>
+<p><a id="refs"></a></p>
+<h2 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://paul.pub/android-binder-driver/">理解Android Binder机制1&#x2F;3：驱动篇</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/android-binder">Perfetto Documentation - Android Binder</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/cpu-scheduling">Perfetto Documentation - Ftrace</a></li>
+<li><a target="_blank" rel="noopener" href="https://cs.android.com/android/platform/superproject/+/main:frameworks/native/libs/binder/">Android Source - Binder</a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.android.com/reference/android/os/Parcel">Android Developers - Parcel and Bundle</a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/foundryzero/binder-trace">binder-trace - Wireshark for Binder</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.cnblogs.com/wanghongzhu/p/15069884.html">am trace-ipc 源码分析</a></li>
+</ol>
+<p><a id="attachments"></a></p>
+<h2 id="附件"><a href="#附件" class="headerlink" title="附件"></a>附件</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://github.com/Gracker/SystraceForBlog/tree/master/Perfetto/Android_Perfetto_Binder">下载 Perfetto Trace（SystemServer Binder 案例）</a><br>（Trace 数据包含敏感信息，下载后请注意保密。）</li>
+</ul>
+<p><a id="about"></a></p>
+<h2 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">博主个人介绍</a></li>
+<li><a href="https://androidperformance.com/2019/12/01/BlogMap/">本博客内容导航</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a></li>
+</ol>
+<blockquote>
+<p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p>
+</blockquote>
+<p><img src="/images/WechatIMG581.png" alt="微信扫一扫"></p>
+<!-- flag of hidden posts -->
+    </article>
+    <!-- license -->
+        <div class="license-wrapper">
+            <p>Author：<a href="https://androidperformance.com">Gracker</a>
+            <p>Link：<a href="https://androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/">https://androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/</a>
+            <p>Publish date：<a href="https://androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/">November 16th 2025, 3:33:30 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/">January 11th 2026, 1:36:33 pm</a>
+            <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
+        </div>
+    <!-- paginator -->
+    <ul class="post-paginator">
+        <li class="next">
+        </li>
+        <li class="previous">
+        </li>
+    </ul>
+    <!-- comment -->
+        <div class="post-comment">
+            <!-- 来必力 City 版安装代码 -->
+
+            
+            
+            
+            <!-- utteranc评论 -->
+
+            <!-- partial('_partial/comment/changyan') -->
+            <!--PC版-->
+
+            
+            
+            
+        </div>
+    <!-- timeliness note -->
+    <!-- idea from: https://hexo.fluid-dev.com/posts/hexo-injector/#%E6%96%87%E7%AB%A0%E6%97%B6%E6%95%88%E6%80%A7%E6%8F%90%E7%A4%BA -->
+    <!-- Mathjax -->
+</main>
+
+                <!-- profile -->
+            </div>
+            <footer class="footer footer-unloaded">
+    <!-- social  -->
+        <div class="social">
+                            <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title="email" ></a>
+                <a href="https://github.com/gracker" class="iconfont-archer github" target="_blank" title="github"></a>
+                <span class="iconfont-archer wechat" title="wechat">
+                    <img class="profile-qr" src="/assets/Wechat.jpeg" />
+                </span>
+                <span class="iconfont-archer qq" title="qq">
+                    <img class="profile-qr" src="/553000664" />
+                </span>
+                <a href="https://weibo.com/gracker520" class="iconfont-archer weibo" target="_blank" title="weibo"></a>
+                <a href="https://www.zhihu.com/people/gracker" class="iconfont-archer zhihu" target="_blank" title="zhihu"></a>
+                <a href="https://twitter.com/Gracker_Gao" class="iconfont-archer twitter" target="_blank" title="twitter"></a>
+                <a href="https://juejin.im/user/557b0590e4b052e031453d76" class="iconfont-archer juejin" target="_blank" title="juejin"></a>
+                <a href="/atom.xml" class="iconfont-archer rss" target="_blank" title="rss"></a>
+
+        </div>
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- website approve for Chinese user -->
+        <div class="website-approve">
+                <span id="icp-approve" class="icp-approve">
+                    <a href="https://beian.miit.gov.cn/" target="_blank">蜀 ICP 备 20016190 号</a>
+                </span>
+        </div>
+</footer>
+
+        </div>
+        <!-- toc -->
+            <div class="toc-wrapper toc-wrapper-loding" style=    top:50vh;
+>
+                <div class="toc-catalog">
+                    <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+                </div>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%9C%AC%E6%96%87%E7%9B%AE%E5%BD%95"><span class="toc-number">1.</span> <span class="toc-text">本文目录</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0"><span class="toc-number">2.</span> <span class="toc-text">Perfetto 系列文章</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Binder-%E5%9F%BA%E7%A1%80%E4%B8%8E%E6%A1%88%E4%BE%8B"><span class="toc-number">3.</span> <span class="toc-text">Binder 基础与案例</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%BB%8E-App-%E5%BC%80%E5%8F%91%E8%80%85%E8%A7%86%E8%A7%92%E7%9A%84%E6%A1%88%E4%BE%8B"><span class="toc-number">3.1.</span> <span class="toc-text">从 App 开发者视角的案例</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-%E8%A7%82%E6%B5%8B%E5%87%86%E5%A4%87"><span class="toc-number">4.</span> <span class="toc-text">Perfetto 观测准备</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%95%B0%E6%8D%AE%E6%BA%90%E4%B8%8E%E8%BD%A8%E9%81%93%E6%80%BB%E8%A7%88"><span class="toc-number">4.1.</span> <span class="toc-text">数据源与轨道总览</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Trace-Config-%E6%8E%A8%E8%8D%90"><span class="toc-number">4.2.</span> <span class="toc-text">Trace Config 推荐</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#%E9%85%8D%E7%BD%AE%E9%A1%B9%E8%AF%B4%E6%98%8E"><span class="toc-number">4.2.1.</span> <span class="toc-text">配置项说明</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%BF%AB%E9%80%9F%E4%B8%8A%E6%89%8B%EF%BC%9A3-%E6%AD%A5%E6%8A%93%E5%8F%96%E4%B8%8E%E6%9F%A5%E7%9C%8B-Binder-Trace"><span class="toc-number">4.3.</span> <span class="toc-text">快速上手：3 步抓取与查看 Binder Trace</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%85%B6%E4%BB%96-Binder-%E5%88%86%E6%9E%90%E5%B7%A5%E5%85%B7"><span class="toc-number">4.4.</span> <span class="toc-text">其他 Binder 分析工具</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#am-trace-ipc%EF%BC%9AJava-%E5%B1%82-Binder-%E8%B0%83%E7%94%A8%E8%BF%BD%E8%B8%AA"><span class="toc-number">4.4.1.</span> <span class="toc-text">am trace-ipc：Java 层 Binder 调用追踪</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#binder-trace%EF%BC%9A%E5%AE%9E%E6%97%B6-Binder-%E6%B6%88%E6%81%AF%E8%A7%A3%E6%9E%90"><span class="toc-number">4.4.2.</span> <span class="toc-text">binder-trace：实时 Binder 消息解析</span></a></li></ol></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Binder-%E5%88%86%E6%9E%90%E5%B7%A5%E4%BD%9C%E6%B5%81"><span class="toc-number">5.</span> <span class="toc-text">Binder 分析工作流</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%AD%A5%E9%AA%A4%E4%B8%80%EF%BC%9A%E5%AE%9A%E4%BD%8D%E4%BA%8B%E5%8A%A1%E8%80%97%E6%97%B6"><span class="toc-number">5.1.</span> <span class="toc-text">步骤一：定位事务耗时</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%AD%A5%E9%AA%A4%E4%BA%8C%EF%BC%9A%E8%AF%84%E4%BC%B0%E7%BA%BF%E7%A8%8B%E6%B1%A0%E4%B8%8E-Oneway-%E9%98%9F%E5%88%97"><span class="toc-number">5.2.</span> <span class="toc-text">步骤二：评估线程池与 Oneway 队列</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#system-server-%E7%9A%84-Binder-%E7%BA%BF%E7%A8%8B%E6%B1%A0%E8%A7%84%E6%A8%A1"><span class="toc-number">5.2.1.</span> <span class="toc-text">system_server 的 Binder 线程池规模</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#Binder-%E7%BA%BF%E7%A8%8B%E6%95%B0%E3%80%81%E7%BC%93%E5%86%B2%E5%8C%BA%E4%B8%8E%E2%80%9CBinder-%E8%80%97%E5%B0%BD%E2%80%9D"><span class="toc-number">5.2.2.</span> <span class="toc-text">Binder 线程数、缓冲区与“Binder 耗尽”</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%AD%A5%E9%AA%A4%E4%B8%89%EF%BC%9A%E6%8E%92%E6%9F%A5%E9%94%81%E7%AB%9E%E4%BA%89"><span class="toc-number">5.3.</span> <span class="toc-text">步骤三：排查锁竞争</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#%E4%BD%BF%E7%94%A8-SQL-%E7%BB%9F%E8%AE%A1-system-server-%E4%B8%AD%E7%9A%84%E9%94%81%E7%AB%9E%E4%BA%89%EF%BC%88%E5%8F%AF%E9%80%89%EF%BC%89"><span class="toc-number">5.3.1.</span> <span class="toc-text">使用 SQL 统计 system_server 中的锁竞争（可选）</span></a></li></ol></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%A1%88%E4%BE%8B%E6%BC%94%E7%BB%83%EF%BC%9A%E7%AA%97%E5%8F%A3%E7%AE%A1%E7%90%86%E5%BB%B6%E8%BF%9F"><span class="toc-number">6.</span> <span class="toc-text">案例演练：窗口管理延迟</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%A1%88%E4%BE%8B%E6%BC%94%E7%BB%83%EF%BC%9ABinder-%E7%BA%BF%E7%A8%8B%E6%B1%A0%E9%A5%B1%E5%92%8C"><span class="toc-number">7.</span> <span class="toc-text">案例演练：Binder 线程池饱和</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%9C%80%E6%96%B0%E5%B9%B3%E5%8F%B0%E7%89%B9%E6%80%A7%E4%B8%8E%E4%BC%98%E5%8C%96%E5%BB%BA%E8%AE%AE"><span class="toc-number">8.</span> <span class="toc-text">最新平台特性与优化建议</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%80%BB%E7%BB%93"><span class="toc-number">9.</span> <span class="toc-text">总结</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83"><span class="toc-number">10.</span> <span class="toc-text">参考</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E9%99%84%E4%BB%B6"><span class="toc-number">11.</span> <span class="toc-text">附件</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number">12.</span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a></li></ol>
+            </div>
+        <!-- sidebar -->
+        <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+        <div class="sidebar-panel-archives">
+    <!-- 在 ejs 中将 archive 按照时间排序 -->
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 118
+        </div>
+        <!-- search  -->
+    </div>
+    <div class="post-archive">
+            <div class="archive-year"> 2025 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 9 - CPU 信息解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/02</span>
+            <a class="archive-post-title" href="/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7 - MainThread 和 RenderThread 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/26</span>
+            <a class="archive-post-title" href="/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/26</span>
+            <a class="archive-post-title" href="/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto 系列 5：Android App 基于 Choreographer 的渲染流程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto 系列 4：使用命令行在本地打开超大 Trace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR 系列 3 ：ANR 案例分享</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR 系列 2 ：ANR 分析套路和关键 Log 介绍</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-01-ANR-Design/">Android ANR 系列 1 ：理解 Android ANR 设计思想</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2024 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto 系列 3：熟悉 Perfetto View</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto 系列 2：Perfetto Trace 抓取</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto 系列 1：Perfetto 工具简介</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/2024/03/27/Android-Perfetto-101/">Android Perfetto 系列目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/01</span>
+            <a class="archive-post-title" href="/2024/01/01/2023-review/">2023 年的方方面面</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2023 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/30</span>
+            <a class="archive-post-title" href="/2023/12/30/the-performance/">关于 The Android Performance 知识星球介绍</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/15</span>
+            <a class="archive-post-title" href="/2023/10/15/the-performance-design-of-os-en/">The Performance Design Of OS</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/2023/08/21/the-performance-design-of-os/">OS 设计之性能设计</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/2023/05/14/bad-android-app-with-system-permissions/">当 App 有了系统权限，真的可以为所欲为？</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2022 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/2022/03/27/the-performance-tea-part-01/">The Performance 星球茶话会 - 第一期</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/2022/03/13/android-systrace-cpu-state-running/">Systrace 线程 CPU 运行状态分析技巧 - Running 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/2022/01/21/android-systrace-cpu-state-runnable/">Systrace 线程 CPU 运行状态分析技巧 - Runnable 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/03</span>
+            <a class="archive-post-title" href="/2022/01/03/2021-Review/">回顾 2021</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2021 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/27</span>
+            <a class="archive-post-title" href="/2021/10/27/if-i-write-a-book-about-performance/">一本讲 Android 流畅性的书，应该有什么内容？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/26</span>
+            <a class="archive-post-title" href="/2021/10/26/build-android-12/">Android 系统开发系列（1）：Android 12 源代码下载、编译和刷机</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace 响应速度实战 3 ：响应速度延伸知识</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace 响应速度实战 2 ：响应速度实战分析-以启动速度为例</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace 响应速度实战 1 ：了解响应速度原理</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace 流畅性实战 3 ：卡顿分析过程中的一些疑问</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace 流畅性实战 2 ：案例分析 - MIUI 桌面滑动卡顿分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace 流畅性实战 1 ：了解卡顿原理</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2020 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span>
+            <a class="archive-post-title" href="/2020/08/20/weibo-imageload-opt-on-huawei/">华为手机刷微博体验更好？技术角度的一些分析和思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/2020/05/26/samsung_crash/">一个「闰」字引发的事故 - 三星系统重启分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/2020/05/07/Android-App-Chain-Wakeup/">Android App 链式唤醒分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/14</span>
+            <a class="archive-post-title" href="/2020/02/14/Android-Systrace-SurfaceFlinger/">Android Systrace 基础知识 - SurfaceFlinger 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/03</span>
+            <a class="archive-post-title" href="/2020/02/03/android-development-learning-path-2020-edition/">Android 开发者学习路线(2020 版本)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span>
+            <a class="archive-post-title" href="/2020/01/28/2020-read/">我的 2020 年读书单</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2019 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/21</span>
+            <a class="archive-post-title" href="/2019/12/21/Android-Systrace-CPU/">Android Systrace 基础知识 - CPU Info 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/15</span>
+            <a class="archive-post-title" href="/2019/12/15/Android-Systrace-Triple-Buffer/">Android Systrace 基础知识 - Triple Buffer 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/06</span>
+            <a class="archive-post-title" href="/2019/12/06/Android-Systrace-Binder/">Android Systrace 基础知识 - Binder 和锁竞争解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/2019/12/01/BlogMap/">「置顶」博客文章目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/2019/12/01/Android-Systrace-Vsync/">Android Systrace 基础知识 - Vsync 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/2019/11/18/Android-App-Lunch-Optimize/">Android App 启动优化全记录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/06</span>
+            <a class="archive-post-title" href="/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Android Systrace 基础知识 - MainThread 和 RenderThread 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/04</span>
+            <a class="archive-post-title" href="/2019/11/04/Android-Systrace-Input/">Android Systrace 基础知识 - Input 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/24</span>
+            <a class="archive-post-title" href="/2019/10/24/Android-Background-Animation/">Android 中的“后台无效动画“行为分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/22</span>
+            <a class="archive-post-title" href="/2019/10/22/Android-Choreographer/">Android 基于 Choreographer 的渲染机制详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/2019/09/18/Android-Jank-Due-To-Low-Memory/">Android 中的卡顿丢帧原因概述 - 低内存篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/17</span>
+            <a class="archive-post-title" href="/2019/09/17/Android-Kill-Background-App-Debug/">Android 桌面被杀问题分析案例</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Due-To-App/">Android 中的卡顿丢帧原因概述 - 应用篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Due-To-System/">Android 中的卡顿丢帧原因概述 - 系统篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Debug/">Android 中的卡顿丢帧原因概述 - 方法论</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/2019/09/01/Android-Activity-Lunch-Mode/">Android 中的 Activity Launch Mode 详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/2019/07/27/Android-Hardware-Layer/">Android 中的 Hardware Layer 详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/23</span>
+            <a class="archive-post-title" href="/2019/07/23/Android-Systrace-Pre/">Android Systrace 基础知识 -- 分析 Systrace 预备知识</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/29</span>
+            <a class="archive-post-title" href="/2019/06/29/Android-Systrace-SystemServer/">Android Systrace 基础知识 - SystemServer 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/2019/05/28/Android-Systrace-About/">Android Systrace 基础知识 -- Systrace 简介</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/27</span>
+            <a class="archive-post-title" href="/2019/05/27/why-60-fps/">Android Systrace 基础知识 -- Why 60 fps ？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/2019/05/26/Android_Systrace_0/">Android Systrace -- 系列文章目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/15</span>
+            <a class="archive-post-title" href="/2019/05/15/90hz-on-android/">Android 新的流畅体验，90Hz 漫谈</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/2019/04/07/liqi/">利器 - 高效工具推荐</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/2019/01/21/android-performance-case-jank-accessbility/">Android 无障碍服务导致的整机卡顿案例分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/12</span>
+            <a class="archive-post-title" href="/2019/01/12/recommend-of-2018/">2018 年度好物推荐 - 给辛勤工作的自己一点奖励</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2018 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span>
+            <a class="archive-post-title" href="/2018/11/01/android-system-develop-0/">Android 系统开发源码环境搭建</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/25</span>
+            <a class="archive-post-title" href="/2018/10/25/How-do-engineers-count-well/">陆奇：除了好代码，工程师怎样才算优秀？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/01</span>
+            <a class="archive-post-title" href="/2018/10/01/how-to-stop-sucking-and-be-awesome-instead-8/">程序员的修炼-08-阅读之美</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/30</span>
+            <a class="archive-post-title" href="/2018/09/30/how-to-stop-sucking-and-be-awesome-instead-7/">程序员的修炼-07-游戏与编程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/29</span>
+            <a class="archive-post-title" href="/2018/09/29/how-to-stop-sucking-and-be-awesome-instead-6/">程序员的修炼-06-互联网那些事</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/28</span>
+            <a class="archive-post-title" href="/2018/09/28/how-to-stop-sucking-and-be-awesome-instead-5/">程序员的修炼-05-了解你的用户</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/27</span>
+            <a class="archive-post-title" href="/2018/09/27/how-to-stop-sucking-and-be-awesome-instead-4/">程序员的修炼-04-关于测试的一些思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/26</span>
+            <a class="archive-post-title" href="/2018/09/26/how-to-stop-sucking-and-be-awesome-instead-3/">程序员的修炼-03-Web 设计原则</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/20</span>
+            <a class="archive-post-title" href="/2018/09/20/how-to-stop-sucking-and-be-awesome-instead-2/">程序员的修炼-02-编程之道</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/2018/09/19/how-to-stop-sucking-and-be-awesome-instead-1/">程序员的修炼-01-绝地反击之术</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2018/09/13/android-memory/">Android 系统不释放内存吗？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/13</span>
+            <a class="archive-post-title" href="/2018/08/13/Some-Thoughts-on-the-Fluency-of-Android/">关于 Android 系统流畅性的一些思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/20</span>
+            <a class="archive-post-title" href="/2018/05/20/zhihu-startingwindow/">知乎 救救你的 StartingWindow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/2018/05/07/Android-performance-optimization-skills-and-tools/">「置顶」Android 性能优化必知必会</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/2018/01/06/2017%E5%B9%B4%E5%BA%A6%E6%9C%80%E6%8E%A8%E8%8D%90/">2017 年度好物推荐 - 给辛勤工作的自己一点奖励</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2017 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/23</span>
+            <a class="archive-post-title" href="/2017/04/23/About-work/">2017</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2016 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/2016/04/05/android-bottom-bar-2/">Android Bottom navigation 规范二：样式、行为与规格</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/2016/04/05/android-bottom-bar-1/">Android Bottom Navigation 规范一：使用方法</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2015 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/31</span>
+            <a class="archive-post-title" href="/2015/12/31/How-to-calculation-android-app-lunch-time/">Android 中如何计算 App 的启动时间？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/29</span>
+            <a class="archive-post-title" href="/2015/12/29/Android%E5%BA%94%E7%94%A8%E5%90%AF%E5%8A%A8%E4%BC%98%E5%8C%96-%E4%B8%80%E7%A7%8DDelayLoad%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%92%8C%E5%8E%9F%E7%90%86-%E4%B8%8B%E7%AF%87/">Android 应用启动优化:一种 DelayLoad 的实现和原理(下篇)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/2015/11/18/Android-app-lunch-optimize-delay-load/">Android 应用启动优化 - 一种 DelayLoad 的实现和原理(上篇)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/12</span>
+            <a class="archive-post-title" href="/2015/08/12/AndroidL-hwui-RenderThread-workflow/">Android hwui 中 RenderThread 工作流程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/2015/08/05/HashMap/">Java7 HashMap 源码分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-onTrimMemory/">Android 代码内存优化建议 - OnTrimMemory 优化</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-AndroidResource/">Android 代码内存优化建议 - Android 资源篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-Google/">Android 代码内存优化建议 - Android 官方篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-Java/">Android 代码内存优化建议 - Java 官方篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/29</span>
+            <a class="archive-post-title" href="/2015/05/29/Nexus6-with-Android-M/">Nexus6 with Android M 开启多窗口模式</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/06</span>
+            <a class="archive-post-title" href="/2015/05/06/Java-Singleton/">细说 Java 单例模式</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-4/">Android 性能优化典范 - Profile GPU Rendering</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-3/">Android 性能优化典范 - Understanding VSYNC</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-2/">Android 性能优化典范之 Understanding Overdraw</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-1/">Android 性能优化典范 - Render Performance</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns/">Android 性能优化典范综述</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/">Android 内存优化之三 - 打开 MAT 中的 Bitmap 原图</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android 内存优化之二 - MAT使用进阶</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android 内存优化(1) - MAT 使用入门</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/31</span>
+            <a class="archive-post-title" href="/2015/03/31/android-performance-case-study-follow-up/">Android性能优化后续</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-5/">Android 小技巧 - 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-4/">Android 小技巧 - 4</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-3/">Android 小技巧 -3</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/04</span>
+            <a class="archive-post-title" href="/2015/02/04/build-rom-for-nexus5/">为 Nexus5 编译 AndroidL 固件</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/30</span>
+            <a class="archive-post-title" href="/2015/01/30/android-performance-tools-systrace-1/">Android 性能优化之 Systrace 工具介绍(一)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/16</span>
+            <a class="archive-post-title" href="/2015/01/16/view-android-source-code-with-androidstudio/">使用 Android Studio 查看 Android Lollipop 源码</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/13</span>
+            <a class="archive-post-title" href="/2015/01/13/android-performance-optimization-overdraw-2/">Android 性能优化之过渡绘制 - 实战篇</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2014 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/2014/10/20/android-performance-optimization-overdraw-1/">Android 性能优化之过渡绘制 - 理论篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/03</span>
+            <a class="archive-post-title" href="/2014/06/03/android-edittext-do-not-auto-get-focus/">Android 小技巧 - 如何让EditText不自动获取焦点</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/31</span>
+            <a class="archive-post-title" href="/2014/05/31/android-tips-round-up-2/">Android 小技巧 -2</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/2014/05/28/android-tips-round-up-1/">Android 小技巧 - 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/02</span>
+            <a class="archive-post-title" href="/2014/05/02/android_log_to_file/">Android Tools - Log2File</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/01</span>
+            <a class="archive-post-title" href="/2014/04/01/android-service-build-your-own-notification-servers-app/">Android Service：开发自己的通知中心(2):辅助性服务实战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/25</span>
+            <a class="archive-post-title" href="/2014/03/25/ubuntu-adb-can-not-find-devices/">Android:Ubuntu 下执行 Adb 命令找不到设备</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/17</span>
+            <a class="archive-post-title" href="/2014/03/17/android-build-your-own-android-notification-service-app/">Android Service：开发自己的通知中心(1):辅助性服务介绍</a>
+        </li>
+            </ul>
+    </div>
+</div>
+
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="年度推荐">
+                <span class="iconfont-archer">&#xe606;</span>
+                年度推荐
+            </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="随笔">
+                <span class="iconfont-archer">&#xe606;</span>
+                随笔
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="年终总结">
+                <span class="iconfont-archer">&#xe606;</span>
+                年终总结
+            </span>
+            <span class="sidebar-tag-name" data-tags="知识星球">
+                <span class="iconfont-archer">&#xe606;</span>
+                知识星球
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="性能优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                性能优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="线程优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                线程优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR分析">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR分析
+            </span>
+            <span class="sidebar-tag-name" data-tags="页面响应">
+                <span class="iconfont-archer">&#xe606;</span>
+                页面响应
+            </span>
+            <span class="sidebar-tag-name" data-tags="电量优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                电量优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Kotlin">
+                <span class="iconfont-archer">&#xe606;</span>
+                Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="程序员">
+                <span class="iconfont-archer">&#xe606;</span>
+                程序员
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计规范">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计规范
+            </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿
+            </span>
+            <span class="sidebar-tag-name" data-tags="读书笔记">
+                <span class="iconfont-archer">&#xe606;</span>
+                读书笔记
+            </span>
+            <span class="sidebar-tag-name" data-tags="程序员的修炼">
+                <span class="iconfont-archer">&#xe606;</span>
+                程序员的修炼
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计原则">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计原则
+            </span>
+            <span class="sidebar-tag-name" data-tags="测试">
+                <span class="iconfont-archer">&#xe606;</span>
+                测试
+            </span>
+            <span class="sidebar-tag-name" data-tags="了解你的用户">
+                <span class="iconfont-archer">&#xe606;</span>
+                了解你的用户
+            </span>
+            <span class="sidebar-tag-name" data-tags="游戏与编程">
+                <span class="iconfont-archer">&#xe606;</span>
+                游戏与编程
+            </span>
+            <span class="sidebar-tag-name" data-tags="互联网那些事">
+                <span class="iconfont-archer">&#xe606;</span>
+                互联网那些事
+            </span>
+            <span class="sidebar-tag-name" data-tags="阅读之美">
+                <span class="iconfont-archer">&#xe606;</span>
+                阅读之美
+            </span>
+            <span class="sidebar-tag-name" data-tags="利器">
+                <span class="iconfont-archer">&#xe606;</span>
+                利器
+            </span>
+            <span class="sidebar-tag-name" data-tags="iOS">
+                <span class="iconfont-archer">&#xe606;</span>
+                iOS
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design
+            </span>
+            <span class="sidebar-tag-name" data-tags="Smooth">
+                <span class="iconfont-archer">&#xe606;</span>
+                Smooth
+            </span>
+            <span class="sidebar-tag-name" data-tags="体验优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                体验优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="用户体验">
+                <span class="iconfont-archer">&#xe606;</span>
+                用户体验
+            </span>
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+        缺失模块，请参考主题文档进行安装配置：https://github.com/fi3ework/hexo-theme-archer#%E5%AE%89%E8%A3%85%E4%B8%BB%E9%A2%98
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="随笔">
+            <span class="iconfont-archer">&#xe60a;</span>
+            随笔
+        </span>
+        <span class="sidebar-category-name" data-categories="读书笔记">
+            <span class="iconfont-archer">&#xe60a;</span>
+            读书笔记
+        </span>
+        <span class="sidebar-category-name" data-categories="Android">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
+        </span>
+        <span class="sidebar-category-name" data-categories="iOS">
+            <span class="iconfont-archer">&#xe60a;</span>
+            iOS
+        </span>
+        <span class="sidebar-category-name" data-categories="Android性能优化">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android性能优化
+        </span>
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+
+    </div>
+</div>
+
+        <!-- site-meta -->
+        <script>
+    var siteMetaRoot = "/"
+    if (siteMetaRoot === "undefined") {
+        siteMetaRoot = '/'
+    }
+    var siteMeta = {
+        url: "https://androidperformance.com",
+        root: siteMetaRoot,
+        author: "Gracker"
+    }
+</script>
+
+        <!-- import experimental options here -->
+        <!-- Custom Font -->
+
+        <!-- jquery (must load before main.js) -->
+        <script defer src="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+        <!-- main func (depends on jQuery) -->
+        <script src="/scripts/main.js" defer></script>
+        <!-- fancybox -->
+        <script>
+            (function(){
+              var urls = [
+                'https://cdn.bootcdn.net/ajax/libs/fancyapps-ui/5.0.36/fancybox/fancybox.umd.js',
+                'https://cdn.jsdelivr.net/npm/@fancyapps/ui@5.0.36/dist/fancybox/fancybox.umd.js'
+              ];
+              function loadNext(){
+                var u = urls.shift();
+                if(!u) return;
+                var s = document.createElement('script');
+                s.src = u; s.defer = true;
+                s.onload = function(){ if (window.Fancybox) { window.Fancybox.bind('[data-fancybox]'); } };
+                s.onerror = loadNext;
+                document.head.appendChild(s);
+              }
+              loadNext();
+            })();
+        </script>
+        <!-- algolia -->
+        <!-- busuanzi (delay load + silent fail) -->
+        <!-- async load share.js on first click -->
+            <script>
+                (function(){
+                  var loaded = false
+                  function loadShare(){
+                    if (loaded) return
+                    loaded = true
+                    var s = document.createElement('script')
+                    s.src = '/scripts/share.js'
+                    s.async = true
+                    document.head.appendChild(s)
+                  }
+                  document.addEventListener('click', function(e){
+                    var t = e.target
+                    if (!t) return
+                    if (t.closest && t.closest('.share-wrapper')) { loadShare() }
+                    else if (t.classList && t.classList.contains('share-wrapper')) { loadShare() }
+                  }, true)
+                })();
+            </script>
+        <!-- mermaid -->
+    </body>
+</html>

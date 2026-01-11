@@ -1,0 +1,1752 @@
+<!DOCTYPE html>
+<html lang="zh,en">
+    <!-- title -->
+            <!-- keywords -->
+
+                  <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <meta name="author" content="Gracker">
+                    <meta name="renderer" content="webkit">
+                    <meta name="copyright" content="Gracker">
+                      <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,启动优化,Startup,Perfetto,Systrace,RenderThread,Java">
+                          <meta name="description" content="Focus On Android Performance">
+                          <meta name="description" content="本文是 Systrace 系列文章的第六篇，主要是对 Systrace 中的 Input 进行简单介绍，介绍其 Input 的流程； Systrace 中 Input 信息的体现 ，以及如何结合 Input 信息，分析与 Input 相关的问题 本系列的目的是通过 Systrace 这个工具，从另外一个角度来看待 Android 系统整体的运行，同时也从另外一个角度来对 Framework 进行学">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Android Systrace 基础知识 - Input 解读">
+<meta property="og:url" content="https://androidperformance.com/2019/11/04/Android-Systrace-Input/index.html">
+<meta property="og:site_name" content="Android Performance">
+<meta property="og:description" content="本文是 Systrace 系列文章的第六篇，主要是对 Systrace 中的 Input 进行简单介绍，介绍其 Input 的流程； Systrace 中 Input 信息的体现 ，以及如何结合 Input 信息，分析与 Input 相关的问题 本系列的目的是通过 Systrace 这个工具，从另外一个角度来看待 Android 系统整体的运行，同时也从另外一个角度来对 Framework 进行学">
+<meta property="og:locale">
+<meta property="og:image" content="https://androidperformance.com/images/15728723423427.jpg">
+<meta property="og:image" content="https://androidperformance.com/images/15728723576583.jpg">
+<meta property="og:image" content="https://androidperformance.com/images/15728723679523.jpg">
+<meta property="og:image" content="https://androidperformance.com/images/15728723758398.jpg">
+<meta property="og:image" content="https://androidperformance.com/images/15728723834004.jpg">
+<meta property="og:image" content="https://androidperformance.com/images/15728723980792.jpg">
+<meta property="og:image" content="https://androidperformance.com/images/15728724564781.jpg">
+<meta property="og:image" content="https://androidperformance.com/images/15728724685263.jpg">
+<meta property="og:image" content="https://androidperformance.com/images/15728724936139.jpg">
+<meta property="og:image" content="https://androidperformance.com/images/15728725023006.jpg">
+<meta property="og:image" content="https://androidperformance.com/images/15728725102137.jpg">
+<meta property="og:image" content="https://androidperformance.com/images/15728725219191.jpg">
+<meta property="og:image" content="https://androidperformance.com/images/15728725296687.jpg">
+<meta property="og:image" content="https://androidperformance.com/images/WechatIMG581.png">
+<meta property="article:published_time" content="2019-11-04T01:38:29.000Z">
+<meta property="article:modified_time" content="2026-01-11T05:36:33.415Z">
+<meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Startup">
+<meta property="article:tag" content="Android">
+<meta property="article:tag" content="Jank">
+<meta property="article:tag" content="Systrace">
+<meta property="article:tag" content="Performance">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://androidperformance.com/images/15728723423427.jpg">
+                            <meta http-equiv="Cache-control" content="no-cache">
+                            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+                            <link rel="icon" href="/assets/favicon.ico">
+                                <title>
+                                  Android Systrace 基础知识 - Input 解读 · Android Performance
+                                </title>
+                                <!-- /*! loadCSS. [c]2017 Filament Group, Inc. MIT License */
+/* This file is meant as a standalone workflow for
+- testing support for link[rel=preload]
+- enabling async CSS loading in browsers that do not support rel=preload
+- applying rel preload css once loaded, whether supported or not.
+*/ -->
+<script>
+    (function (w) {
+        'use strict'
+        // rel=preload support test
+        if (!w.loadCSS) {
+            w.loadCSS = function () {}
+        }
+        // define on the loadCSS obj
+        var rp = (loadCSS.relpreload = {})
+        // rel=preload feature support test
+        // runs once and returns a function for compat purposes
+        rp.support = (function () {
+            var ret
+            try {
+                ret = w.document.createElement('link').relList.supports('preload')
+            } catch (e) {
+                ret = false
+            }
+            return function () {
+                return ret
+            }
+        })()
+
+        // if preload isn't supported, get an asynchronous load by using a non-matching media attribute
+        // then change that media back to its intended value on load
+        rp.bindMediaToggle = function (link) {
+            // remember existing media attr for ultimate state, or default to 'all'
+            var finalMedia = link.media || 'all'
+
+            function enableStylesheet() {
+                link.media = finalMedia
+            }
+
+            // bind load handlers to enable media
+            if (link.addEventListener) {
+                link.addEventListener('load', enableStylesheet)
+            } else if (link.attachEvent) {
+                link.attachEvent('onload', enableStylesheet)
+            }
+
+            // Set rel and non-applicable media type to start an async request
+            // note: timeout allows this to happen async to let rendering continue in IE
+            setTimeout(function () {
+                link.rel = 'stylesheet'
+                link.media = 'only x'
+            })
+            // also enable media after 3 seconds,
+            // which will catch very old browsers (android 2.x, old firefox) that don't support onload on link
+            setTimeout(enableStylesheet, 3000)
+        }
+
+        // loop through link elements in DOM
+        rp.poly = function () {
+            // double check this to prevent external calls from running
+            if (rp.support()) {
+                return
+            }
+            var links = w.document.getElementsByTagName('link')
+            for (var i = 0; i < links.length; i++) {
+                var link = links[i]
+                // qualify links to those with rel=preload and as=style attrs
+                if (
+                    link.rel === 'preload' &&
+                    link.getAttribute('as') === 'style' &&
+                    !link.getAttribute('data-loadcss')
+                ) {
+                    // prevent rerunning on link
+                    link.setAttribute('data-loadcss', true)
+                    // bind listeners to toggle media back
+                    rp.bindMediaToggle(link)
+                }
+            }
+        }
+
+        // if unsupported, run the polyfill
+        if (!rp.support()) {
+            // run once at least
+            rp.poly()
+
+            // rerun poly on an interval until onload
+            var run = w.setInterval(rp.poly, 500)
+            if (w.addEventListener) {
+                w.addEventListener('load', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            } else if (w.attachEvent) {
+                w.attachEvent('onload', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            }
+        }
+
+        // commonjs
+        if (typeof exports !== 'undefined') {
+            exports.loadCSS = loadCSS
+        } else {
+            w.loadCSS = loadCSS
+        }
+    })(typeof global !== 'undefined' ? global : this)
+</script>
+
+                                  <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/font/Oswald-Regular.woff2") format('woff2'),
+             url("/font/Oswald-Regular.ttf") format('truetype');
+        font-display: swap;
+    }
+
+    body {
+        margin: 0;
+    }
+
+    /* Removed initial hide to show content immediately */
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(
+            -45deg,
+            #444 0,
+            #444 80px,
+            #333 80px,
+            #333 160px
+        );
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+</style>
+
+                                    <link id="stylesheet-base" rel="preload" href="/css/style.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <link id="stylesheet-mobile" rel="preload" href="/css/mobile.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet';this.media='screen and
+                                    (max-width: 960px)'">
+                                    <link id="stylesheet-theme-dark" rel="preload" href="/css/dark.css
+                                    " as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <!-- Font Awesome CSS (with CDN fallback) -->
+                                    <link id="stylesheet-fontawesome" rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+                                      as="style" onload="this.onload=null;this.rel='stylesheet'"
+                                      onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css';this.rel='stylesheet'">
+                                    <link rel="preconnect" href="https://cdn.bootcdn.net" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.bootcdn.net">
+                                    <link rel="preconnect" href="https://cdn.staticfile.org" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.staticfile.org">
+                                    <link rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js" as="script">
+                                    <link rel="preload" href="/scripts/main.js" as="script">
+                                    <!-- use compressed font format to reduce transfer size -->
+                                    <link rel="preload" href="/font/Source%5C%20Sans%5C%20Pro.woff2"
+                                      as="font" type="font/woff2" crossorigin>
+                                    <link rel="preload" href="/font/Source%5C%20Sans%5C%20Pro.woff" as="font"
+                                      type="font/woff" crossorigin>
+                                    <link rel="preload" href="https://at.alicdn.com/t/font_327081_1dta1rlogw17zaor.woff"
+                                      as="font" crossorigin>
+                                    <!-- algolia -->
+                                        <!-- 百度统计（延迟加载，失败静默）  -->
+                                            <!-- CNZZ（延迟加载，失败静默）  -->
+                                                <!-- Google tag (gtag.js) 延迟加载，失败静默 -->
+                                                  <script>
+                                                    (function () {
+                                                      function loadGtag() {
+                                                        try {
+                                                          window.dataLayer = window.dataLayer || []
+                                                          function gtag() { dataLayer.push(arguments) }
+                                                          window.gtag = gtag
+                                                          gtag('js', new Date())
+                                                          var s = document.createElement('script')
+                                                          s.async = true
+                                                          s.src = 'https://www.googletagmanager.com/gtag/js?id=UA-50993302-2'
+                                                          s.onerror = function () { }
+                                                          s.onload = function () { gtag('config', 'UA-50993302-2') }
+                                                          document.head.appendChild(s)
+                                                        } catch (e) { }
+                                                      }
+                                                      if (window.requestIdleCallback) {
+                                                        requestIdleCallback(loadGtag, { timeout: 5000 })
+                                                      } else {
+                                                        window.addEventListener('load', function () { setTimeout(loadGtag, 3000) })
+                                                      }
+                                                    })();
+                                                  </script>
+                                                    <!-- Hreflang Tags -->
+                                                    
+                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2019/11/04/Android-Systrace-Input/" />
+                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2019/11/04/Android-Systrace-Input/" />
+                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2019/11/04/Android-Systrace-Input/" />
+                  <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/atom.xml" title="Android Performance" type="application/atom+xml">
+</head>
+        <body class="post-body">
+        <!-- header -->
+        <header class="header header-mobile">
+    <!-- top read progress line -->
+    <div class="header-element">
+        <div class="read-progress"></div>
+    </div>
+    <!-- sidebar menu button -->
+    <div class="header-element">
+        <div class="header-sidebar-menu">
+            <div style="padding-left: 1px;">&#xe775;</div>
+        </div>
+    </div>
+    <!-- header actions -->
+    <div class="header-actions">
+        <!-- theme mode switch button -->
+        <span class="header-theme-btn header-element">
+            <i class="fas fa-adjust"></i>
+        </span>
+        <!-- back to home page text -->
+        <span class="home-link header-element">
+            <a href="/">Android Performance</a>
+        </span>
+    </div>
+    <!-- toggle banner -->
+    <div class="banner">
+        <div class="blog-title header-element">
+            <a href="/">Android Performance</a>
+        </div>
+        <div class="post-title header-element">
+            <a href="#" class="post-name">Android Systrace 基础知识 - Input 解读</a>
+        </div>
+    </div>
+</header>
+
+        <!-- fixed footer -->
+        <footer class="footer-fixed">
+    <!-- donate button -->
+    <div class="donate-popup donate-popup--hidden">
+    <div class="donate-popup__title">Buy Me A Coffee</div>
+    <div class="donate-popup__content">
+        <div class="donate-popup__content-description">如果觉得文章还不错，打赏一杯咖啡吧.</div>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Wechat"
+            alt="Wechat"
+            src="/assets/donate-wechat.png"
+        ></img>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Alipay"
+            alt="Alipay"
+            src="/assets/donate-alipay.png"
+        ></img>
+    </div>
+</div>
+
+    <div
+        title="Donate to the author"
+        class="footer-fixed-btn footer-fixed-btn--hidden donate-btn"
+    >
+        <i class="fas fa-donate"></i>
+    </div>
+
+    <!-- back to top button -->
+    <div class="footer-fixed-btn footer-fixed-btn--hidden back-top">
+        <div>&#xe639;</div>
+    </div>
+</footer>
+
+        <!-- wrapper -->
+        <div class="wrapper">
+            <div class="site-intro" style="    height:50vh;
+">
+    <!-- 主页  -->
+    <!-- 404页  -->
+    <div class="site-intro-placeholder"></div>
+    <picture>
+            <source type="image/webp" srcset="/intro/post-bg.webp">
+        <img class="site-intro-img"
+             src="/intro/post-bg.jpg"
+             alt=""
+loading="lazy"             decoding="async"
+             fetchpriority="auto"
+             sizes="100vw">
+    </picture>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+                Android Systrace 基础知识 - Input 解读
+            <!-- 404 -->
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            <!-- 404 -->
+        </p>
+        <!-- 文章页 meta -->
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                    <div class="post-intro-tags" >
+        <span class="post-category" data-categories="Android">
+            <i class="fas fa-folder post-category-icon"></i>
+            <span class="post-category-text">
+                Android
+            </span>
+        </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Startup">Startup</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Jank">Jank</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Systrace">Systrace</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
+</div>
+
+                <!-- 文章字数统计 -->
+                    <div class="post-intro-read">
+                        <span>Word count: <span class="post-count word-count">4.9k</span>Reading time: <span class="post-count reading-time">21 min</span></span>
+                    </div>
+                <div class="post-intro-meta">
+                    <!-- 撰写日期 -->
+                    <span class="iconfont-archer post-intro-calander">&#xe676;</span>
+                    <span class="post-intro-time">2019/11/04</span>
+                    <!-- 文章分享 -->
+                    <span class="share-wrapper">
+                        <span class="iconfont-archer share-icon">&#xe71d;</span>
+                        <span class="share-text">Share</span>
+                        <ul class="share-list">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+    </div>
+</div>
+
+            
+            <script>
+  // get user agent
+  function getBrowserVersions() {
+    var u = window.navigator.userAgent
+    return {
+      userAgent: u,
+      trident: u.indexOf('Trident') > -1, //IE内核
+      presto: u.indexOf('Presto') > -1, //opera内核
+      webKit: u.indexOf('AppleWebKit') > -1, //苹果、谷歌内核
+      gecko: u.indexOf('Gecko') > -1 && u.indexOf('KHTML') == -1, //火狐内核
+      mobile: !!u.match(/AppleWebKit.*Mobile.*/), //是否为移动终端
+      ios: !!u.match(/\(i[^;]+;( U;)? CPU.+Mac OS X/), //ios终端
+      android: u.indexOf('Android') > -1 || u.indexOf('Linux') > -1, //android终端或者uc浏览器
+      iPhone: u.indexOf('iPhone') > -1 || u.indexOf('Mac') > -1, //是否为iPhone或者安卓QQ浏览器
+      iPad: u.indexOf('iPad') > -1, //是否为iPad
+      webApp: u.indexOf('Safari') == -1, //是否为web应用程序，没有头部与底部
+      weixin: u.indexOf('MicroMessenger') == -1, //是否为微信浏览器
+      uc: u.indexOf('UCBrowser') > -1, //是否为android下的UC浏览器
+    }
+  }
+  var browser = {
+    versions: getBrowserVersions(),
+  }
+  console.log('userAgent: ' + browser.versions.userAgent)
+
+  // callback
+  function fontLoaded() {
+    console.log('font loaded')
+    if (document.getElementsByClassName('site-intro-meta')) {
+      document
+        .getElementsByClassName('intro-title')[0]
+        .classList.add('intro-fade-in')
+      document
+        .getElementsByClassName('intro-subtitle')[0]
+        .classList.add('intro-fade-in')
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+      if (postIntros) {
+        postIntros.classList.add('post-fade-in')
+      }
+    }
+  }
+
+  // UC不支持跨域，所以直接显示
+  function asyncCb() {
+    if (browser.versions.uc) {
+      console.log('UCBrowser')
+      fontLoaded()
+    } else {
+      WebFont.load({
+        custom: {
+          families: ['Oswald-Regular'],
+        },
+        loading: function () {
+          // 所有字体开始加载
+          // console.log('font loading');
+        },
+        active: function () {
+          // 所有字体已渲染
+          fontLoaded()
+        },
+        inactive: function () {
+          // 字体预加载失败，无效字体或浏览器不支持加载
+          console.log('inactive: timeout')
+          fontLoaded()
+        },
+        timeout: 5000, // Set the timeout to two seconds
+      })
+    }
+  }
+
+  function asyncErr() {
+    console.warn('script load from CDN failed, will load local script')
+  }
+
+  // load webfont-loader async, and add callback function
+  function async(u, cb, err) {
+    var d = document,
+      t = 'script',
+      o = d.createElement(t),
+      s = d.getElementsByTagName(t)[0]
+    o.src = u
+    if (cb) {
+      o.addEventListener(
+        'load',
+        function (e) {
+          cb(null, e)
+        },
+        false
+      )
+    }
+    if (err) {
+      o.addEventListener(
+        'error',
+        function (e) {
+          err(null, e)
+        },
+        false
+      )
+    }
+    s.parentNode.insertBefore(o, s)
+  }
+
+  var asyncLoadWithFallBack = function (arr, success, reject) {
+    var currReject = function () {
+      reject()
+      arr.shift()
+      if (arr.length) async(arr[0], success, currReject)
+    }
+
+    async(arr[0], success, currReject)
+  }
+
+  asyncLoadWithFallBack(
+    [
+      'https://cdn.bootcdn.net/ajax/libs/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.staticfile.org/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.jsdelivr.net/npm/webfontloader@1.6.28/webfontloader.min.js',
+      "/lib/webfontloader.min.js",
+    ],
+    asyncCb,
+    asyncErr
+  )
+</script>
+
+            <img class="loading" src="/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" alt="loading">
+            <div class="container container-unloaded">
+                <main class="main post-page">
+    <article class="article-entry">
+        <p>本文是 Systrace 系列文章的第六篇，主要是对 Systrace 中的 Input 进行简单介绍，介绍其 Input 的流程； Systrace 中 Input 信息的体现 ，以及如何结合 Input 信息，分析与 Input 相关的问题</p>
+<p>本系列的目的是通过 Systrace 这个工具，从另外一个角度来看待 Android 系统整体的运行，同时也从另外一个角度来对 Framework 进行学习。也许你看了很多讲 Framework 的文章，但是总是记不住代码，或者不清楚其运行的流程，也许从 Systrace 这个图形化的角度，你可以理解的更深入一些。</p>
+<span id="more"></span>
+
+<h2 id="本文目录"><a href="#本文目录" class="headerlink" title="本文目录"></a>本文目录</h2><ul>
+<li><a href="#series">系列文章目录</a></li>
+<li><a href="#content">正文</a></li>
+<li><a href="#input-overview">Input in Systrace</a></li>
+<li><a href="#inputdown-ss">InputDown 事件在 SystemServer 的工作流</a></li>
+<li><a href="#inputdown-app">InputDown 事件在 App 的工作流</a></li>
+<li><a href="#key-points">关键知识点和流程</a></li>
+<li><a href="#input-vsync">Input 刷新与 Vsync</a></li>
+<li><a href="#input-debug">Input 调试信息</a></li>
+<li><a href="#refs">参考</a></li>
+<li><a href="#attachments">附件</a></li>
+<li><a href="#others">本文其他地址</a></li>
+<li><a href="#about">关于我 &amp;&amp; 博客</a></li>
+</ul>
+<p><a id="series"></a></p>
+<h1 id="系列文章目录"><a href="#系列文章目录" class="headerlink" title="系列文章目录"></a>系列文章目录</h1><ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/05/28/Android-Systrace-About/">Systrace 简介</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/07/23/Android-Systrace-Pre/">Systrace 基础知识 - Systrace 预备知识</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/05/27/why-60-fps/">Systrace 基础知识 - Why 60 fps ？</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/06/29/Android-Systrace-SystemServer/">Systrace 基础知识 - SystemServer 解读</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2020/02/14/Android-Systrace-SurfaceFlinger/">Systrace 基础知识 - SurfaceFlinger 解读</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/11/04/Android-Systrace-Input/">Systrace 基础知识 - Input 解读</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/12/01/Android-Systrace-Vsync/">Systrace 基础知识 - Vsync 解读</a></li>
+<li><a href="https://androidperformance.com/2019/10/22/Android-Choreographer/">Systrace 基础知识 - Vsync-App ：基于 Choreographer 的渲染机制详解</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Systrace 基础知识 - MainThread 和 RenderThread 解读</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/12/06/Android-Systrace-Binder/">Systrace 基础知识 - Binder 和锁竞争解读</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/12/15/Android-Systrace-Triple-Buffer">Systrace 基础知识 - Triple Buffer 解读</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/12/21/Android-Systrace-CPU">Systrace 基础知识 - CPU Info 解读</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2021/04/24/android-systrace-smooth-in-action-1/">Systrace 流畅性实战 1 ：了解卡顿原理</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2021/04/24/android-systrace-smooth-in-action-2/">Systrace 流畅性实战 2 ：案例分析: MIUI 桌面滑动卡顿分析</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2021/04/24/android-systrace-smooth-in-action-3/">Systrace 流畅性实战 3 ：卡顿分析过程中的一些疑问</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2021/09/13/android-systrace-Responsiveness-in-action-1/">Systrace 响应速度实战 1 ：了解响应速度原理</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2021/09/13/android-systrace-Responsiveness-in-action-2/">Systrace 响应速度实战 2 ：响应速度实战分析-以启动速度为例</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2021/09/13/android-systrace-Responsiveness-in-action-3/">Systrace 响应速度实战 3 ：响应速度延伸知识</a>   </li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2022/01/21/android-systrace-cpu-state-runnable/">Systrace 线程 CPU 运行状态分析技巧 - Runnable 篇</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-running/">Systrace 线程 CPU 运行状态分析技巧 - Running 篇</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a></li>
+</ol>
+<p><a id="content"></a></p>
+<h1 id="正文"><a href="#正文" class="headerlink" title="正文"></a>正文</h1><p>在<a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/10/22/Android-Choreographer/">Android 基于 Choreographer 的渲染机制详解</a> 这篇文章中，我有讲到，Android App 的主线程运行的本质是靠 Message 驱动的，这个 Message 可以是循环动画、可以是定时任务、可以是其他线程唤醒，不过我们最常见的还是 Input Message ，这里的 Input 是以 InputReader 这里的分类，不仅包含触摸事件(Down、Up、Move) ， 可包含 Key 事件(Home Key  、 Back Key) . 这里我们着重讲的是<strong>触摸事件</strong></p>
+<p>由于 Android 系统在 Input 链上加了一些 Trace 点，且这些 Trace 点也比较完善，部分厂家可能会自己加一些，不过我们这里以标准的 Trace 点来讲解，这样不至于你换了个手机抓的 Trace 就不一样了</p>
+<p>Input 在 Android 中的地位是很高的，我们在玩手机的时候，大部分应用的滑动、跳转这些都依靠 Input 事件来驱动，后续我会专门写一篇文章，来介绍 Android 中基于 Input 的运行机制。这里是从 Systrace 的角度来看 Input 。看下面的流程之前，脑子里先有个关于 Input 的大概处理流程，这样看的时候，就可以代入：</p>
+<ol>
+<li><strong>触摸屏每隔几毫秒扫描一次，如果有触摸事件，那么把事件上报到对应的驱动</strong></li>
+<li><strong>InputReader 读取触摸事件交给 InputDispatcher 进行事件派发</strong></li>
+<li><strong>InputDispatcher 将触摸事件发给注册了 Input 事件的 App</strong></li>
+<li><strong>App 拿到事件之后，进行 Input 事件分发，如果此事件分发的过程中，App 的 UI 发生了变化，那么会请求 Vsync，则进行一帧的绘制</strong></li>
+</ol>
+<p><strong>另外在看 Systrace 的时候，要牢记 Systrace 中时间是从左到右流逝的，也就是说如果你在 Systrace 上画一条竖直线，那么竖直线左边的事件永远比右边的事件先发生，这也是我们分析源码流程的一个基石。我希望大家在看基于  Systrace 的源码流程分析之后，脑子里有一个图形化的、立体的流程图，你跟的代码走到哪一步了在图形你在脑中可以快速定位出来</strong></p>
+<p><a id="input-overview"></a></p>
+<h1 id="Input-in-Systrace"><a href="#Input-in-Systrace" class="headerlink" title="Input in Systrace"></a>Input in Systrace</h1><p>下面这张图是一个概览图，以滑动桌面为例 (<strong>滑动桌面包括一个 Input_Down 事件 + 若干个 Input_Move 事件 + 一个 Input_Up 事件，这些事件和事件流都会在 Systrace 上有所体现，这也是我们分析 Systrace 的一个重要的切入点</strong>)，主要牵扯到的模块是 SystemServer 和 App 模块，其中用蓝色标识的是事件的流动信息，红色的是辅助信息。</p>
+<p><img src="/images/15728723423427.jpg"></p>
+<p><strong>InputReader</strong> 和 <strong>InputDispatcher</strong> 是跑在 SystemServer 里面的两个 Native 线程，负责读取和分发 Input 事件，我们分析 Systrace 的 Input 事件流，首先是找到这里。下面针对上图中标号进行简单说明</p>
+<ol>
+<li><strong>InputReader</strong> 负责从 EventHub 里面把 Input 事件读取出来，然后交给 InputDispatcher 进行事件分发</li>
+<li><strong>InputDispatcher</strong> 在拿到 InputReader 获取的事件之后，对事件进行包装和分发 (也就是发给对应的)</li>
+<li><strong>OutboundQueue</strong> 里面放的是即将要被派发给对应 AppConnection 的事件</li>
+<li><strong>WaitQueue</strong> 里面记录的是已经派发给 AppConnection 但是 App 还在处理没有返回处理成功的事件</li>
+<li><strong>PendingInputEventQueue</strong> 里面记录的是 App 需要处理的 Input 事件，这里可以看到已经到了应用进程</li>
+<li><strong>deliverInputEvent</strong> 标识 App UI Thread 被 Input 事件唤醒</li>
+<li><strong>InputResponse</strong> 标识 Input 事件区域，这里可以看到一个 Input_Down 事件 + 若干个 Input_Move 事件 + 一个 Input_Up 事件的处理阶段都被算到了这里</li>
+<li><strong>App 响应 Input 事件</strong> ： 这里是滑动然后松手，也就是我们熟悉的桌面滑动的操作，桌面随着手指的滑动更新画面，松手后触发 Fling 继续滑动，从 Systrace 就可以看到整个事件的流程</li>
+</ol>
+<p>下面以第一个 Input_Down 事件的处理流程来进行详细的工作流说明，其他的 Move 事件和 Up 事件的处理是一样的（部分不一样，不过影响不大）</p>
+<p><a id="inputdown-ss"></a></p>
+<h2 id="InputDown-事件在-SystemServer-的工作流"><a href="#InputDown-事件在-SystemServer-的工作流" class="headerlink" title="InputDown 事件在 SystemServer 的工作流"></a>InputDown 事件在 SystemServer 的工作流</h2><p>放大 SystemServer 的部分，可以看到其工作流(蓝色)，<strong>滑动桌面包括 Input_Down + 若干个 Input_Move + Input_Up ，我们这里看的是 Input_Down 这个事件</strong></p>
+<p><img src="/images/15728723576583.jpg"></p>
+<p><a id="inputdown-app"></a></p>
+<h2 id="InputDown-事件在-App-的工作流"><a href="#InputDown-事件在-App-的工作流" class="headerlink" title="InputDown 事件在 App 的工作流"></a>InputDown 事件在 App 的工作流</h2><p>应用在收到 Input 事件后，有时候会马上去处理 (没有 Vsync 的情况下)，有时候会等 Vsync 信号来了之后去处理，这里 Input_Down 事件就是直接去唤醒主线程做处理，其 Systrace 比较简单，最上面有个 Input 事件队列，主线程则是简单的处理</p>
+<p><img src="/images/15728723679523.jpg"></p>
+<h3 id="App-的-Pending-队列"><a href="#App-的-Pending-队列" class="headerlink" title="App 的 Pending 队列"></a>App 的 Pending 队列</h3><p><img src="/images/15728723758398.jpg"></p>
+<h3 id="主线程处理-Input-事件"><a href="#主线程处理-Input-事件" class="headerlink" title="主线程处理 Input 事件"></a>主线程处理 Input 事件</h3><p>主线程处理 Input 事件这个大家比较熟悉，从下面的调用栈可以看到，Input 事件传到了 ViewRootImpl，最终到了 DecorView ，然后就是大家熟悉的 Input 事件分发机制</p>
+<p><img src="/images/15728723834004.jpg"></p>
+<p><a id="key-points"></a></p>
+<h1 id="关键知识点和流程"><a href="#关键知识点和流程" class="headerlink" title="关键知识点和流程"></a>关键知识点和流程</h1><p>从上面的 Systrace 来看，Input 事件的基本流向如下：</p>
+<ol>
+<li><strong>InputReader 读取 Input 事件</strong></li>
+<li><strong>InputReader 将读取的 Input 事件放到 InboundQueue 中</strong></li>
+<li><strong>InputDispatcher 从 InboundQueue 中取出 Input 事件派发到各个 App(连接) 的 OutBoundQueue</strong></li>
+<li><strong>同时将事件记录到各个 App(连接) 的  WaitQueue</strong></li>
+<li><strong>App 接收到 Input 事件，同时记录到 PendingInputEventQueue ，然后对事件进行分发处理</strong></li>
+<li><strong>App 处理完成后，回调 InputManagerService 将负责监听的 WaitQueue 中对应的 Input 移除</strong></li>
+</ol>
+<p>通过上面的流程，一次 Input 事件就被消耗掉了(当然这只是正常情况，还有很多异常情况、细节处理，这里就不细说了，自己看相关流程的时候可以深挖一下) ， 那么本节就从上面的关键流中取几个重要的知识点讲解（部分流程和图参考和拷贝了 Gityuan 的博客的图，链接在最下面<strong>参考</strong>那一节）</p>
+<h2 id="InputReader"><a href="#InputReader" class="headerlink" title="InputReader"></a>InputReader</h2><p>InputReader 是一个 Native 线程，跑在 SystemServer 进程里面，其核心功能是从 EventHub 读取事件、进行加工、将加工好的事件发送到 InputDispatcher</p>
+<p>InputReader Loop 流程如下</p>
+<ol>
+<li>getEvents：通过 EventHub (监听目录 &#x2F;dev&#x2F;input )读取事件放入 mEventBuffer ,而mEventBuffer 是一个大小为256的数组, 再将事件 input_event 转换为 RawEvent </li>
+<li>processEventsLocked: 对事件进行加工, 转换 RawEvent -&gt; NotifyKeyArgs(NotifyArgs) </li>
+<li>QueuedListener-&gt;flush：将事件发送到 InputDispatcher 线程, 转换 NotifyKeyArgs -&gt; KeyEntry(EventEntry)</li>
+</ol>
+<p>核心代码 loopOnce 处理流程如下：<br><img src="/images/15728723980792.jpg"></p>
+<p>InputReader 核心 Loop 函数 loopOnce 逻辑如下</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">InputReader::loopOnce</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="type">int32_t</span> oldGeneration;</span><br><span class="line">    <span class="type">int32_t</span> timeoutMillis;</span><br><span class="line">    <span class="type">bool</span> inputDevicesChanged = <span class="literal">false</span>;</span><br><span class="line">    std::vector&lt;InputDeviceInfo&gt; inputDevices;</span><br><span class="line">    &#123; <span class="comment">// acquire lock</span></span><br><span class="line">    ......</span><br><span class="line">    <span class="comment">//获取输入事件、设备增删事件，count 为事件数量</span></span><br><span class="line">    <span class="type">size_t</span> count = mEventHub -&gt;<span class="built_in">getEvents</span>(timeoutMillis, mEventBuffer, EVENT_BUFFER_SIZE);</span><br><span class="line">    &#123;</span><br><span class="line">    ......</span><br><span class="line">        <span class="keyword">if</span> (count) &#123;<span class="comment">//处理事件</span></span><br><span class="line">            <span class="built_in">processEventsLocked</span>(mEventBuffer, count);</span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line">    &#125;</span><br><span class="line">    ......</span><br><span class="line">    mQueuedListener-&gt;<span class="built_in">flush</span>();<span class="comment">//将事件传到 InputDispatcher，这里getListener 得到的就是 InputDispatcher</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h2 id="InputDispatcher"><a href="#InputDispatcher" class="headerlink" title="InputDispatcher"></a>InputDispatcher</h2><p>上面的 InputReader 调用 mQueuedListener-&gt;flush 之后 ，将 Input 事件加入到InputDispatcher 的 mInboundQueue ，然后唤醒 InputDispatcher ， 从 Systrace 的唤醒信息那里也可以看到 InputDispatch 线程是被 InputReader 唤醒的</p>
+<p><img src="/images/15728724564781.jpg"></p>
+<p>InputDispatcher 的核心逻辑如下：</p>
+<ol>
+<li>dispatchOnceInnerLocked(): 从 InputDispatcher 的 mInboundQueue 队列，取出事件 EventEntry。另外该方法开始执行的时间点 (currentTime) 便是后续事件 dispatchEntry 的分发时间 (deliveryTime）</li>
+<li>dispatchKeyLocked()：满足一定条件时会添加命令 doInterceptKeyBeforeDispatchingLockedInterruptible；</li>
+<li>enqueueDispatchEntryLocked()：生成事件 DispatchEntry 并加入 connection 的 outbound 队列</li>
+<li>startDispatchCycleLocked()：从 outboundQueue 中取出事件 DispatchEntry, 重新放入 connection 的 waitQueue 队列；</li>
+<li>InputChannel.sendMessage 通过 socket 方式将消息发送给远程进程；</li>
+<li>runCommandsLockedInterruptible()：通过循环遍历的方式，依次处理 mCommandQueue 队列中的所有命令。而 mCommandQueue 队列中的命令是通过 postCommandLocked() 方式向该队列添加的。</li>
+</ol>
+<p><img src="/images/15728724685263.jpg"></p>
+<p>其核心处理逻辑在 dispatchOnceInnerLocked 这里</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">InputDispatcher::dispatchOnceInnerLocked</span><span class="params">(<span class="type">nsecs_t</span>* nextWakeupTime)</span> </span>&#123;</span><br><span class="line">    <span class="comment">// Ready to start a new event.</span></span><br><span class="line">    <span class="comment">// If we don&#x27;t already have a pending event, go grab one.</span></span><br><span class="line">    <span class="keyword">if</span> (! mPendingEvent) &#123;</span><br><span class="line">        <span class="keyword">if</span> (mInboundQueue.<span class="built_in">isEmpty</span>()) &#123;</span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            <span class="comment">// Inbound queue has at least one entry.</span></span><br><span class="line">            mPendingEvent = mInboundQueue.<span class="built_in">dequeueAtHead</span>();</span><br><span class="line">            <span class="built_in">traceInboundQueueLengthLocked</span>();</span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line">        <span class="comment">// Poke user activity for this event.</span></span><br><span class="line">        <span class="keyword">if</span> (mPendingEvent-&gt;policyFlags &amp; POLICY_FLAG_PASS_TO_USER) &#123;</span><br><span class="line">            <span class="built_in">pokeUserActivityLocked</span>(mPendingEvent);</span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line">        <span class="comment">// Get ready to dispatch the event.</span></span><br><span class="line">        <span class="built_in">resetANRTimeoutsLocked</span>();</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">case</span> EventEntry::TYPE_MOTION: &#123;</span><br><span class="line">        done = <span class="built_in">dispatchMotionLocked</span>(currentTime, typedEntry,</span><br><span class="line">                &amp;dropReason, nextWakeupTime);</span><br><span class="line">        <span class="keyword">break</span>;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (done) &#123;</span><br><span class="line">        <span class="keyword">if</span> (dropReason != DROP_REASON_NOT_DROPPED) &#123;</span><br><span class="line">            <span class="built_in">dropInboundEventLocked</span>(mPendingEvent, dropReason);</span><br><span class="line">        &#125;</span><br><span class="line">        mLastDropReason = dropReason;</span><br><span class="line">        <span class="built_in">releasePendingEventLocked</span>();</span><br><span class="line">        *nextWakeupTime = LONG_LONG_MIN;  <span class="comment">// force next poll to wake up immediately</span></span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h2 id="InboundQueue"><a href="#InboundQueue" class="headerlink" title="InboundQueue"></a>InboundQueue</h2><p>InputDispatcher 执行 notifyKey 的时候，会将 Input 事件封装后放到  InboundQueue 中，后续 InputDispatcher 循环处理 Input 事件的时候，就是从 InboundQueue 取出事件然后做处理</p>
+<p><img src="/images/15728724936139.jpg"></p>
+<h2 id="OutboundQueue"><a href="#OutboundQueue" class="headerlink" title="OutboundQueue"></a>OutboundQueue</h2><p>Outbound 意思是出站，这里的 OutboundQueue 指的是要被 App 拿去处理的事件队列，每一个 App(Connection) 都对应有一个 OutboundQueue ，从 InboundQueue 那一节的图来看，事件会先进入 InboundQueue ，然后被 InputDIspatcher 派发到各个 App 的 OutboundQueue </p>
+<p><img src="/images/15728725023006.jpg"></p>
+<h2 id="WaitQueue"><a href="#WaitQueue" class="headerlink" title="WaitQueue"></a>WaitQueue</h2><p>当 InputDispatcher 将 Input 事件分发出去之后，将 DispatchEntry 从 outboundQueue 中取出来放到 WaitQueue 中，当 publish 出去的事件被处理完成（finished），InputManagerService 就会从应用中得到一个回复，此时就会取出 WaitQueue 中的事件，从 Systrace 中看就是对应 App 的 WaitQueue 减少</p>
+<p>如果主线程发生卡顿，那么 Input 事件没有及时被消耗，也会在 WaitQueue 这里体现出来，如下图：</p>
+<p><img src="/images/15728725102137.jpg"></p>
+<h2 id="整体逻辑"><a href="#整体逻辑" class="headerlink" title="整体逻辑"></a>整体逻辑</h2><p>图来自 <a target="_blank" rel="noopener" href="http://gityuan.com/">Gityuan 博客</a><br><img src="/images/15728725219191.jpg"></p>
+<p><a id="input-vsync"></a></p>
+<h1 id="Input-刷新与-Vsync"><a href="#Input-刷新与-Vsync" class="headerlink" title="Input 刷新与 Vsync"></a>Input 刷新与 Vsync</h1><p>Input 的刷新取决于触摸屏的采样，目前比较多的屏幕采样率是 120Hz 和 160Hz ，对应就是 8ms 采样一次或者 6.25ms 采样一次，我们来看一下其在 Systrace 上的展示</p>
+<p><img src="/images/15728725296687.jpg"></p>
+<p>可以看到上图中， InputReader 每隔 6.25ms 就可以读上来一个数据，交给 InputDispatcher 去分发给 App ，那么是不是屏幕采样率越高越好呢？也不一定，比如上面那张图，虽然 InputReader 每隔 6.25ms 就可以读上来一个数据给 InputDispatcher 去分发给 App ，但是从 WaitQueue 的表现来看，应用并没有消耗这个 Input 事件，这是为什么呢？</p>
+<p>原因在于应用消耗 Input 事件的时机是 Vsync 信号来了之后，刷新率为 60Hz 的屏幕，一般系统也是 60 fps ，也就是说两个 Vsync 的间隔在 16.6ms ，这期间如果有两个或者三个 Input 事件，那么必然有一个或者两个要被抛弃掉，只拿最新的那个。也就是说：</p>
+<ol>
+<li><strong>在屏幕刷新率和系统 FPS 都是 60 的时候，盲目提高触摸屏的采样率，是没有太大的效果的，反而有可能出现上面图中那样，有的 Vsync 周期中有两个 Input 事件，而有的 Vsync 周期中有三个 Input 事件，这样造成事件不均匀，可能会使 UI 产生抖动</strong></li>
+<li><strong>在屏幕刷新率和系统 FPS 都是 60 的时候，使用 120Hz 采样率的触摸屏就可以了</strong></li>
+<li><strong>如果在屏幕刷新率和系统 FPS 都是 90 的时候 ，那么 120Hz 采样率的触摸屏显然不够用了，这时候应该采用 180Hz 采样率的屏幕</strong></li>
+</ol>
+<p><a id="input-debug"></a></p>
+<h1 id="Input-调试信息"><a href="#Input-调试信息" class="headerlink" title="Input 调试信息"></a>Input 调试信息</h1><p>Dumpsys Input 主要是 Debug 用，我们也可以来看一下其中的一些关键信息，到时候遇到了问题也可以从这里面找 ， 其命令如下：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">adb shell dumpsys input</span><br></pre></td></tr></table></figure>
+<p>其中的输出比较多，我们终点截取 Device 信息、InputReader、InputDispatcher 三段来看就可以了</p>
+<h2 id="Device-信息"><a href="#Device-信息" class="headerlink" title="Device 信息"></a>Device 信息</h2><p>主要是目前连接上的 Device 信息，下面摘取的是 touch 相关的</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">    3: main_touch</span><br><span class="line">      Classes: 0x00000015</span><br><span class="line">      Path: /dev/input/event6</span><br><span class="line">      Enabled: true</span><br><span class="line">      Descriptor: 4055b8a032ccf50ef66dbe2ff99f3b2474e9eab5</span><br><span class="line">      Location: main_touch/input0</span><br><span class="line">      ControllerNumber: 0</span><br><span class="line">      UniqueId: </span><br><span class="line">      Identifier: bus=0x0000, vendor=0xbeef, product=0xdead, version=0x28bb</span><br><span class="line">      KeyLayoutFile: /system/usr/keylayout/main_touch.kl</span><br><span class="line">      KeyCharacterMapFile: /system/usr/keychars/Generic.kcm</span><br><span class="line">      ConfigurationFile: </span><br><span class="line">      HaveKeyboardLayoutOverlay: false</span><br></pre></td></tr></table></figure>
+<h2 id="Input-Reader-状态"><a href="#Input-Reader-状态" class="headerlink" title="Input Reader 状态"></a>Input Reader 状态</h2><p>InputReader 这里就是当前 Input 事件的一些展示</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br><span class="line">86</span><br><span class="line">87</span><br><span class="line">88</span><br><span class="line">89</span><br><span class="line">90</span><br><span class="line">91</span><br><span class="line">92</span><br><span class="line">93</span><br><span class="line">94</span><br><span class="line">95</span><br><span class="line">96</span><br><span class="line">97</span><br><span class="line">98</span><br><span class="line">99</span><br><span class="line">100</span><br></pre></td><td class="code"><pre><span class="line">  Device 3: main_touch</span><br><span class="line">    Generation: 24</span><br><span class="line">    IsExternal: false</span><br><span class="line">    HasMic:     false</span><br><span class="line">    Sources: 0x00005103</span><br><span class="line">    KeyboardType: 1</span><br><span class="line">    Motion Ranges:</span><br><span class="line">      X: source=0x00005002, min=0.000, max=1079.000, flat=0.000, fuzz=0.000, resolution=0.000</span><br><span class="line">      Y: source=0x00005002, min=0.000, max=2231.000, flat=0.000, fuzz=0.000, resolution=0.000</span><br><span class="line">      PRESSURE: source=0x00005002, min=0.000, max=1.000, flat=0.000, fuzz=0.000, resolution=0.000</span><br><span class="line">      SIZE: source=0x00005002, min=0.000, max=1.000, flat=0.000, fuzz=0.000, resolution=0.000</span><br><span class="line">      TOUCH_MAJOR: source=0x00005002, min=0.000, max=2479.561, flat=0.000, fuzz=0.000, resolution=0.000</span><br><span class="line">      TOUCH_MINOR: source=0x00005002, min=0.000, max=2479.561, flat=0.000, fuzz=0.000, resolution=0.000</span><br><span class="line">      TOOL_MAJOR: source=0x00005002, min=0.000, max=2479.561, flat=0.000, fuzz=0.000, resolution=0.000</span><br><span class="line">      TOOL_MINOR: source=0x00005002, min=0.000, max=2479.561, flat=0.000, fuzz=0.000, resolution=0.000</span><br><span class="line">    Keyboard Input Mapper:</span><br><span class="line">      Parameters:</span><br><span class="line">        HasAssociatedDisplay: false</span><br><span class="line">        OrientationAware: false</span><br><span class="line">        HandlesKeyRepeat: false</span><br><span class="line">      KeyboardType: 1</span><br><span class="line">      Orientation: 0</span><br><span class="line">      KeyDowns: 0 keys currently down</span><br><span class="line">      MetaState: 0x0</span><br><span class="line">      DownTime: 521271703875000</span><br><span class="line">    Touch Input Mapper (mode - direct):</span><br><span class="line">      Parameters:</span><br><span class="line">        GestureMode: multi-touch</span><br><span class="line">        DeviceType: touchScreen</span><br><span class="line">        AssociatedDisplay: hasAssociatedDisplay=true, isExternal=false, displayId=&#x27;&#x27;</span><br><span class="line">        OrientationAware: true</span><br><span class="line">      Raw Touch Axes:</span><br><span class="line">        X: min=0, max=1080, flat=0, fuzz=0, resolution=0</span><br><span class="line">        Y: min=0, max=2232, flat=0, fuzz=0, resolution=0</span><br><span class="line">        Pressure: min=0, max=127, flat=0, fuzz=0, resolution=0</span><br><span class="line">        TouchMajor: min=0, max=512, flat=0, fuzz=0, resolution=0</span><br><span class="line">        TouchMinor: unknown range</span><br><span class="line">        ToolMajor: unknown range</span><br><span class="line">        ToolMinor: unknown range</span><br><span class="line">        Orientation: unknown range</span><br><span class="line">        Distance: unknown range</span><br><span class="line">        TiltX: unknown range</span><br><span class="line">        TiltY: unknown range</span><br><span class="line">        TrackingId: min=0, max=65535, flat=0, fuzz=0, resolution=0</span><br><span class="line">        Slot: min=0, max=20, flat=0, fuzz=0, resolution=0</span><br><span class="line">      Calibration:</span><br><span class="line">        touch.size.calibration: geometric</span><br><span class="line">        touch.pressure.calibration: physical</span><br><span class="line">        touch.orientation.calibration: none</span><br><span class="line">        touch.distance.calibration: none</span><br><span class="line">        touch.coverage.calibration: none</span><br><span class="line">      Affine Transformation:</span><br><span class="line">        X scale: 1.000</span><br><span class="line">        X ymix: 0.000</span><br><span class="line">        X offset: 0.000</span><br><span class="line">        Y xmix: 0.000</span><br><span class="line">        Y scale: 1.000</span><br><span class="line">        Y offset: 0.000</span><br><span class="line">      Viewport: displayId=0, orientation=0, logicalFrame=[0, 0, 1080, 2232], physicalFrame=[0, 0, 1080, 2232], deviceSize=[1080, 2232]</span><br><span class="line">      SurfaceWidth: 1080px</span><br><span class="line">      SurfaceHeight: 2232px</span><br><span class="line">      SurfaceLeft: 0</span><br><span class="line">      SurfaceTop: 0</span><br><span class="line">      PhysicalWidth: 1080px</span><br><span class="line">      PhysicalHeight: 2232px</span><br><span class="line">      PhysicalLeft: 0</span><br><span class="line">      PhysicalTop: 0</span><br><span class="line">      SurfaceOrientation: 0</span><br><span class="line">      Translation and Scaling Factors:</span><br><span class="line">        XTranslate: 0.000</span><br><span class="line">        YTranslate: 0.000</span><br><span class="line">        XScale: 0.999</span><br><span class="line">        YScale: 1.000</span><br><span class="line">        XPrecision: 1.001</span><br><span class="line">        YPrecision: 1.000</span><br><span class="line">        GeometricScale: 0.999</span><br><span class="line">        PressureScale: 0.008</span><br><span class="line">        SizeScale: 0.002</span><br><span class="line">        OrientationScale: 0.000</span><br><span class="line">        DistanceScale: 0.000</span><br><span class="line">        HaveTilt: false</span><br><span class="line">        TiltXCenter: 0.000</span><br><span class="line">        TiltXScale: 0.000</span><br><span class="line">        TiltYCenter: 0.000</span><br><span class="line">        TiltYScale: 0.000</span><br><span class="line">      Last Raw Button State: 0x00000000</span><br><span class="line">      Last Raw Touch: pointerCount=1</span><br><span class="line">        [0]: id=0, x=660, y=1338, pressure=44, touchMajor=44, touchMinor=44, toolMajor=0, toolMinor=0, orientation=0, tiltX=0, tiltY=0, distance=0, toolType=1, isHovering=false</span><br><span class="line">      Last Cooked Button State: 0x00000000</span><br><span class="line">      Last Cooked Touch: pointerCount=1</span><br><span class="line">        [0]: id=0, x=659.389, y=1337.401, pressure=0.346, touchMajor=43.970, touchMinor=43.970, toolMajor=43.970, toolMinor=43.970, orientation=0.000, tilt=0.000, distance=0.000, toolType=1, isHovering=false</span><br><span class="line">      Stylus Fusion:</span><br><span class="line">        ExternalStylusConnected: false</span><br><span class="line">        External Stylus ID: -1</span><br><span class="line">        External Stylus Data Timeout: 9223372036854775807</span><br><span class="line">      External Stylus State:</span><br><span class="line">        When: 9223372036854775807</span><br><span class="line">        Pressure: 0.000000</span><br><span class="line">        Button State: 0x00000000</span><br><span class="line">        Tool Type: 0</span><br></pre></td></tr></table></figure>
+
+<h2 id="InputDispatcher-状态"><a href="#InputDispatcher-状态" class="headerlink" title="InputDispatcher 状态"></a>InputDispatcher 状态</h2><p>InputDispatch 这里的重要信息主要包括</p>
+<ol>
+<li>FocusedApplication ：当前获取焦点的应用</li>
+<li>FocusedWindow ： 当前获取焦点的窗口</li>
+<li>TouchStatesByDisplay</li>
+<li>Windows ：所有的 Window</li>
+<li>MonitoringChannels ：Window 对应的 Channel</li>
+<li>Connections ：所有的连接</li>
+<li>AppSwitch: not pending</li>
+<li>Configuration</li>
+</ol>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br></pre></td><td class="code"><pre><span class="line">Input Dispatcher State:</span><br><span class="line">  DispatchEnabled: 1</span><br><span class="line">  DispatchFrozen: 0</span><br><span class="line">  FocusedApplication: name=&#x27;AppWindowToken&#123;ac6ec28 token=Token&#123;a38a4b ActivityRecord&#123;7230f1a u0 com.meizu.flyme.launcher/.Launcher t13&#125;&#125;&#125;&#x27;, dispatchingTimeout=5000.000ms</span><br><span class="line">  FocusedWindow: name=&#x27;Window&#123;3c007ad u0 com.meizu.flyme.launcher/com.meizu.flyme.launcher.Launcher&#125;&#x27;</span><br><span class="line">  TouchStatesByDisplay:</span><br><span class="line">    0: down=true, split=true, deviceId=3, source=0x00005002</span><br><span class="line">      Windows:</span><br><span class="line">        0: name=&#x27;Window&#123;3c007ad u0 com.meizu.flyme.launcher/com.meizu.flyme.launcher.Launcher&#125;&#x27;, pointerIds=0x80000000, targetFlags=0x105</span><br><span class="line">        1: name=&#x27;Window&#123;8cb8f7 u0 com.android.systemui.ImageWallpaper&#125;&#x27;, pointerIds=0x0, targetFlags=0x4102</span><br><span class="line">  Windows:</span><br><span class="line">    2: name=&#x27;Window&#123;ba2fc6b u0 NavigationBar&#125;&#x27;, displayId=0, paused=false, hasFocus=false, hasWallpaper=false, visible=true, canReceiveKeys=false, flags=0x21840068, type=0x000007e3, layer=0, frame=[0,2136][1080,2232], scale=1.000000, touchableRegion=[0,2136][1080,2232], inputFeatures=0x00000000, ownerPid=26514, ownerUid=10033, dispatchingTimeout=5000.000ms</span><br><span class="line">    3: name=&#x27;Window&#123;72b7776 u0 StatusBar&#125;&#x27;, displayId=0, paused=false, hasFocus=false, hasWallpaper=false, visible=true, canReceiveKeys=false, flags=0x81840048, type=0x000007d0, layer=0, frame=[0,0][1080,84], scale=1.000000, touchableRegion=[0,0][1080,84], inputFeatures=0x00000000, ownerPid=26514, ownerUid=10033, dispatchingTimeout=5000.000ms</span><br><span class="line">    9: name=&#x27;Window&#123;3c007ad u0 com.meizu.flyme.launcher/com.meizu.flyme.launcher.Launcher&#125;&#x27;, displayId=0, paused=false, hasFocus=true, hasWallpaper=true, visible=true, canReceiveKeys=true, flags=0x81910120, type=0x00000001, layer=0, frame=[0,0][1080,2232], scale=1.000000, touchableRegion=[0,0][1080,2232], inputFeatures=0x00000000, ownerPid=27619, ownerUid=10021, dispatchingTimeout=5000.000ms</span><br><span class="line">  MonitoringChannels:</span><br><span class="line">    0: &#x27;WindowManager (server)&#x27;</span><br><span class="line">  RecentQueue: length=10</span><br><span class="line">    MotionEvent(deviceId=3, source=0x00005002, action=MOVE, actionButton=0x00000000, flags=0x00000000, metaState=0x00000000, buttonState=0x00000000, edgeFlags=0x00000000, xPrecision=1.0, yPrecision=1.0, displayId=0, pointers=[0: (524.5, 1306.4)]), policyFlags=0x62000000, age=61.2ms</span><br><span class="line">    MotionEvent(deviceId=3, source=0x00005002, action=MOVE, actionButton=0x00000000, flags=0x00000000, metaState=0x00000000, buttonState=0x00000000, edgeFlags=0x00000000, xPrecision=1.0, yPrecision=1.0, displayId=0, pointers=[0: (543.5, 1309.4)]), policyFlags=0x62000000, age=54.7ms</span><br><span class="line">  PendingEvent: &lt;none&gt;</span><br><span class="line">  InboundQueue: &lt;empty&gt;</span><br><span class="line">  ReplacedKeys: &lt;empty&gt;</span><br><span class="line">  Connections:</span><br><span class="line">    0: channelName=&#x27;WindowManager (server)&#x27;, windowName=&#x27;monitor&#x27;, status=NORMAL, monitor=true, inputPublisherBlocked=false</span><br><span class="line">      OutboundQueue: &lt;empty&gt;</span><br><span class="line">      WaitQueue: &lt;empty&gt;</span><br><span class="line">    5: channelName=&#x27;72b7776 StatusBar (server)&#x27;, windowName=&#x27;Window&#123;72b7776 u0 StatusBar&#125;&#x27;, status=NORMAL, monitor=false, inputPublisherBlocked=false</span><br><span class="line">      OutboundQueue: &lt;empty&gt;</span><br><span class="line">      WaitQueue: &lt;empty&gt;</span><br><span class="line">    6: channelName=&#x27;ba2fc6b NavigationBar (server)&#x27;, windowName=&#x27;Window&#123;ba2fc6b u0 NavigationBar&#125;&#x27;, status=NORMAL, monitor=false, inputPublisherBlocked=false</span><br><span class="line">      OutboundQueue: &lt;empty&gt;</span><br><span class="line">      WaitQueue: &lt;empty&gt;</span><br><span class="line">    12: channelName=&#x27;3c007ad com.meizu.flyme.launcher/com.meizu.flyme.launcher.Launcher (server)&#x27;, windowName=&#x27;Window&#123;3c007ad u0 com.meizu.flyme.launcher/com.meizu.flyme.launcher.Launcher&#125;&#x27;, status=NORMAL, monitor=false, inputPublisherBlocked=false</span><br><span class="line">      OutboundQueue: &lt;empty&gt;</span><br><span class="line">      WaitQueue: length=3</span><br><span class="line">        MotionEvent(deviceId=3, source=0x00005002, action=MOVE, actionButton=0x00000000, flags=0x00000000, metaState=0x00000000, buttonState=0x00000000, edgeFlags=0x00000000, xPrecision=1.0, yPrecision=1.0, displayId=0, pointers=[0: (634.4, 1329.4)]), policyFlags=0x62000000, targetFlags=0x00000105, resolvedAction=2, age=17.4ms, wait=16.8ms</span><br><span class="line">        MotionEvent(deviceId=3, source=0x00005002, action=MOVE, actionButton=0x00000000, flags=0x00000000, metaState=0x00000000, buttonState=0x00000000, edgeFlags=0x00000000, xPrecision=1.0, yPrecision=1.0, displayId=0, pointers=[0: (647.4, 1333.4)]), policyFlags=0x62000000, targetFlags=0x00000105, resolvedAction=2, age=11.1ms, wait=10.4ms</span><br><span class="line">        MotionEvent(deviceId=3, source=0x00005002, action=MOVE, actionButton=0x00000000, flags=0x00000000, metaState=0x00000000, buttonState=0x00000000, edgeFlags=0x00000000, xPrecision=1.0, yPrecision=1.0, displayId=0, pointers=[0: (659.4, 1337.4)]), policyFlags=0x62000000, targetFlags=0x00000105, resolvedAction=2, age=5.2ms, wait=4.6ms</span><br><span class="line">  AppSwitch: not pending</span><br><span class="line">  Configuration:</span><br><span class="line">    KeyRepeatDelay: 50.0ms</span><br><span class="line">    KeyRepeatTimeout: 500.0ms</span><br></pre></td></tr></table></figure>
+
+<p><a id="refs"></a></p>
+<h1 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h1><p>本文部分图文参考和拷贝自下面几篇文章，同时下面几篇文章讲解了 Input 流程的细节部分，推荐大家在看完这篇文章后，如果对代码细节感兴趣，可以仔细研读下面这几篇非常棒的文章。</p>
+<ol>
+<li><a target="_blank" rel="noopener" href="http://gityuan.com/2016/12/11/input-reader/">http://gityuan.com/2016/12/11/input-reader/</a></li>
+<li><a target="_blank" rel="noopener" href="http://gityuan.com/2016/12/10/input-manager/">http://gityuan.com/2016/12/10/input-manager/</a></li>
+<li><a target="_blank" rel="noopener" href="http://gityuan.com/2016/12/17/input-dispatcher/">http://gityuan.com/2016/12/17/input-dispatcher/</a></li>
+<li><a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/29386642">https://zhuanlan.zhihu.com/p/29386642</a></li>
+</ol>
+<p><a id="attachments"></a></p>
+<h1 id="附件"><a href="#附件" class="headerlink" title="附件"></a>附件</h1><p>本文涉及到的附件也上传了，各位下载后解压，使用 <strong>Chrome</strong> 浏览器打开即可<br><a target="_blank" rel="noopener" href="https://github.com/Gracker/SystraceForBlog/tree/master/Android_Systrace_Input">点此链接下载文章所涉及到的 Systrace 附件</a></p>
+<p><a id="others"></a></p>
+<h1 id="本文其他地址"><a href="#本文其他地址" class="headerlink" title="本文其他地址"></a>本文其他地址</h1><p>由于博客留言交流不方便，点赞或者交流，可以移步本文的知乎或者掘金页面<br><a target="_blank" rel="noopener" href="https://juejin.im/post/5dc1838ef265da4d02626ae0">掘金 - Systrace 基础知识 - Input 解读</a></p>
+<p><a id="about"></a></p>
+<h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p>
+<ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li>
+<li><a href="https://androidperformance.com/2019/12/01/BlogMap/">本博客内容导航</a> ：个人博客内容的一个导航。</li>
+<li><a href="https://androidperformance.com/2018/05/07/Android-performance-optimization-skills-and-tools/">个人整理和搜集的优秀博客文章 - Android 性能优化必知必会</a> ：欢迎大家自荐和推荐 （微信私聊即可）</li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a> ： 欢迎加入，多谢支持～</li>
+</ol>
+<blockquote>
+<p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p>
+</blockquote>
+<p><img src="/images/WechatIMG581.png" alt="微信扫一扫"></p>
+
+    </article>
+    <!-- license -->
+        <div class="license-wrapper">
+            <p>Author：<a href="https://androidperformance.com">Gracker</a>
+            <p>Link：<a href="https://androidperformance.com/2019/11/04/Android-Systrace-Input/">https://androidperformance.com/2019/11/04/Android-Systrace-Input/</a>
+            <p>Publish date：<a href="https://androidperformance.com/2019/11/04/Android-Systrace-Input/">November 4th 2019, 9:38:29 am</a>
+            <p>Update date：<a href="https://androidperformance.com/2019/11/04/Android-Systrace-Input/">January 11th 2026, 1:36:33 pm</a>
+            <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
+        </div>
+    <!-- paginator -->
+    <ul class="post-paginator">
+        <li class="next">
+                <div class="nextSlogan">Next Post</div>
+                <a href="/2019/11/06/Android-Systrace-MainThread-And-RenderThread/" title="Android Systrace 基础知识 - MainThread 和 RenderThread 解读">
+                    <div class="nextTitle">Android Systrace 基础知识 - MainThread 和 RenderThread 解读</div>
+                </a>
+        </li>
+        <li class="previous">
+                <div class="prevSlogan">Previous Post</div>
+                <a href="/2019/10/24/Android-Background-Animation/" title="Android 中的“后台无效动画“行为分析">
+                    <div class="prevTitle">Android 中的“后台无效动画“行为分析</div>
+                </a>
+        </li>
+    </ul>
+    <!-- comment -->
+        <div class="post-comment">
+            <!-- 来必力 City 版安装代码 -->
+
+            
+            
+            
+            <!-- utteranc评论 -->
+
+            <!-- partial('_partial/comment/changyan') -->
+            <!--PC版-->
+
+            
+            
+            
+        </div>
+    <!-- timeliness note -->
+    <!-- idea from: https://hexo.fluid-dev.com/posts/hexo-injector/#%E6%96%87%E7%AB%A0%E6%97%B6%E6%95%88%E6%80%A7%E6%8F%90%E7%A4%BA -->
+    <!-- Mathjax -->
+</main>
+
+                <!-- profile -->
+            </div>
+            <footer class="footer footer-unloaded">
+    <!-- social  -->
+        <div class="social">
+                            <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title="email" ></a>
+                <a href="https://github.com/gracker" class="iconfont-archer github" target="_blank" title="github"></a>
+                <span class="iconfont-archer wechat" title="wechat">
+                    <img class="profile-qr" src="/assets/Wechat.jpeg" />
+                </span>
+                <span class="iconfont-archer qq" title="qq">
+                    <img class="profile-qr" src="/553000664" />
+                </span>
+                <a href="https://weibo.com/gracker520" class="iconfont-archer weibo" target="_blank" title="weibo"></a>
+                <a href="https://www.zhihu.com/people/gracker" class="iconfont-archer zhihu" target="_blank" title="zhihu"></a>
+                <a href="https://twitter.com/Gracker_Gao" class="iconfont-archer twitter" target="_blank" title="twitter"></a>
+                <a href="https://juejin.im/user/557b0590e4b052e031453d76" class="iconfont-archer juejin" target="_blank" title="juejin"></a>
+                <a href="/atom.xml" class="iconfont-archer rss" target="_blank" title="rss"></a>
+
+        </div>
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- website approve for Chinese user -->
+        <div class="website-approve">
+                <span id="icp-approve" class="icp-approve">
+                    <a href="https://beian.miit.gov.cn/" target="_blank">蜀 ICP 备 20016190 号</a>
+                </span>
+        </div>
+</footer>
+
+        </div>
+        <!-- toc -->
+            <div class="toc-wrapper toc-wrapper-loding" style=    top:50vh;
+>
+                <div class="toc-catalog">
+                    <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+                </div>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%9C%AC%E6%96%87%E7%9B%AE%E5%BD%95"><span class="toc-number">1.</span> <span class="toc-text">本文目录</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0%E7%9B%AE%E5%BD%95"><span class="toc-number"></span> <span class="toc-text">系列文章目录</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E6%AD%A3%E6%96%87"><span class="toc-number"></span> <span class="toc-text">正文</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Input-in-Systrace"><span class="toc-number"></span> <span class="toc-text">Input in Systrace</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#InputDown-%E4%BA%8B%E4%BB%B6%E5%9C%A8-SystemServer-%E7%9A%84%E5%B7%A5%E4%BD%9C%E6%B5%81"><span class="toc-number">1.</span> <span class="toc-text">InputDown 事件在 SystemServer 的工作流</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#InputDown-%E4%BA%8B%E4%BB%B6%E5%9C%A8-App-%E7%9A%84%E5%B7%A5%E4%BD%9C%E6%B5%81"><span class="toc-number">2.</span> <span class="toc-text">InputDown 事件在 App 的工作流</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#App-%E7%9A%84-Pending-%E9%98%9F%E5%88%97"><span class="toc-number">2.1.</span> <span class="toc-text">App 的 Pending 队列</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%B8%BB%E7%BA%BF%E7%A8%8B%E5%A4%84%E7%90%86-Input-%E4%BA%8B%E4%BB%B6"><span class="toc-number">2.2.</span> <span class="toc-text">主线程处理 Input 事件</span></a></li></ol></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E9%94%AE%E7%9F%A5%E8%AF%86%E7%82%B9%E5%92%8C%E6%B5%81%E7%A8%8B"><span class="toc-number"></span> <span class="toc-text">关键知识点和流程</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#InputReader"><span class="toc-number">1.</span> <span class="toc-text">InputReader</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#InputDispatcher"><span class="toc-number">2.</span> <span class="toc-text">InputDispatcher</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#InboundQueue"><span class="toc-number">3.</span> <span class="toc-text">InboundQueue</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#OutboundQueue"><span class="toc-number">4.</span> <span class="toc-text">OutboundQueue</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#WaitQueue"><span class="toc-number">5.</span> <span class="toc-text">WaitQueue</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%95%B4%E4%BD%93%E9%80%BB%E8%BE%91"><span class="toc-number">6.</span> <span class="toc-text">整体逻辑</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Input-%E5%88%B7%E6%96%B0%E4%B8%8E-Vsync"><span class="toc-number"></span> <span class="toc-text">Input 刷新与 Vsync</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Input-%E8%B0%83%E8%AF%95%E4%BF%A1%E6%81%AF"><span class="toc-number"></span> <span class="toc-text">Input 调试信息</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#Device-%E4%BF%A1%E6%81%AF"><span class="toc-number">1.</span> <span class="toc-text">Device 信息</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Input-Reader-%E7%8A%B6%E6%80%81"><span class="toc-number">2.</span> <span class="toc-text">Input Reader 状态</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#InputDispatcher-%E7%8A%B6%E6%80%81"><span class="toc-number">3.</span> <span class="toc-text">InputDispatcher 状态</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%8F%82%E8%80%83"><span class="toc-number"></span> <span class="toc-text">参考</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E9%99%84%E4%BB%B6"><span class="toc-number"></span> <span class="toc-text">附件</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E6%9C%AC%E6%96%87%E5%85%B6%E4%BB%96%E5%9C%B0%E5%9D%80"><span class="toc-number"></span> <span class="toc-text">本文其他地址</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number"></span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a>
+            </div>
+        <!-- sidebar -->
+        <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+        <div class="sidebar-panel-archives">
+    <!-- 在 ejs 中将 archive 按照时间排序 -->
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 118
+        </div>
+        <!-- search  -->
+    </div>
+    <div class="post-archive">
+            <div class="archive-year"> 2025 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 9 - CPU 信息解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/02</span>
+            <a class="archive-post-title" href="/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7 - MainThread 和 RenderThread 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/26</span>
+            <a class="archive-post-title" href="/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/26</span>
+            <a class="archive-post-title" href="/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto 系列 5：Android App 基于 Choreographer 的渲染流程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto 系列 4：使用命令行在本地打开超大 Trace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR 系列 3 ：ANR 案例分享</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR 系列 2 ：ANR 分析套路和关键 Log 介绍</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-01-ANR-Design/">Android ANR 系列 1 ：理解 Android ANR 设计思想</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2024 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto 系列 3：熟悉 Perfetto View</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto 系列 2：Perfetto Trace 抓取</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto 系列 1：Perfetto 工具简介</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/2024/03/27/Android-Perfetto-101/">Android Perfetto 系列目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/01</span>
+            <a class="archive-post-title" href="/2024/01/01/2023-review/">2023 年的方方面面</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2023 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/30</span>
+            <a class="archive-post-title" href="/2023/12/30/the-performance/">关于 The Android Performance 知识星球介绍</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/15</span>
+            <a class="archive-post-title" href="/2023/10/15/the-performance-design-of-os-en/">The Performance Design Of OS</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/2023/08/21/the-performance-design-of-os/">OS 设计之性能设计</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/2023/05/14/bad-android-app-with-system-permissions/">当 App 有了系统权限，真的可以为所欲为？</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2022 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/2022/03/27/the-performance-tea-part-01/">The Performance 星球茶话会 - 第一期</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/2022/03/13/android-systrace-cpu-state-running/">Systrace 线程 CPU 运行状态分析技巧 - Running 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/2022/01/21/android-systrace-cpu-state-runnable/">Systrace 线程 CPU 运行状态分析技巧 - Runnable 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/03</span>
+            <a class="archive-post-title" href="/2022/01/03/2021-Review/">回顾 2021</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2021 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/27</span>
+            <a class="archive-post-title" href="/2021/10/27/if-i-write-a-book-about-performance/">一本讲 Android 流畅性的书，应该有什么内容？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/26</span>
+            <a class="archive-post-title" href="/2021/10/26/build-android-12/">Android 系统开发系列（1）：Android 12 源代码下载、编译和刷机</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace 响应速度实战 3 ：响应速度延伸知识</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace 响应速度实战 2 ：响应速度实战分析-以启动速度为例</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace 响应速度实战 1 ：了解响应速度原理</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace 流畅性实战 3 ：卡顿分析过程中的一些疑问</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace 流畅性实战 2 ：案例分析 - MIUI 桌面滑动卡顿分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace 流畅性实战 1 ：了解卡顿原理</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2020 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span>
+            <a class="archive-post-title" href="/2020/08/20/weibo-imageload-opt-on-huawei/">华为手机刷微博体验更好？技术角度的一些分析和思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/2020/05/26/samsung_crash/">一个「闰」字引发的事故 - 三星系统重启分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/2020/05/07/Android-App-Chain-Wakeup/">Android App 链式唤醒分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/14</span>
+            <a class="archive-post-title" href="/2020/02/14/Android-Systrace-SurfaceFlinger/">Android Systrace 基础知识 - SurfaceFlinger 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/03</span>
+            <a class="archive-post-title" href="/2020/02/03/android-development-learning-path-2020-edition/">Android 开发者学习路线(2020 版本)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span>
+            <a class="archive-post-title" href="/2020/01/28/2020-read/">我的 2020 年读书单</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2019 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/21</span>
+            <a class="archive-post-title" href="/2019/12/21/Android-Systrace-CPU/">Android Systrace 基础知识 - CPU Info 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/15</span>
+            <a class="archive-post-title" href="/2019/12/15/Android-Systrace-Triple-Buffer/">Android Systrace 基础知识 - Triple Buffer 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/06</span>
+            <a class="archive-post-title" href="/2019/12/06/Android-Systrace-Binder/">Android Systrace 基础知识 - Binder 和锁竞争解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/2019/12/01/BlogMap/">「置顶」博客文章目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/2019/12/01/Android-Systrace-Vsync/">Android Systrace 基础知识 - Vsync 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/2019/11/18/Android-App-Lunch-Optimize/">Android App 启动优化全记录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/06</span>
+            <a class="archive-post-title" href="/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Android Systrace 基础知识 - MainThread 和 RenderThread 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/04</span>
+            <a class="archive-post-title" href="/2019/11/04/Android-Systrace-Input/">Android Systrace 基础知识 - Input 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/24</span>
+            <a class="archive-post-title" href="/2019/10/24/Android-Background-Animation/">Android 中的“后台无效动画“行为分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/22</span>
+            <a class="archive-post-title" href="/2019/10/22/Android-Choreographer/">Android 基于 Choreographer 的渲染机制详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/2019/09/18/Android-Jank-Due-To-Low-Memory/">Android 中的卡顿丢帧原因概述 - 低内存篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/17</span>
+            <a class="archive-post-title" href="/2019/09/17/Android-Kill-Background-App-Debug/">Android 桌面被杀问题分析案例</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Due-To-App/">Android 中的卡顿丢帧原因概述 - 应用篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Due-To-System/">Android 中的卡顿丢帧原因概述 - 系统篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Debug/">Android 中的卡顿丢帧原因概述 - 方法论</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/2019/09/01/Android-Activity-Lunch-Mode/">Android 中的 Activity Launch Mode 详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/2019/07/27/Android-Hardware-Layer/">Android 中的 Hardware Layer 详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/23</span>
+            <a class="archive-post-title" href="/2019/07/23/Android-Systrace-Pre/">Android Systrace 基础知识 -- 分析 Systrace 预备知识</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/29</span>
+            <a class="archive-post-title" href="/2019/06/29/Android-Systrace-SystemServer/">Android Systrace 基础知识 - SystemServer 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/2019/05/28/Android-Systrace-About/">Android Systrace 基础知识 -- Systrace 简介</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/27</span>
+            <a class="archive-post-title" href="/2019/05/27/why-60-fps/">Android Systrace 基础知识 -- Why 60 fps ？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/2019/05/26/Android_Systrace_0/">Android Systrace -- 系列文章目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/15</span>
+            <a class="archive-post-title" href="/2019/05/15/90hz-on-android/">Android 新的流畅体验，90Hz 漫谈</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/2019/04/07/liqi/">利器 - 高效工具推荐</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/2019/01/21/android-performance-case-jank-accessbility/">Android 无障碍服务导致的整机卡顿案例分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/12</span>
+            <a class="archive-post-title" href="/2019/01/12/recommend-of-2018/">2018 年度好物推荐 - 给辛勤工作的自己一点奖励</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2018 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span>
+            <a class="archive-post-title" href="/2018/11/01/android-system-develop-0/">Android 系统开发源码环境搭建</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/25</span>
+            <a class="archive-post-title" href="/2018/10/25/How-do-engineers-count-well/">陆奇：除了好代码，工程师怎样才算优秀？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/01</span>
+            <a class="archive-post-title" href="/2018/10/01/how-to-stop-sucking-and-be-awesome-instead-8/">程序员的修炼-08-阅读之美</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/30</span>
+            <a class="archive-post-title" href="/2018/09/30/how-to-stop-sucking-and-be-awesome-instead-7/">程序员的修炼-07-游戏与编程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/29</span>
+            <a class="archive-post-title" href="/2018/09/29/how-to-stop-sucking-and-be-awesome-instead-6/">程序员的修炼-06-互联网那些事</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/28</span>
+            <a class="archive-post-title" href="/2018/09/28/how-to-stop-sucking-and-be-awesome-instead-5/">程序员的修炼-05-了解你的用户</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/27</span>
+            <a class="archive-post-title" href="/2018/09/27/how-to-stop-sucking-and-be-awesome-instead-4/">程序员的修炼-04-关于测试的一些思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/26</span>
+            <a class="archive-post-title" href="/2018/09/26/how-to-stop-sucking-and-be-awesome-instead-3/">程序员的修炼-03-Web 设计原则</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/20</span>
+            <a class="archive-post-title" href="/2018/09/20/how-to-stop-sucking-and-be-awesome-instead-2/">程序员的修炼-02-编程之道</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/2018/09/19/how-to-stop-sucking-and-be-awesome-instead-1/">程序员的修炼-01-绝地反击之术</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2018/09/13/android-memory/">Android 系统不释放内存吗？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/13</span>
+            <a class="archive-post-title" href="/2018/08/13/Some-Thoughts-on-the-Fluency-of-Android/">关于 Android 系统流畅性的一些思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/20</span>
+            <a class="archive-post-title" href="/2018/05/20/zhihu-startingwindow/">知乎 救救你的 StartingWindow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/2018/05/07/Android-performance-optimization-skills-and-tools/">「置顶」Android 性能优化必知必会</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/2018/01/06/2017%E5%B9%B4%E5%BA%A6%E6%9C%80%E6%8E%A8%E8%8D%90/">2017 年度好物推荐 - 给辛勤工作的自己一点奖励</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2017 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/23</span>
+            <a class="archive-post-title" href="/2017/04/23/About-work/">2017</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2016 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/2016/04/05/android-bottom-bar-2/">Android Bottom navigation 规范二：样式、行为与规格</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/2016/04/05/android-bottom-bar-1/">Android Bottom Navigation 规范一：使用方法</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2015 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/31</span>
+            <a class="archive-post-title" href="/2015/12/31/How-to-calculation-android-app-lunch-time/">Android 中如何计算 App 的启动时间？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/29</span>
+            <a class="archive-post-title" href="/2015/12/29/Android%E5%BA%94%E7%94%A8%E5%90%AF%E5%8A%A8%E4%BC%98%E5%8C%96-%E4%B8%80%E7%A7%8DDelayLoad%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%92%8C%E5%8E%9F%E7%90%86-%E4%B8%8B%E7%AF%87/">Android 应用启动优化:一种 DelayLoad 的实现和原理(下篇)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/2015/11/18/Android-app-lunch-optimize-delay-load/">Android 应用启动优化 - 一种 DelayLoad 的实现和原理(上篇)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/12</span>
+            <a class="archive-post-title" href="/2015/08/12/AndroidL-hwui-RenderThread-workflow/">Android hwui 中 RenderThread 工作流程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/2015/08/05/HashMap/">Java7 HashMap 源码分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-onTrimMemory/">Android 代码内存优化建议 - OnTrimMemory 优化</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-AndroidResource/">Android 代码内存优化建议 - Android 资源篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-Google/">Android 代码内存优化建议 - Android 官方篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-Java/">Android 代码内存优化建议 - Java 官方篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/29</span>
+            <a class="archive-post-title" href="/2015/05/29/Nexus6-with-Android-M/">Nexus6 with Android M 开启多窗口模式</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/06</span>
+            <a class="archive-post-title" href="/2015/05/06/Java-Singleton/">细说 Java 单例模式</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-4/">Android 性能优化典范 - Profile GPU Rendering</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-3/">Android 性能优化典范 - Understanding VSYNC</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-2/">Android 性能优化典范之 Understanding Overdraw</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-1/">Android 性能优化典范 - Render Performance</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns/">Android 性能优化典范综述</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/">Android 内存优化之三 - 打开 MAT 中的 Bitmap 原图</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android 内存优化之二 - MAT使用进阶</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android 内存优化(1) - MAT 使用入门</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/31</span>
+            <a class="archive-post-title" href="/2015/03/31/android-performance-case-study-follow-up/">Android性能优化后续</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-5/">Android 小技巧 - 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-4/">Android 小技巧 - 4</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-3/">Android 小技巧 -3</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/04</span>
+            <a class="archive-post-title" href="/2015/02/04/build-rom-for-nexus5/">为 Nexus5 编译 AndroidL 固件</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/30</span>
+            <a class="archive-post-title" href="/2015/01/30/android-performance-tools-systrace-1/">Android 性能优化之 Systrace 工具介绍(一)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/16</span>
+            <a class="archive-post-title" href="/2015/01/16/view-android-source-code-with-androidstudio/">使用 Android Studio 查看 Android Lollipop 源码</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/13</span>
+            <a class="archive-post-title" href="/2015/01/13/android-performance-optimization-overdraw-2/">Android 性能优化之过渡绘制 - 实战篇</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2014 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/2014/10/20/android-performance-optimization-overdraw-1/">Android 性能优化之过渡绘制 - 理论篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/03</span>
+            <a class="archive-post-title" href="/2014/06/03/android-edittext-do-not-auto-get-focus/">Android 小技巧 - 如何让EditText不自动获取焦点</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/31</span>
+            <a class="archive-post-title" href="/2014/05/31/android-tips-round-up-2/">Android 小技巧 -2</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/2014/05/28/android-tips-round-up-1/">Android 小技巧 - 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/02</span>
+            <a class="archive-post-title" href="/2014/05/02/android_log_to_file/">Android Tools - Log2File</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/01</span>
+            <a class="archive-post-title" href="/2014/04/01/android-service-build-your-own-notification-servers-app/">Android Service：开发自己的通知中心(2):辅助性服务实战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/25</span>
+            <a class="archive-post-title" href="/2014/03/25/ubuntu-adb-can-not-find-devices/">Android:Ubuntu 下执行 Adb 命令找不到设备</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/17</span>
+            <a class="archive-post-title" href="/2014/03/17/android-build-your-own-android-notification-service-app/">Android Service：开发自己的通知中心(1):辅助性服务介绍</a>
+        </li>
+            </ul>
+    </div>
+</div>
+
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="年度推荐">
+                <span class="iconfont-archer">&#xe606;</span>
+                年度推荐
+            </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="随笔">
+                <span class="iconfont-archer">&#xe606;</span>
+                随笔
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="年终总结">
+                <span class="iconfont-archer">&#xe606;</span>
+                年终总结
+            </span>
+            <span class="sidebar-tag-name" data-tags="知识星球">
+                <span class="iconfont-archer">&#xe606;</span>
+                知识星球
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="性能优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                性能优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="线程优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                线程优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR分析">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR分析
+            </span>
+            <span class="sidebar-tag-name" data-tags="页面响应">
+                <span class="iconfont-archer">&#xe606;</span>
+                页面响应
+            </span>
+            <span class="sidebar-tag-name" data-tags="电量优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                电量优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Kotlin">
+                <span class="iconfont-archer">&#xe606;</span>
+                Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="程序员">
+                <span class="iconfont-archer">&#xe606;</span>
+                程序员
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计规范">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计规范
+            </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿
+            </span>
+            <span class="sidebar-tag-name" data-tags="读书笔记">
+                <span class="iconfont-archer">&#xe606;</span>
+                读书笔记
+            </span>
+            <span class="sidebar-tag-name" data-tags="程序员的修炼">
+                <span class="iconfont-archer">&#xe606;</span>
+                程序员的修炼
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计原则">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计原则
+            </span>
+            <span class="sidebar-tag-name" data-tags="测试">
+                <span class="iconfont-archer">&#xe606;</span>
+                测试
+            </span>
+            <span class="sidebar-tag-name" data-tags="了解你的用户">
+                <span class="iconfont-archer">&#xe606;</span>
+                了解你的用户
+            </span>
+            <span class="sidebar-tag-name" data-tags="游戏与编程">
+                <span class="iconfont-archer">&#xe606;</span>
+                游戏与编程
+            </span>
+            <span class="sidebar-tag-name" data-tags="互联网那些事">
+                <span class="iconfont-archer">&#xe606;</span>
+                互联网那些事
+            </span>
+            <span class="sidebar-tag-name" data-tags="阅读之美">
+                <span class="iconfont-archer">&#xe606;</span>
+                阅读之美
+            </span>
+            <span class="sidebar-tag-name" data-tags="利器">
+                <span class="iconfont-archer">&#xe606;</span>
+                利器
+            </span>
+            <span class="sidebar-tag-name" data-tags="iOS">
+                <span class="iconfont-archer">&#xe606;</span>
+                iOS
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design
+            </span>
+            <span class="sidebar-tag-name" data-tags="Smooth">
+                <span class="iconfont-archer">&#xe606;</span>
+                Smooth
+            </span>
+            <span class="sidebar-tag-name" data-tags="体验优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                体验优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="用户体验">
+                <span class="iconfont-archer">&#xe606;</span>
+                用户体验
+            </span>
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+        缺失模块，请参考主题文档进行安装配置：https://github.com/fi3ework/hexo-theme-archer#%E5%AE%89%E8%A3%85%E4%B8%BB%E9%A2%98
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="随笔">
+            <span class="iconfont-archer">&#xe60a;</span>
+            随笔
+        </span>
+        <span class="sidebar-category-name" data-categories="读书笔记">
+            <span class="iconfont-archer">&#xe60a;</span>
+            读书笔记
+        </span>
+        <span class="sidebar-category-name" data-categories="Android">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
+        </span>
+        <span class="sidebar-category-name" data-categories="iOS">
+            <span class="iconfont-archer">&#xe60a;</span>
+            iOS
+        </span>
+        <span class="sidebar-category-name" data-categories="Android性能优化">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android性能优化
+        </span>
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+
+    </div>
+</div>
+
+        <!-- site-meta -->
+        <script>
+    var siteMetaRoot = "/"
+    if (siteMetaRoot === "undefined") {
+        siteMetaRoot = '/'
+    }
+    var siteMeta = {
+        url: "https://androidperformance.com",
+        root: siteMetaRoot,
+        author: "Gracker"
+    }
+</script>
+
+        <!-- import experimental options here -->
+        <!-- Custom Font -->
+
+        <!-- jquery (must load before main.js) -->
+        <script defer src="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+        <!-- main func (depends on jQuery) -->
+        <script src="/scripts/main.js" defer></script>
+        <!-- fancybox -->
+        <script>
+            (function(){
+              var urls = [
+                'https://cdn.bootcdn.net/ajax/libs/fancyapps-ui/5.0.36/fancybox/fancybox.umd.js',
+                'https://cdn.jsdelivr.net/npm/@fancyapps/ui@5.0.36/dist/fancybox/fancybox.umd.js'
+              ];
+              function loadNext(){
+                var u = urls.shift();
+                if(!u) return;
+                var s = document.createElement('script');
+                s.src = u; s.defer = true;
+                s.onload = function(){ if (window.Fancybox) { window.Fancybox.bind('[data-fancybox]'); } };
+                s.onerror = loadNext;
+                document.head.appendChild(s);
+              }
+              loadNext();
+            })();
+        </script>
+        <!-- algolia -->
+        <!-- busuanzi (delay load + silent fail) -->
+        <!-- async load share.js on first click -->
+            <script>
+                (function(){
+                  var loaded = false
+                  function loadShare(){
+                    if (loaded) return
+                    loaded = true
+                    var s = document.createElement('script')
+                    s.src = '/scripts/share.js'
+                    s.async = true
+                    document.head.appendChild(s)
+                  }
+                  document.addEventListener('click', function(e){
+                    var t = e.target
+                    if (!t) return
+                    if (t.closest && t.closest('.share-wrapper')) { loadShare() }
+                    else if (t.classList && t.classList.contains('share-wrapper')) { loadShare() }
+                  }, true)
+                })();
+            </script>
+        <!-- mermaid -->
+    </body>
+</html>

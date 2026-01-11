@@ -1,0 +1,1882 @@
+<!DOCTYPE html>
+<html lang="zh,en">
+    <!-- title -->
+            <!-- keywords -->
+
+                  <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <meta name="author" content="Gracker">
+                    <meta name="renderer" content="webkit">
+                    <meta name="copyright" content="Gracker">
+                      <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,启动优化,Startup,Perfetto,Systrace,RenderThread,Java">
+                          <meta name="description" content="Focus On Android Performance">
+                          <meta name="description" content="本文为 Android App ANR 系列的第二篇，主要分享 ANR 分析套路和关键 Log 介绍，系列文章目录如下  Android App ANR 系列 1 ：理解 Android ANR 设计思想 Android App ANR 系列 2 ：ANR 分析套路和关键 Log 介绍 Android App ANR 系列 3 ：ANR 案例分享">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Android ANR 系列 2 ：ANR 分析套路和关键 Log 介绍">
+<meta property="og:url" content="https://androidperformance.com/2025/02/08/Android-ANR-02-How-to-analysis-ANR/index.html">
+<meta property="og:site_name" content="Android Performance">
+<meta property="og:description" content="本文为 Android App ANR 系列的第二篇，主要分享 ANR 分析套路和关键 Log 介绍，系列文章目录如下  Android App ANR 系列 1 ：理解 Android ANR 设计思想 Android App ANR 系列 2 ：ANR 分析套路和关键 Log 介绍 Android App ANR 系列 3 ：ANR 案例分享">
+<meta property="og:locale">
+<meta property="og:image" content="https://androidperformance.com/images/Android-ANR-02-How-to-analysis-ANR/894ce64d-1586-459b-92cd-45f5999bd666.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-ANR-02-How-to-analysis-ANR/dde07d81-cefd-4478-9704-c81b900bb54d.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-ANR-02-How-to-analysis-ANR/4878f3bb-ac76-4804-928f-894ab90cfb1b.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-ANR-02-How-to-analysis-ANR/ce7a3897-9d73-43e1-8b55-d7fb11727489.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-ANR-02-How-to-analysis-ANR/a62e6bd8-8672-4cb7-8815-ff740d0eaec9.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-ANR-02-How-to-analysis-ANR/53e8ee44-b1f7-4729-83e8-4ccb4f784a6a.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-ANR-02-How-to-analysis-ANR/7cfb4102-f137-426b-84f0-a6a06c58fd47.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-ANR-02-How-to-analysis-ANR/e8f54015-0bf1-494c-8262-9a56e797d04d.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-ANR-02-How-to-analysis-ANR/8d7d8da3-0171-4be5-921c-79eb33e276d7.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-ANR-02-How-to-analysis-ANR/4e5b3f4e-4668-4d92-bb7f-83b90fd0de18.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-ANR-02-How-to-analysis-ANR/933942df-43e8-4b74-8e12-768198a17667.png">
+<meta property="article:published_time" content="2025-02-08T08:29:09.000Z">
+<meta property="article:modified_time" content="2026-01-11T05:36:33.416Z">
+<meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Startup">
+<meta property="article:tag" content="Memory">
+<meta property="article:tag" content="Android">
+<meta property="article:tag" content="Systrace">
+<meta property="article:tag" content="ANR">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://androidperformance.com/images/Android-ANR-02-How-to-analysis-ANR/894ce64d-1586-459b-92cd-45f5999bd666.png">
+                            <meta http-equiv="Cache-control" content="no-cache">
+                            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+                            <link rel="icon" href="/assets/favicon.ico">
+                                <title>
+                                  Android ANR 系列 2 ：ANR 分析套路和关键 Log 介绍 · Android Performance
+                                </title>
+                                <!-- /*! loadCSS. [c]2017 Filament Group, Inc. MIT License */
+/* This file is meant as a standalone workflow for
+- testing support for link[rel=preload]
+- enabling async CSS loading in browsers that do not support rel=preload
+- applying rel preload css once loaded, whether supported or not.
+*/ -->
+<script>
+    (function (w) {
+        'use strict'
+        // rel=preload support test
+        if (!w.loadCSS) {
+            w.loadCSS = function () {}
+        }
+        // define on the loadCSS obj
+        var rp = (loadCSS.relpreload = {})
+        // rel=preload feature support test
+        // runs once and returns a function for compat purposes
+        rp.support = (function () {
+            var ret
+            try {
+                ret = w.document.createElement('link').relList.supports('preload')
+            } catch (e) {
+                ret = false
+            }
+            return function () {
+                return ret
+            }
+        })()
+
+        // if preload isn't supported, get an asynchronous load by using a non-matching media attribute
+        // then change that media back to its intended value on load
+        rp.bindMediaToggle = function (link) {
+            // remember existing media attr for ultimate state, or default to 'all'
+            var finalMedia = link.media || 'all'
+
+            function enableStylesheet() {
+                link.media = finalMedia
+            }
+
+            // bind load handlers to enable media
+            if (link.addEventListener) {
+                link.addEventListener('load', enableStylesheet)
+            } else if (link.attachEvent) {
+                link.attachEvent('onload', enableStylesheet)
+            }
+
+            // Set rel and non-applicable media type to start an async request
+            // note: timeout allows this to happen async to let rendering continue in IE
+            setTimeout(function () {
+                link.rel = 'stylesheet'
+                link.media = 'only x'
+            })
+            // also enable media after 3 seconds,
+            // which will catch very old browsers (android 2.x, old firefox) that don't support onload on link
+            setTimeout(enableStylesheet, 3000)
+        }
+
+        // loop through link elements in DOM
+        rp.poly = function () {
+            // double check this to prevent external calls from running
+            if (rp.support()) {
+                return
+            }
+            var links = w.document.getElementsByTagName('link')
+            for (var i = 0; i < links.length; i++) {
+                var link = links[i]
+                // qualify links to those with rel=preload and as=style attrs
+                if (
+                    link.rel === 'preload' &&
+                    link.getAttribute('as') === 'style' &&
+                    !link.getAttribute('data-loadcss')
+                ) {
+                    // prevent rerunning on link
+                    link.setAttribute('data-loadcss', true)
+                    // bind listeners to toggle media back
+                    rp.bindMediaToggle(link)
+                }
+            }
+        }
+
+        // if unsupported, run the polyfill
+        if (!rp.support()) {
+            // run once at least
+            rp.poly()
+
+            // rerun poly on an interval until onload
+            var run = w.setInterval(rp.poly, 500)
+            if (w.addEventListener) {
+                w.addEventListener('load', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            } else if (w.attachEvent) {
+                w.attachEvent('onload', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            }
+        }
+
+        // commonjs
+        if (typeof exports !== 'undefined') {
+            exports.loadCSS = loadCSS
+        } else {
+            w.loadCSS = loadCSS
+        }
+    })(typeof global !== 'undefined' ? global : this)
+</script>
+
+                                  <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/font/Oswald-Regular.woff2") format('woff2'),
+             url("/font/Oswald-Regular.ttf") format('truetype');
+        font-display: swap;
+    }
+
+    body {
+        margin: 0;
+    }
+
+    /* Removed initial hide to show content immediately */
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(
+            -45deg,
+            #444 0,
+            #444 80px,
+            #333 80px,
+            #333 160px
+        );
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+</style>
+
+                                    <link id="stylesheet-base" rel="preload" href="/css/style.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <link id="stylesheet-mobile" rel="preload" href="/css/mobile.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet';this.media='screen and
+                                    (max-width: 960px)'">
+                                    <link id="stylesheet-theme-dark" rel="preload" href="/css/dark.css
+                                    " as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <!-- Font Awesome CSS (with CDN fallback) -->
+                                    <link id="stylesheet-fontawesome" rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+                                      as="style" onload="this.onload=null;this.rel='stylesheet'"
+                                      onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css';this.rel='stylesheet'">
+                                    <link rel="preconnect" href="https://cdn.bootcdn.net" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.bootcdn.net">
+                                    <link rel="preconnect" href="https://cdn.staticfile.org" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.staticfile.org">
+                                    <link rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js" as="script">
+                                    <link rel="preload" href="/scripts/main.js" as="script">
+                                    <!-- use compressed font format to reduce transfer size -->
+                                    <link rel="preload" href="/font/Source%5C%20Sans%5C%20Pro.woff2"
+                                      as="font" type="font/woff2" crossorigin>
+                                    <link rel="preload" href="/font/Source%5C%20Sans%5C%20Pro.woff" as="font"
+                                      type="font/woff" crossorigin>
+                                    <link rel="preload" href="https://at.alicdn.com/t/font_327081_1dta1rlogw17zaor.woff"
+                                      as="font" crossorigin>
+                                    <!-- algolia -->
+                                        <!-- 百度统计（延迟加载，失败静默）  -->
+                                            <!-- CNZZ（延迟加载，失败静默）  -->
+                                                <!-- Google tag (gtag.js) 延迟加载，失败静默 -->
+                                                  <script>
+                                                    (function () {
+                                                      function loadGtag() {
+                                                        try {
+                                                          window.dataLayer = window.dataLayer || []
+                                                          function gtag() { dataLayer.push(arguments) }
+                                                          window.gtag = gtag
+                                                          gtag('js', new Date())
+                                                          var s = document.createElement('script')
+                                                          s.async = true
+                                                          s.src = 'https://www.googletagmanager.com/gtag/js?id=UA-50993302-2'
+                                                          s.onerror = function () { }
+                                                          s.onload = function () { gtag('config', 'UA-50993302-2') }
+                                                          document.head.appendChild(s)
+                                                        } catch (e) { }
+                                                      }
+                                                      if (window.requestIdleCallback) {
+                                                        requestIdleCallback(loadGtag, { timeout: 5000 })
+                                                      } else {
+                                                        window.addEventListener('load', function () { setTimeout(loadGtag, 3000) })
+                                                      }
+                                                    })();
+                                                  </script>
+                                                    <!-- Hreflang Tags -->
+                                                    
+                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2025/02/08/Android-ANR-02-How-to-analysis-ANR/" />
+                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/" />
+                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/" />
+                  <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/atom.xml" title="Android Performance" type="application/atom+xml">
+</head>
+        <body class="post-body">
+        <!-- header -->
+        <header class="header header-mobile">
+    <!-- top read progress line -->
+    <div class="header-element">
+        <div class="read-progress"></div>
+    </div>
+    <!-- sidebar menu button -->
+    <div class="header-element">
+        <div class="header-sidebar-menu">
+            <div style="padding-left: 1px;">&#xe775;</div>
+        </div>
+    </div>
+    <!-- header actions -->
+    <div class="header-actions">
+        <!-- theme mode switch button -->
+        <span class="header-theme-btn header-element">
+            <i class="fas fa-adjust"></i>
+        </span>
+        <!-- back to home page text -->
+        <span class="home-link header-element">
+            <a href="/">Android Performance</a>
+        </span>
+    </div>
+    <!-- toggle banner -->
+    <div class="banner">
+        <div class="blog-title header-element">
+            <a href="/">Android Performance</a>
+        </div>
+        <div class="post-title header-element">
+            <a href="#" class="post-name">Android ANR 系列 2 ：ANR 分析套路和关键 Log 介绍</a>
+        </div>
+    </div>
+</header>
+
+        <!-- fixed footer -->
+        <footer class="footer-fixed">
+    <!-- donate button -->
+    <div class="donate-popup donate-popup--hidden">
+    <div class="donate-popup__title">Buy Me A Coffee</div>
+    <div class="donate-popup__content">
+        <div class="donate-popup__content-description">如果觉得文章还不错，打赏一杯咖啡吧.</div>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Wechat"
+            alt="Wechat"
+            src="/assets/donate-wechat.png"
+        ></img>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Alipay"
+            alt="Alipay"
+            src="/assets/donate-alipay.png"
+        ></img>
+    </div>
+</div>
+
+    <div
+        title="Donate to the author"
+        class="footer-fixed-btn footer-fixed-btn--hidden donate-btn"
+    >
+        <i class="fas fa-donate"></i>
+    </div>
+
+    <!-- back to top button -->
+    <div class="footer-fixed-btn footer-fixed-btn--hidden back-top">
+        <div>&#xe639;</div>
+    </div>
+</footer>
+
+        <!-- wrapper -->
+        <div class="wrapper">
+            <div class="site-intro" style="    height:50vh;
+">
+    <!-- 主页  -->
+    <!-- 404页  -->
+    <div class="site-intro-placeholder"></div>
+    <picture>
+            <source type="image/webp" srcset="/intro/post-bg.webp">
+        <img class="site-intro-img"
+             src="/intro/post-bg.jpg"
+             alt=""
+loading="lazy"             decoding="async"
+             fetchpriority="auto"
+             sizes="100vw">
+    </picture>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+                Android ANR 系列 2 ：ANR 分析套路和关键 Log 介绍
+            <!-- 404 -->
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            <!-- 404 -->
+        </p>
+        <!-- 文章页 meta -->
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                    <div class="post-intro-tags" >
+        <span class="post-category" data-categories="Java">
+            <i class="fas fa-folder post-category-icon"></i>
+            <span class="post-category-text">
+                Java
+            </span>
+        </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Startup">Startup</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Memory">Memory</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Systrace">Systrace</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="ANR">ANR</a>
+</div>
+
+                <!-- 文章字数统计 -->
+                    <div class="post-intro-read">
+                        <span>Word count: <span class="post-count word-count">8.3k</span>Reading time: <span class="post-count reading-time">38 min</span></span>
+                    </div>
+                <div class="post-intro-meta">
+                    <!-- 撰写日期 -->
+                    <span class="iconfont-archer post-intro-calander">&#xe676;</span>
+                    <span class="post-intro-time">2025/02/08</span>
+                    <!-- 文章分享 -->
+                    <span class="share-wrapper">
+                        <span class="iconfont-archer share-icon">&#xe71d;</span>
+                        <span class="share-text">Share</span>
+                        <ul class="share-list">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+    </div>
+</div>
+
+            
+            <script>
+  // get user agent
+  function getBrowserVersions() {
+    var u = window.navigator.userAgent
+    return {
+      userAgent: u,
+      trident: u.indexOf('Trident') > -1, //IE内核
+      presto: u.indexOf('Presto') > -1, //opera内核
+      webKit: u.indexOf('AppleWebKit') > -1, //苹果、谷歌内核
+      gecko: u.indexOf('Gecko') > -1 && u.indexOf('KHTML') == -1, //火狐内核
+      mobile: !!u.match(/AppleWebKit.*Mobile.*/), //是否为移动终端
+      ios: !!u.match(/\(i[^;]+;( U;)? CPU.+Mac OS X/), //ios终端
+      android: u.indexOf('Android') > -1 || u.indexOf('Linux') > -1, //android终端或者uc浏览器
+      iPhone: u.indexOf('iPhone') > -1 || u.indexOf('Mac') > -1, //是否为iPhone或者安卓QQ浏览器
+      iPad: u.indexOf('iPad') > -1, //是否为iPad
+      webApp: u.indexOf('Safari') == -1, //是否为web应用程序，没有头部与底部
+      weixin: u.indexOf('MicroMessenger') == -1, //是否为微信浏览器
+      uc: u.indexOf('UCBrowser') > -1, //是否为android下的UC浏览器
+    }
+  }
+  var browser = {
+    versions: getBrowserVersions(),
+  }
+  console.log('userAgent: ' + browser.versions.userAgent)
+
+  // callback
+  function fontLoaded() {
+    console.log('font loaded')
+    if (document.getElementsByClassName('site-intro-meta')) {
+      document
+        .getElementsByClassName('intro-title')[0]
+        .classList.add('intro-fade-in')
+      document
+        .getElementsByClassName('intro-subtitle')[0]
+        .classList.add('intro-fade-in')
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+      if (postIntros) {
+        postIntros.classList.add('post-fade-in')
+      }
+    }
+  }
+
+  // UC不支持跨域，所以直接显示
+  function asyncCb() {
+    if (browser.versions.uc) {
+      console.log('UCBrowser')
+      fontLoaded()
+    } else {
+      WebFont.load({
+        custom: {
+          families: ['Oswald-Regular'],
+        },
+        loading: function () {
+          // 所有字体开始加载
+          // console.log('font loading');
+        },
+        active: function () {
+          // 所有字体已渲染
+          fontLoaded()
+        },
+        inactive: function () {
+          // 字体预加载失败，无效字体或浏览器不支持加载
+          console.log('inactive: timeout')
+          fontLoaded()
+        },
+        timeout: 5000, // Set the timeout to two seconds
+      })
+    }
+  }
+
+  function asyncErr() {
+    console.warn('script load from CDN failed, will load local script')
+  }
+
+  // load webfont-loader async, and add callback function
+  function async(u, cb, err) {
+    var d = document,
+      t = 'script',
+      o = d.createElement(t),
+      s = d.getElementsByTagName(t)[0]
+    o.src = u
+    if (cb) {
+      o.addEventListener(
+        'load',
+        function (e) {
+          cb(null, e)
+        },
+        false
+      )
+    }
+    if (err) {
+      o.addEventListener(
+        'error',
+        function (e) {
+          err(null, e)
+        },
+        false
+      )
+    }
+    s.parentNode.insertBefore(o, s)
+  }
+
+  var asyncLoadWithFallBack = function (arr, success, reject) {
+    var currReject = function () {
+      reject()
+      arr.shift()
+      if (arr.length) async(arr[0], success, currReject)
+    }
+
+    async(arr[0], success, currReject)
+  }
+
+  asyncLoadWithFallBack(
+    [
+      'https://cdn.bootcdn.net/ajax/libs/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.staticfile.org/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.jsdelivr.net/npm/webfontloader@1.6.28/webfontloader.min.js',
+      "/lib/webfontloader.min.js",
+    ],
+    asyncCb,
+    asyncErr
+  )
+</script>
+
+            <img class="loading" src="/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" alt="loading">
+            <div class="container container-unloaded">
+                <main class="main post-page">
+    <article class="article-entry">
+        <p>本文为 Android App ANR 系列的第二篇，主要分享 ANR 分析套路和关键 Log 介绍，系列文章目录如下</p>
+<ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/02/08/Android-ANR-01-ANR-Design/">Android App ANR 系列 1 ：理解 Android ANR 设计思想</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android App ANR 系列 2 ：ANR 分析套路和关键 Log 介绍</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android App ANR 系列 3 ：ANR 案例分享</a></li>
+</ol>
+<span id="more"></span>
+
+<blockquote>
+<p>ANR(Application Not Responding)，应用程序无响应，简单一个定义，却涵盖了很多 Android 系统的设计思想</p>
+<p>首先，ANR 属于应用程序的范畴。这不同于 SNR(System Not Respoding)，SNR 反映的问题是系统进程(system_server)失去了响应能力，而 ANR 明确将问题圈定在应用程序。SNR 由 Watchdog 机制保证，具体可以查阅 Watchdog 机制以及问题分析; ANR 由消息处理机制保证，Android 在系统层实现了一套精密的机制来发现 ANR，核心原理是消息调度和超时处理</p>
+<p>其次，ANR 机制主体实现在系统层。所有与 ANR 相关的消息，都会经过系统进程(system_server)调度，然后派发到应用进程完成对消息的实际处理，同时，系统进程设计了不同的超时限制来跟踪消息的处理。 一旦应用程序处理消息不当，超时限制就起作用了，它收集一些系统状态，譬如 CPU&#x2F;IO 使用情况、进程函数调用栈，并且报告用户有进程无响应了(ANR 对话框，部分 Rom 不显示 ANR 对话框，而是直接闪退到主界面)</p>
+<p>然后，ANR 问题本质是一个性能问题。ANR 机制实际上对应用程序主线程的限制，要求主线程在限定的时间内处理完一些最常见的操作(启动服务、处理广播、处理输入)， 如果处理超时，则认为主线程已经失去了响应其他操作的能力。主线程中的耗时操作，譬如密集 CPU 运算、大量 IO、复杂界面布局等，都会降低应用程序的响应能力</p>
+<p>最后，部分 ANR 问题是很难分析的。有时候由于系统底层的一些影响，导致消息调度失败，出现问题的场景又难以复现。 这类 ANR 问题往往需要花费大量的时间去了解系统的一些行为，超出了 ANR 机制本身的范畴。有一些 ANR 问题很难调查清楚，因为整个系统不稳定的因素很多，例如 Linux Kernel 本身的 Bug 引起的内存碎片过多、硬件损坏等。这类比较底层的原因引起的 ANR 问题往往无从查起，并且这根本不是应用程序的问题，浪费了应用开发人员很多时间，如果你从事过整个系统的开发和维护工作的话会深有体会。所以我不能保证了解了本章的所有内容后能够解决一切 ANR 问题，如果出现了很疑难的 ANR 问题，我建议最好去和做 Framework、驱动和内核的朋友聊聊，或者，如果问题只是个十万分之一的偶然现象，不影响程序的正常运行，我倒是建议不去理它</p>
+<p>– From <a target="_blank" rel="noopener" href="https://duanqz.github.io/2015-10-12-ANR-Analysis">duanqz</a></p>
+</blockquote>
+<h1 id="ANR-分析套路"><a href="#ANR-分析套路" class="headerlink" title="ANR 分析套路"></a>ANR 分析套路</h1><p>ANR 问题主要有两种原因：<strong>应用自身的问题</strong> 和 <strong>系统异常导致的问题</strong>。在分析 ANR 问题的时候，最主要的就是要确定是哪个原因导致的（当然也有一些中间地带，比如代码写的不好，在正常情况下不会暴露，在系统出问题的时候很快就暴露出来）。</p>
+<h1 id="ANR-问题一般的分析步骤如下："><a href="#ANR-问题一般的分析步骤如下：" class="headerlink" title="ANR 问题一般的分析步骤如下："></a>ANR 问题一般的分析步骤如下：</h1><ol>
+<li>EventLog 看具体的 ANR 时间（搜索 am_anr），看看是否跟 ANR log 能够对上，以确定 ANR Log 是否有效，如果 ANR Log 有效，分析 ANR Log，提取有用信息：pid、tid、死锁等,遇到 ANR 问题，摆在我们面前的 trace 是不是第一案发现场，如果 ANR 发生的输出的信息很多，当时的 CPU 和 I&#x2F;O 资源比较紧张，那么这段日志输出的时间点可能会延迟 10 秒到 20 秒都有可能，所以我们有时候需要提高警惕。不过正常情况下，EventLog 中的 am_anr 的输出时间是最早的，也是最接近 ANR 时间的。</li>
+<li>看 MainLog(Android Log) 或者 SystemLog 查看 ANR 详细信息(搜索 ANR in)，提取有效的信息。<ol>
+<li>发生 ANR 的时间</li>
+<li>打印 ANR 日志的进程</li>
+<li>发生 ANR 的进程</li>
+<li>发生 ANR 的原因</li>
+<li>CPU 负载</li>
+<li>Memory 负载</li>
+<li>CPU 使用统计时间段</li>
+<li>各进程的 CPU 使用率<ol>
+<li>总的 CPU 使用率</li>
+<li>缺页次数 fault<ol>
+<li>xxx minor 表示高速缓存中的缺页次数，可以理解为进程在做内存访问</li>
+<li>xxx major 表示内存的缺页次数，可以理解为进程在做 IO 操作</li>
+</ol>
+</li>
+</ol>
+</li>
+<li>CPU 使用汇总</li>
+</ol>
+</li>
+<li>配合 MainLog(Android Log) 和 EventLog 把 CPU 开始和结束的时间点内的所有有用信息提取出来到一个文件中.<ol>
+<li>收集关键操作，比如解锁、安装应用、亮灭屏、应用启动等</li>
+<li>收集异常和系统关键 Log<ol>
+<li>系统变慢 ：比如 Slow operation、Slow dispatch、Slow delivery、dvm_lock_sample</li>
+<li>进程变化 ：am_kill、am_proc_died、lowmemorykiller、ANR、应用启动关系等</li>
+<li>系统信息 ：cpu info、meminfo、binder info（是否满了） 、iowait (是否过高)</li>
+</ol>
+</li>
+<li>收集 ANR 进程的所有关键线程的运行情况、线程优先级等</li>
+<li>根据第四步提取出来的关键信息文件，进一步理出系统当时的情况、状态（（推荐 vscode 或者 notepad ++ ，有 线索就全局搜索）），比如<ol>
+<li>是处于低内存频繁杀进程？</li>
+<li>重启第一次解锁系统繁忙</li>
+<li>还是短时间内多个应用启动系统繁忙</li>
+<li>还是应用自己的逻辑等待？</li>
+</ol>
+</li>
+</ol>
+</li>
+<li>不行就加 Log 复现.</li>
+</ol>
+<h2 id="区分是应用的问题还是系统的问题"><a href="#区分是应用的问题还是系统的问题" class="headerlink" title="区分是应用的问题还是系统的问题"></a>区分是应用的问题还是系统的问题</h2><h3 id="首先应该分析是否是应用的问题"><a href="#首先应该分析是否是应用的问题" class="headerlink" title="首先应该分析是否是应用的问题"></a>首先应该分析是否是应用的问题</h3><p>分析应用的问题的关键是需要理清当时用户的操作是什么，应用在用户这个操作的过程中扮演了什么角色，然后再进行进一步的分析</p>
+<ol>
+<li>分析应用是否关键组件中的生命周期中有耗时操作，可能平时没有暴露出来，一旦系统负载上来，就会暴露问题（建议在关键生命周期函数中加上对应的 Log，方便 Debug）。</li>
+<li>分析是否出现极端情况，导致应用的逻辑耗时，比如大量的数据处理或者导入，同时运行线程过多等（看应用的 cpu \ io 使用情况）。</li>
+<li>分析是否存在死锁。</li>
+<li>分析是否是在等待 binder 返回。</li>
+<li>分析 Trace 文件中 MainThread 和 RenderThread 是否存在异常。</li>
+<li>分析 Trace 文件中 MainThread 跟 WorkerThread 是否存在等待关系。</li>
+</ol>
+<h3 id="分析系统的状态"><a href="#分析系统的状态" class="headerlink" title="分析系统的状态"></a>分析系统的状态</h3><ol>
+<li>查看 CPU 使用情况(cpu 使用率和 cpu 负载)，看看 SystemServer、lowmemorykiller、HeapTaskDeamon、Audio、SurfaceFlinger 这些系统相关的进程或者线程是否占用高</li>
+<li>查看是否存在大量 IO 的情况，看 io 负载<ol>
+<li>faults: 118172 minor(高速缓存的缺页次数)。</li>
+<li>major(内存的缺页次数)。</li>
+</ol>
+</li>
+<li>查看系统是否是低内存<ol>
+<li>看 dumpsys meminfo 的结果，看看是否处于低内存。</li>
+<li>kernel log 是否有频繁的 lowmemorykiller。</li>
+<li>event log 是否有频繁的应用被系统低内存策略杀掉。</li>
+<li>kswapd0 。</li>
+</ol>
+</li>
+<li>应用是否被冻结：应用处于 D 状态，发生 ANR，如果最后的操作是 refriger，那么是应用被冻结了，正常情况下是功耗优化引起的，可以找一下前后是否有 xxxHansManager : unfreeze 这样的 Log；或者在 Systrace 中的 Kernel Callstack 显示 ：{kernel callsite when blocked:: “__refrigerator+0xe4&#x2F;0x198”}。</li>
+<li>查看是否存在系统异常，比如自研功能导致系统繁忙，没有及时响应应用 Binder 之类的，这种需要分析 Log 中 SystemServer 的日志输出，查看是否有异常的 Log 输出。</li>
+</ol>
+<h2 id="继续分析：应用可以解决还是系统可以解决"><a href="#继续分析：应用可以解决还是系统可以解决" class="headerlink" title="继续分析：应用可以解决还是系统可以解决"></a>继续分析：应用可以解决还是系统可以解决</h2><ol>
+<li>ANR 问题如果转给系统，大概率是无解的。</li>
+<li>如果应用的代码是正常的，也没有极端的使用场景和数据处理，纯粹是由于系统或者其他的 App 造成的，那么可以转给系统处理。</li>
+<li>如果应用代码本身有一定的问题，在非极端场景或者非系统异常的不会暴露出来，那么需要应用这边想一想规避方案。</li>
+</ol>
+<h1 id="ANR-Log-分析"><a href="#ANR-Log-分析" class="headerlink" title="ANR Log 分析"></a>ANR Log 分析</h1><p>Log 可由测试使用 Log 工具抓取，可由线上平台获取，也可以自己抓取：</p>
+<figure class="highlight elm"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="title">adb</span> bugre<span class="keyword">port</span> log.zip1</span><br></pre></td></tr></table></figure>
+
+<p>ANR Trace Log 所包含的内容如下</p>
+<h2 id="线程详细数据"><a href="#线程详细数据" class="headerlink" title="线程详细数据"></a>线程详细数据</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="string">&quot;main&quot;</span> prio=<span class="number">5</span> tid=<span class="number">1</span> Native</span><br><span class="line">  | group=<span class="string">&quot;main&quot;</span> sCount=<span class="number">1</span> dsCount=<span class="number">0</span> flags=<span class="number">1</span> obj=<span class="number">0x72c8bbf8</span> self=<span class="number">0xb400007b0ec10800</span></span><br><span class="line">  | sysTid=<span class="number">5991</span> nice=-<span class="number">10</span> cgrp=<span class="keyword">default</span> sched=<span class="number">0</span>/<span class="number">0</span> handle=<span class="number">0x7b95f61500</span></span><br><span class="line">  | state=S schedstat=( <span class="number">807053249</span> <span class="number">267562324</span> <span class="number">1494</span> ) utm=<span class="number">63</span> stm=<span class="number">17</span> core=<span class="number">3</span> HZ=<span class="number">100</span></span><br><span class="line">  | stack=<span class="number">0x7fcccd9000</span>-<span class="number">0x7fcccdb000</span> stackSize=8192KB</span><br><span class="line">  | held mutexes=</span><br><span class="line">  <span class="keyword">native</span>: #<span class="number">00</span> pc 00000000000c6418  /apex/com.android.runtime/lib64/bionic/libc.so (__epoll_pwait+<span class="number">8</span>)</span><br><span class="line">  <span class="keyword">native</span>: #<span class="number">01</span> pc 0000000000019a9c  /system/lib64/libutils.so (android::Looper::pollInner(<span class="type">int</span>)+<span class="number">184</span>)</span><br><span class="line">  <span class="keyword">native</span>: #<span class="number">02</span> pc 000000000001997c  /system/lib64/libutils.so (android::Looper::pollOnce(<span class="type">int</span>, <span class="type">int</span>*, <span class="type">int</span>*, <span class="keyword">void</span>**)+<span class="number">112</span>)</span><br><span class="line">  <span class="keyword">native</span>: #<span class="number">03</span> pc <span class="number">0000000000114310</span>  /system/lib64/libandroid_runtime.so (android::android_os_MessageQueue_nativePollOnce(_JNIEnv*, _jobject*, <span class="type">long</span>, <span class="type">int</span>)+<span class="number">44</span>)</span><br><span class="line">  at android.os.MessageQueue.nativePollOnce(Native method)</span><br><span class="line">  at android.os.MessageQueue.next(MessageQueue.java:<span class="number">339</span>)</span><br><span class="line">  at android.os.Looper.loop(Looper.java:<span class="number">198</span>)</span><br><span class="line">  at android.app.ActivityThread.main(ActivityThread.java:<span class="number">8142</span>)</span><br><span class="line">  at java.lang.reflect.Method.invoke(Native method)</span><br><span class="line">  at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:<span class="number">592</span>)</span><br><span class="line">  at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:<span class="number">1006</span>)</span><br></pre></td></tr></table></figure>
+
+<p>上面 Trace 中 部分字段的含义</p>
+<p><img src="/../images/Android-ANR-02-How-to-analysis-ANR/894ce64d-1586-459b-92cd-45f5999bd666.png"></p>
+<h2 id="线程堆栈"><a href="#线程堆栈" class="headerlink" title="线程堆栈"></a><strong>线程堆栈</strong></h2><p>下面是该线程对应的调用堆栈</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">native</span>: #<span class="number">00</span> pc 00000000000c6418 /apex/com.android.runtime/lib64/bionic/libc.so (__epoll_pwait+<span class="number">8</span>)</span><br><span class="line"><span class="keyword">native</span>: #<span class="number">01</span> pc 0000000000019a9c /system/lib64/libutils.so (android::Looper::pollInner(<span class="type">int</span>)+<span class="number">184</span>)</span><br><span class="line"><span class="keyword">native</span>: #<span class="number">02</span> pc 000000000001997c /system/lib64/libutils.so (android::Looper::pollOnce(<span class="type">int</span>, <span class="type">int</span>*, <span class="type">int</span>*, <span class="keyword">void</span>**)+<span class="number">112</span>)</span><br><span class="line"><span class="keyword">native</span>: #<span class="number">03</span> pc <span class="number">0000000000114310</span> /system/lib64/libandroid_runtime.so (android::android_os_MessageQueue_nativePollOnce(_JNIEnv*, _jobject*, <span class="type">long</span>, <span class="type">int</span>)+<span class="number">44</span>)</span><br><span class="line">at android.os.MessageQueue.nativePollOnce(Native method)</span><br><span class="line">at android.os.MessageQueue.next(MessageQueue.java:<span class="number">339</span>)</span><br><span class="line">at android.os.Looper.loop(Looper.java:<span class="number">198</span>)</span><br><span class="line">at android.app.ActivityThread.main(ActivityThread.java:<span class="number">8142</span>)</span><br><span class="line">at java.lang.reflect.Method.invoke(Native method)</span><br><span class="line">at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:<span class="number">592</span>)</span><br><span class="line">at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:<span class="number">1006</span>)</span><br></pre></td></tr></table></figure>
+
+<p>分为 Java 和 Native，一般来说，nativePollOnce 是在等待 Message，这是正常的</p>
+<h2 id="线程状态"><a href="#线程状态" class="headerlink" title="线程状态"></a>线程状态</h2><p><img src="/../images/Android-ANR-02-How-to-analysis-ANR/dde07d81-cefd-4478-9704-c81b900bb54d.png"></p>
+<p>Thread.java 中的状态和 Thread.cpp 中的状态是有对应关系的。可以看到前者更加概括，也比较容易理解，面向 Java 的使用者；而后者更详细，面向虚拟机内部的环境。traces.txt 中显示的线程状态都是 Thread.cpp 中定义的,完整的对应关系如下</p>
+<p>art&#x2F;runtime&#x2F;thread_state.h</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// State stored in our C++ class Thread.</span></span><br><span class="line"><span class="comment">// When we refer to &quot;a suspended state&quot;, or when function names mention &quot;ToSuspended&quot; or</span></span><br><span class="line"><span class="comment">// &quot;FromSuspended&quot;, we mean any state other than kRunnable, i.e. any state in which the thread is</span></span><br><span class="line"><span class="comment">// guaranteed not to access the Java heap. The kSuspended state is merely one of these.</span></span><br><span class="line"><span class="keyword">enum</span> <span class="title class_">ThreadState</span> &#123;</span><br><span class="line">  <span class="comment">//                                   Java</span></span><br><span class="line">  <span class="comment">//                                   Thread.State   JDWP state</span></span><br><span class="line">  kTerminated = <span class="number">66</span>,                 <span class="comment">// TERMINATED     TS_ZOMBIE    Thread.run has returned, but Thread* still around</span></span><br><span class="line">  kRunnable,                        <span class="comment">// RUNNABLE       TS_RUNNING   runnable</span></span><br><span class="line">  kTimedWaiting,                    <span class="comment">// TIMED_WAITING  TS_WAIT      in Object.wait() with a timeout</span></span><br><span class="line">  kSleeping,                        <span class="comment">// TIMED_WAITING  TS_SLEEPING  in Thread.sleep()</span></span><br><span class="line">  kBlocked,                         <span class="comment">// BLOCKED        TS_MONITOR   blocked on a monitor</span></span><br><span class="line">  kWaiting,                         <span class="comment">// WAITING        TS_WAIT      in Object.wait()</span></span><br><span class="line">  kWaitingForLockInflation,         <span class="comment">// WAITING        TS_WAIT      blocked inflating a thin-lock</span></span><br><span class="line">  kWaitingForTaskProcessor,         <span class="comment">// WAITING        TS_WAIT      blocked waiting for taskProcessor</span></span><br><span class="line">  kWaitingForGcToComplete,          <span class="comment">// WAITING        TS_WAIT      blocked waiting for GC</span></span><br><span class="line">  kWaitingForCheckPointsToRun,      <span class="comment">// WAITING        TS_WAIT      GC waiting for checkpoints to run</span></span><br><span class="line">  kWaitingPerformingGc,             <span class="comment">// WAITING        TS_WAIT      performing GC</span></span><br><span class="line">  kWaitingForDebuggerSend,          <span class="comment">// WAITING        TS_WAIT      blocked waiting for events to be sent</span></span><br><span class="line">  kWaitingForDebuggerToAttach,      <span class="comment">// WAITING        TS_WAIT      blocked waiting for debugger to attach</span></span><br><span class="line">  kWaitingInMainDebuggerLoop,       <span class="comment">// WAITING        TS_WAIT      blocking/reading/processing debugger events</span></span><br><span class="line">  kWaitingForDebuggerSuspension,    <span class="comment">// WAITING        TS_WAIT      waiting for debugger suspend all</span></span><br><span class="line">  kWaitingForJniOnLoad,             <span class="comment">// WAITING        TS_WAIT      waiting for execution of dlopen and JNI on load code</span></span><br><span class="line">  kWaitingForSignalCatcherOutput,   <span class="comment">// WAITING        TS_WAIT      waiting for signal catcher IO to complete</span></span><br><span class="line">  kWaitingInMainSignalCatcherLoop,  <span class="comment">// WAITING        TS_WAIT      blocking/reading/processing signals</span></span><br><span class="line">  kWaitingForDeoptimization,        <span class="comment">// WAITING        TS_WAIT      waiting for deoptimization suspend all</span></span><br><span class="line">  kWaitingForMethodTracingStart,    <span class="comment">// WAITING        TS_WAIT      waiting for method tracing to start</span></span><br><span class="line">  kWaitingForVisitObjects,          <span class="comment">// WAITING        TS_WAIT      waiting for visiting objects</span></span><br><span class="line">  kWaitingForGetObjectsAllocated,   <span class="comment">// WAITING        TS_WAIT      waiting for getting the number of allocated objects</span></span><br><span class="line">  kWaitingWeakGcRootRead,           <span class="comment">// WAITING        TS_WAIT      waiting on the GC to read a weak root</span></span><br><span class="line">  kWaitingForGcThreadFlip,          <span class="comment">// WAITING        TS_WAIT      waiting on the GC thread flip (CC collector) to finish</span></span><br><span class="line">  kNativeForAbort,                  <span class="comment">// WAITING        TS_WAIT      checking other threads are not run on abort.</span></span><br><span class="line">  kStarting,                        <span class="comment">// NEW            TS_WAIT      native thread started, not yet ready to run managed code</span></span><br><span class="line">  kNative,                          <span class="comment">// RUNNABLE       TS_RUNNING   running in a JNI native method</span></span><br><span class="line">  kSuspended,                       <span class="comment">// RUNNABLE       TS_RUNNING   suspended by GC or debugger</span></span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure>
+
+<p>Trace 文件中，线程名的最后一行标识的就是当前线程的状态</p>
+<p><img src="/../images/Android-ANR-02-How-to-analysis-ANR/4878f3bb-ac76-4804-928f-894ab90cfb1b.png"></p>
+<h3 id="正常主线程-Trace"><a href="#正常主线程-Trace" class="headerlink" title="正常主线程 Trace"></a>正常主线程 Trace</h3><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="string">&quot;main&quot;</span> prio=<span class="number">5</span> tid=<span class="number">1</span> Native</span><br><span class="line">  | group=<span class="string">&quot;main&quot;</span> sCount=<span class="number">1</span> dsCount=<span class="number">0</span> flags=<span class="number">1</span> obj=<span class="number">0x72c8bbf8</span> self=<span class="number">0xb400007b0ec10800</span></span><br><span class="line">  | sysTid=<span class="number">5991</span> nice=-<span class="number">10</span> cgrp=<span class="keyword">default</span> sched=<span class="number">0</span>/<span class="number">0</span> handle=<span class="number">0x7b95f61500</span></span><br><span class="line">  | state=S schedstat=( <span class="number">807053249</span> <span class="number">267562324</span> <span class="number">1494</span> ) utm=<span class="number">63</span> stm=<span class="number">17</span> core=<span class="number">3</span> HZ=<span class="number">100</span></span><br><span class="line">  | stack=<span class="number">0x7fcccd9000</span>-<span class="number">0x7fcccdb000</span> stackSize=8192KB</span><br><span class="line">  | held mutexes=</span><br><span class="line">  <span class="keyword">native</span>: #<span class="number">00</span> pc 00000000000c6418  /apex/com.android.runtime/lib64/bionic/libc.so (__epoll_pwait+<span class="number">8</span>)</span><br><span class="line">  <span class="keyword">native</span>: #<span class="number">01</span> pc 0000000000019a9c  /system/lib64/libutils.so (android::Looper::pollInner(<span class="type">int</span>)+<span class="number">184</span>)</span><br><span class="line">  <span class="keyword">native</span>: #<span class="number">02</span> pc 000000000001997c  /system/lib64/libutils.so (android::Looper::pollOnce(<span class="type">int</span>, <span class="type">int</span>*, <span class="type">int</span>*, <span class="keyword">void</span>**)+<span class="number">112</span>)</span><br><span class="line">  <span class="keyword">native</span>: #<span class="number">03</span> pc <span class="number">0000000000114310</span>  /system/lib64/libandroid_runtime.so (android::android_os_MessageQueue_nativePollOnce(_JNIEnv*, _jobject*, <span class="type">long</span>, <span class="type">int</span>)+<span class="number">44</span>)</span><br><span class="line">  at android.os.MessageQueue.nativePollOnce(Native method)</span><br><span class="line">  at android.os.MessageQueue.next(MessageQueue.java:<span class="number">339</span>)</span><br><span class="line">  at android.os.Looper.loop(Looper.java:<span class="number">198</span>)</span><br><span class="line">  at android.app.ActivityThread.main(ActivityThread.java:<span class="number">8142</span>)</span><br><span class="line">  at java.lang.reflect.Method.invoke(Native method)</span><br><span class="line">  at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:<span class="number">592</span>)</span><br><span class="line">  at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:<span class="number">1006</span>)</span><br></pre></td></tr></table></figure>
+
+<h3 id="异常主线程-Trace"><a href="#异常主线程-Trace" class="headerlink" title="异常主线程 Trace"></a>异常主线程 Trace</h3><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="string">&quot;main&quot;</span> prio=<span class="number">5</span> tid=<span class="number">1</span> Blocked</span><br><span class="line">  | group=<span class="string">&quot;main&quot;</span> sCount=<span class="number">1</span> dsCount=<span class="number">0</span> flags=<span class="number">1</span> obj=<span class="number">0x70f65400</span> self=<span class="number">0xe28dae00</span></span><br><span class="line">  | sysTid=<span class="number">22002</span> nice=-<span class="number">10</span> cgrp=<span class="keyword">default</span> sched=<span class="number">0</span>/<span class="number">0</span> handle=<span class="number">0xe9674474</span></span><br><span class="line">  | state=S schedstat=( <span class="number">1943159901</span> <span class="number">290647362</span> <span class="number">1661</span> ) utm=<span class="number">159</span> stm=<span class="number">34</span> core=<span class="number">7</span> HZ=<span class="number">100</span></span><br><span class="line">  | stack=<span class="number">0xff041000</span>-<span class="number">0xff043000</span> stackSize=8192KB</span><br><span class="line">  | held mutexes=</span><br><span class="line">  at com.facebook.cache.disk.DiskStorageCache.e(DiskStorageCache.java:<span class="number">3</span>)</span><br><span class="line">  - waiting to lock &lt;<span class="number">0x0e57c91f</span>&gt; (a java.lang.Object) held by thread <span class="number">89</span></span><br><span class="line">  at com.xxx.community.util.imageloader.FrescoImageLoader.a(FrescoImageLoader.java:<span class="number">18</span>)</span><br><span class="line">  at com.xxx.community.util.imageloader.FrescoImageLoader$<span class="number">2</span>$<span class="number">1.</span>run(FrescoImageLoader.java:<span class="number">2</span>)</span><br><span class="line">  at android.os.Handler.handleCallback(Handler.java:<span class="number">938</span>)</span><br><span class="line">  at android.os.Handler.dispatchMessage(Handler.java:<span class="number">99</span>)</span><br><span class="line">  at android.os.Looper.loop(Looper.java:<span class="number">254</span>)</span><br><span class="line">  at android.app.ActivityThread.main(ActivityThread.java:<span class="number">8142</span>)</span><br><span class="line">  at java.lang.reflect.Method.invoke(Native method)</span><br><span class="line">  at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:<span class="number">592</span>)</span><br><span class="line">  at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:<span class="number">1006</span>)</span><br></pre></td></tr></table></figure>
+
+<h2 id="CPU-使用率分析"><a href="#CPU-使用率分析" class="headerlink" title="CPU 使用率分析"></a>CPU 使用率分析</h2><p>搜索 ANR in 关键字可以看到 ANR 前一段时间内的 CPU 使用情况，其解析如下</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br></pre></td><td class="code"><pre><span class="line">ActivityManager: ANR in com.xxx.launcher (com.xxx.launcher/.Launcher)(进程名)</span><br><span class="line">ActivityManager: PID: <span class="number">5991</span>(进程 pid)</span><br><span class="line">ActivityManager: Reason: Input dispatching timed <span class="title function_">out</span> <span class="params">(6a6083a com.xxx.launcher/com.xxx.launcher.Launcher (server)</span> is not responding. Waited 5001ms <span class="keyword">for</span> <span class="title function_">FocusEvent</span><span class="params">(hasFocus=<span class="literal">true</span>)</span>)(原因)</span><br><span class="line">ActivityManager: Parent: com.xxx.launcher/.Launcher</span><br><span class="line">ActivityManager: Load: <span class="number">15.29</span> / <span class="number">5.19</span> / <span class="number">1.87</span>(Load 表明是 <span class="number">1</span> 分钟,<span class="number">5</span> 分钟,<span class="number">15</span> 分钟 CPU 的负载)</span><br><span class="line">ActivityManager: ----- Output from /proc/pressure/memory -----(内存压力)</span><br><span class="line">ActivityManager: somavg10=<span class="number">1.35</span> avg60=<span class="number">0.31</span> avg300=<span class="number">0.06</span> total=<span class="number">346727</span></span><br><span class="line">ActivityManager: full avg10=<span class="number">0.00</span> avg60=<span class="number">0.00</span> avg300=<span class="number">0.00</span> total=<span class="number">34803</span></span><br><span class="line">ActivityManager: ----- End output from /proc/pressure/memory -----</span><br><span class="line"></span><br><span class="line"><span class="comment">// 13s 内的 cpu 使用情况</span></span><br><span class="line">ActivityManager: CPU usage from 0ms to 13135ms <span class="title function_">later</span> <span class="params">(<span class="number">2020</span>-09-09 <span class="number">02</span>:09:<span class="number">54.942</span> to <span class="number">2020</span>-09-09 <span class="number">02</span>:<span class="number">10</span>:<span class="number">08.077</span>)</span>:</span><br><span class="line">ActivityManager:   <span class="number">191</span>%(CPU 的使用率) <span class="number">1948</span>/system_server: <span class="number">72</span>%(用户态的使用率) user + <span class="number">119</span>%(内核态的使用率) kernel / faults: <span class="number">78816</span> minor <span class="number">9</span> major</span><br><span class="line">ActivityManager:     <span class="number">10</span>% <span class="number">2218</span>/android.bg: <span class="number">3.6</span>% user + <span class="number">6.6</span>% kernel</span><br><span class="line">ActivityManager:   <span class="number">30</span>% <span class="number">5991</span>/com.xxx.launcher: <span class="number">23</span>% user + <span class="number">6.4</span>% kernel / faults: <span class="number">118172</span> minor(高速缓存的缺页次数) <span class="number">2</span> major(内存的缺页次数)</span><br><span class="line">ActivityManager:     <span class="number">16</span>% <span class="number">6174</span>/launcher-loader: <span class="number">13</span>% user + <span class="number">2.8</span>% kernel</span><br><span class="line">ActivityManager:     <span class="number">3.9</span>% <span class="number">5991</span>/m.xxx.launcher: <span class="number">3.1</span>% user + <span class="number">0.8</span>% kernel</span><br><span class="line">ActivityManager:   <span class="number">20</span>% <span class="number">6549</span>/com.xxx.xxx: <span class="number">16</span>% user + <span class="number">3.7</span>% kernel / faults: <span class="number">3541</span> minor</span><br><span class="line">ActivityManager:     <span class="number">10</span>% <span class="number">6889</span>/DBCacheManager: <span class="number">8.7</span>% user + <span class="number">1.2</span>% kernel</span><br><span class="line">ActivityManager:     <span class="number">9.4</span>% <span class="number">6942</span>/DefaultDispatch: <span class="number">7.1</span>% user + <span class="number">2.2</span>% kernel</span><br><span class="line"></span><br><span class="line"><span class="comment">// 1s 内的 各个进程各个线程的 cpu 使用情况</span></span><br><span class="line">ActivityManager: CPU usage from 246ms to 1271ms <span class="title function_">later</span> <span class="params">(<span class="number">2020</span>-09-09 <span class="number">02</span>:09:<span class="number">55.188</span> to <span class="number">2020</span>-09-09 <span class="number">02</span>:09:<span class="number">56.213</span>)</span>:</span><br><span class="line">ActivityManager:   <span class="number">290</span>% <span class="number">1948</span>/system_server: <span class="number">114</span>% user + <span class="number">176</span>% kernel / faults: <span class="number">9353</span> minor</span><br><span class="line">ActivityManager:     <span class="number">32</span>% <span class="number">5159</span>/LockSettingsSer: <span class="number">29</span>% user + <span class="number">2.9</span>% kernel</span><br><span class="line">ActivityManager:     <span class="number">25</span>% <span class="number">8661</span>/AnrConsumer: <span class="number">8.8</span>% user + <span class="number">16</span>% kernel</span><br><span class="line">ActivityManager:   <span class="number">44</span>% <span class="number">5991</span>/com.xxx.launcher: <span class="number">37</span>% user + <span class="number">7.4</span>% kernel / faults: <span class="number">5756</span> minor</span><br><span class="line">ActivityManager:     <span class="number">16</span>% <span class="number">6174</span>/launcher-loader: <span class="number">13</span>% user + <span class="number">3.7</span>% kernel</span><br><span class="line">ActivityManager:     <span class="number">14</span>% <span class="number">5991</span>/m.xxx.launcher: <span class="number">14</span>% user + <span class="number">0</span>% kernel</span><br><span class="line">ActivityManager:   <span class="number">37</span>% <span class="number">6549</span>/com.xxx.xxx: <span class="number">28</span>% user + <span class="number">9.3</span>% kernel / faults: <span class="number">153</span> minor</span><br><span class="line">ActivityManager:     <span class="number">37</span>% <span class="number">6942</span>/DefaultDispatch: <span class="number">28</span>% user + <span class="number">9.3</span>% kernel</span><br><span class="line">ActivityManager:   <span class="number">20</span>% <span class="number">5962</span>/com.android.phone: <span class="number">14</span>% user + <span class="number">5.5</span>% kernel / faults: <span class="number">1345</span> minor</span><br><span class="line">ActivityManager:     <span class="number">11</span>% <span class="number">5962</span>/m.android.phone: <span class="number">7.4</span>% user + <span class="number">3.7</span>% kernel</span><br></pre></td></tr></table></figure>
+
+<h2 id="CPU-负载"><a href="#CPU-负载" class="headerlink" title="CPU 负载"></a>CPU 负载</h2><figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">ActivityManager: Load: <span class="number">15.29</span> / <span class="number">5.19</span> / <span class="number">1.871</span></span><br></pre></td></tr></table></figure>
+
+<p>Load 后面的三个数字的意思分别是 1 分钟、5 分钟、15 分钟内系统的平均负荷。当 CPU 完全空闲的时候，平均负荷为 0；当 CPU 工作量饱和的时候，平均负荷为 1，通过 Load 可以判断系统负荷是否过重</p>
+<p>有一个形象的比喻：个&#x3D; CPU 想象成一座大桥，桥上只有一根车道，所有车辆都必须从这根车道上通过，系统负荷为 0，意味着大桥上一辆车也没有，系统负荷为 0.5，意味着大桥一半的路段有车，系统负荷为 1.0，意味着大桥的所有路段都有车，也就是说大桥已经”满”了，系统负荷为 2.0，意味着车辆太多了，大桥已经被占满了 (100%），后面等着上桥的车辆还有一倍。大桥的通行能力，就是 CPU 的最大工作量；桥梁上的车辆，就是一个个等待 CPU 处理的进程（process）</p>
+<p>经验法则是这样的</p>
+<ol>
+<li>1.当系统负荷持续大于 0.7，你必须开始调查了，问题出在哪里，防止情况恶化</li>
+<li>2.当系统负荷持续大于 1.0，你必须动手寻找解决办法，把这个值降下来</li>
+<li>3.当系统负荷达到 5.0，就表明你的系统有很严重的问题</li>
+</ol>
+<p>现在的手机是多核 CPU 架构，八核的多的是，意味着 Cpu 处理的能力就乘以了８，每个核运行的时间可以从下面的文件中得到，&#x2F;sys&#x2F;devices&#x2F;system&#x2F;cpu&#x2F;cpu%d&#x2F;cpufreq&#x2F;stats&#x2F;time_in_state 中读取的，%d 代表是 CPU 的核。文件中记录了 CPU 从开机到读取文件时，在各个频率下的运行时间，单位：10 ms</p>
+<h2 id="Memory-负载"><a href="#Memory-负载" class="headerlink" title="Memory 负载"></a>Memory 负载</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">ActivityManager: ----- Output from /proc/pressure/memory -----(内存压力)</span><br><span class="line">ActivityManager: somavg10=<span class="number">1.35</span> avg60=<span class="number">0.31</span> avg300=<span class="number">0.06</span> total=<span class="number">346727</span></span><br><span class="line">ActivityManager: full avg10=<span class="number">0.00</span> avg60=<span class="number">0.00</span> avg300=<span class="number">0.00</span> total=<span class="number">34803</span></span><br><span class="line">ActivityManager: ----- End output from /proc/pressure/memory -----</span><br></pre></td></tr></table></figure>
+
+<p>Memory 负载是从 &#x2F;proc&#x2F;pressure&#x2F;memory 中获取的</p>
+<p>avg10、avg60、avg300 分别代表 10s、60s、300s 的时间周期内的阻塞时间百分比。total 是总累计时间，以毫秒为单位</p>
+<p>some 这一行，代表至少有一个任务在某个资源上阻塞的时间占比，full 这一行，代表所有的非 idle 任务同时被阻塞的时间占比，这期间 cpu 被完全浪费，会带来严重的性能问题。我们以 IO 的 some 和 full 来举例说明，假设在 60 秒的时间段内，系统有两个 task，在 60 秒的周期内的运行情况如下图所示：</p>
+<p><img src="/../images/Android-ANR-02-How-to-analysis-ANR/ce7a3897-9d73-43e1-8b55-d7fb11727489.png"></p>
+<p>红色阴影部分表示任务由于等待 IO 资源而进入阻塞状态。Task A 和 Task B 同时阻塞的部分为 full，占比 16.66%；至少有一个任务阻塞（仅 Task B 阻塞的部分也计算入内）的部分为 some，占比 50%。</p>
+<p>some 和 full 都是在某一时间段内阻塞时间占比的总和，阻塞时间不一定连续，如下图所示：</p>
+<p><img src="/../images/Android-ANR-02-How-to-analysis-ANR/a62e6bd8-8672-4cb7-8815-ff740d0eaec9.png"></p>
+<p>具体内容可以参考内核工匠的文章： <a target="_blank" rel="noopener" href="https://blog.csdn.net/feelabclihu/article/details/105534140">https://blog.csdn.net/feelabclihu/article/details/105534140</a></p>
+<h2 id="IO-负载"><a href="#IO-负载" class="headerlink" title="IO 负载"></a>IO 负载</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">ActivityManager:   <span class="number">30</span>% <span class="number">5991</span>/com.xxx.launcher: <span class="number">23</span>% user + <span class="number">6.4</span>% kernel / faults: <span class="number">118172</span> minor(高速缓存的缺页次数) <span class="number">2</span> major(内存的缺页次数)</span><br></pre></td></tr></table></figure>
+
+<ol>
+<li>Minor，高速缓存的缺页次数，指的是 Minor Page Fault(次要页错误，简称 MnPF)，磁盘数据被加载到内存后，内核再次读取时，会发出一个 MnPF 信息。 一个文件第一次被读写时会有很多的 MPF，被缓存到内存后再次访问 MPF 就会很少，MnPF 反而变多，这是内核为减少效率低下的磁盘 I&#x2F;O 操作采用的缓存技术的结果可以理解为进程在做内存访问</li>
+<li>Major，内存的缺页次数，指 Major Page Fault(主要页错误，简称 MPF)，内核在读取数据时会先后查找 CPU 的高速缓存和物理内存，如果找不到会发出一个 MPF 信息，请求将数据加载到内存可以理解为进程在做 IO 操作</li>
+</ol>
+<p>如果有大量的 major，那么说明当时 IO 操作负载比较高</p>
+<h2 id="进程负载"><a href="#进程负载" class="headerlink" title="进程负载"></a>进程负载</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">ActivityManager:   <span class="number">30</span>% <span class="number">5991</span>/com.xxx.launcher: <span class="number">23</span>% user + <span class="number">6.4</span>% kernel / faults: <span class="number">118172</span> minor(高速缓存的缺页次数) <span class="number">2</span> major(内存的缺页次数)</span><br></pre></td></tr></table></figure>
+
+<ol>
+<li>1.23% user：用户态的 cpu 占用</li>
+<li>2.6.4% kernel：内核态的 cpu 占用</li>
+</ol>
+<h2 id="CPU-异常进程"><a href="#CPU-异常进程" class="headerlink" title="CPU 异常进程"></a>CPU 异常进程</h2><ol>
+<li>SystemServer cpu 占用偏高，系统整体运行会缓慢</li>
+<li>kswapd0 cpu 占用率偏高，系统整体运行会缓慢，从而引起各种 ANR。把问题转给”内存优化”，请他们进行优化</li>
+<li>logd 　 CPU 占用率偏高，也会引起系统卡顿和 ANR，因为各个进程输出 LOG 的操作被阻塞从而执行的极为缓慢。</li>
+<li>Vold 占用 CPU 过高，会引起系统卡顿和 ANR，请负责存储的同学先调查</li>
+<li>应用自身 CPU 占用率较高，高概率应用自身问题</li>
+<li>应用处于 D 状态，发生 ANR，如果最后的操作是 refriger，那么是应用被冻结了，正常情况下是功耗优化引起的，可以找一下前后是否有 xxxHansManager : unfreeze 这样的 Log；或者在 Systrace 中的 Kernel Callstack 显示 ：{kernel callsite when blocked:: “__refrigerator+0xe4&#x2F;0x198”}</li>
+<li>CPU 使用率前面的 “+”。部分进程的 CPU 使用率前面有 “+” 号，譬如 cat 和 zygote64，表示在上一次 CPU 统计的时间片段内，还没有这些进程，而这一次 CPU 统计的时间片段内，运行了这些进程。 类似的还有 “-” 号，表示两次 CPU 统计时间片段时，这些进程消亡了</li>
+</ol>
+<h1 id="系统关键-Log-介绍"><a href="#系统关键-Log-介绍" class="headerlink" title="系统关键 Log 介绍"></a>系统关键 Log 介绍</h1><h2 id="应用冻结"><a href="#应用冻结" class="headerlink" title="应用冻结"></a>应用冻结</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">xxxHansManager : freeze uid: <span class="number">10245</span> <span class="keyword">package</span>: com.tencent.mm reason: LcdOff</span><br></pre></td></tr></table></figure>
+
+<p>如果冻结逻辑有 Bug，也会导致应用产生 ANR，这一行 Log 比较简单，主要是被冻结的进程信息和被冻结的原因</p>
+<h2 id="ActivityManager-Slow-operation"><a href="#ActivityManager-Slow-operation" class="headerlink" title="ActivityManager : Slow operation"></a>ActivityManager : Slow operation</h2><p>AMS 在执行关键任务的时候，如果任务耗时超过 50 ms，则会打印对应的 Log</p>
+<p>frameworks&#x2F;base&#x2F;services&#x2F;core&#x2F;java&#x2F;com&#x2F;android&#x2F;server&#x2F;am&#x2F;ActivityManagerService.java</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> <span class="title function_">checkTime</span><span class="params">(<span class="type">long</span> startTime, String where)</span> &#123;</span><br><span class="line">    <span class="type">long</span> <span class="variable">now</span> <span class="operator">=</span> SystemClock.uptimeMillis();</span><br><span class="line">    <span class="keyword">if</span> ((now-startTime) &gt; <span class="number">50</span>) &#123;</span><br><span class="line">        <span class="comment">// If we are taking more than 50ms, log about it.</span></span><br><span class="line">        Slog.w(TAG, <span class="string">&quot;Slow operation: &quot;</span> + (now-startTime) + <span class="string">&quot;ms so far, now at &quot;</span> + where);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>对应的 Log 如下，如果系统中频繁打印这种 Log，说明系统目前处于一个比较卡的状态，分析的时候就得考虑到系统的因素</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">ActivityManager: Slow operation: 138ms so far, now at startProcess: done updating battery stats</span><br><span class="line">ActivityManager: Slow operation: 138ms so far, now at startProcess: building log message</span><br><span class="line">ActivityManager: Slow operation: 138ms so far, now at startProcess: starting to update pids map</span><br></pre></td></tr></table></figure>
+
+<h2 id="Looper-Slow-dispatch"><a href="#Looper-Slow-dispatch" class="headerlink" title="Looper : Slow dispatch"></a>Looper : Slow dispatch</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">Looper  : Slow dispatch took 418ms main h=android.app.ActivityThread$H c=android.app.-$$Lambda$LoadedApk$ReceiverDispatcher$Args$_BumDX2UKsnxLVrE6UJsJZkotuA<span class="meta">@e68bdc4</span> m=<span class="number">0</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="Looper-Slow-delivery"><a href="#Looper-Slow-delivery" class="headerlink" title="Looper : Slow delivery"></a>Looper : Slow delivery</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">Looper  : Slow delivery took 361ms android.ui h=com.android.server.am.ActivityManagerService$UiHandler c=<span class="literal">null</span> m=<span class="number">53</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="Looper：Slow-Looper"><a href="#Looper：Slow-Looper" class="headerlink" title="Looper：Slow Looper"></a>Looper：Slow Looper</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">W/Looper: Slow Looper main: Activity com.androidperformance.memoryfix/.MainActivity is 439ms <span class="title function_">late</span> <span class="params">(wall=0ms running=0ms ClientTransaction&#123; callbacks=[android.app.servertransaction.TopResumedActivityChangeItem] &#125;)</span> because of <span class="number">3</span> msg, msg <span class="number">2</span> took 268ms (seq=<span class="number">2</span> running=207ms runnable=15ms late=1ms h=android.app.ActivityThread$H w=<span class="number">110</span>), msg <span class="number">3</span> took 171ms (seq=<span class="number">3</span> running=140ms runnable=5ms io=1ms late=268ms h=android.app.ActivityThread$H w=<span class="number">159</span>)</span><br></pre></td></tr></table></figure>
+
+<h2 id="onTrimMemory"><a href="#onTrimMemory" class="headerlink" title="onTrimMemory"></a>onTrimMemory</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">ClockTag AlarmClockApplication: onTrimMemory: <span class="number">80</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="dvm-lock-sample"><a href="#dvm-lock-sample" class="headerlink" title="dvm_lock_sample"></a>dvm_lock_sample</h2><p>当某个线程等待 lock 的时间 blocked 超过阈值（比如：500ms）,则输出当前的持锁状态.</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">dvm_lock_sample：[system_server,<span class="number">1</span>,Binder_9,<span class="number">1500</span>,ActivityManagerService.java,<span class="number">6403</span>,-,<span class="number">1448</span>,<span class="number">0</span>]</span><br></pre></td></tr></table></figure>
+
+<ol>
+<li>system_server: Binder_9 执行到 ActivityManagerService.java 的 6403 行代码,一直在等待 AMS 锁</li>
+<li>“-“代表持锁的是同一个文件，即该锁被同一文件的 1448 行代码所持有, 从而导致 Binder_9 线程被阻塞 1500ms.</li>
+</ol>
+<h2 id="binder-sample"><a href="#binder-sample" class="headerlink" title="binder_sample"></a>binder_sample</h2><p>binder_sample： 监控每个进程的主线程的 binder transaction 的耗时情况, 当超过阈值（比如：500ms）时,则输出相应的目标调用信息.</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="number">6628</span>  <span class="number">6628</span> I binder_sample: [android.view.accessibility.IAccessibilityManager,<span class="number">6</span>,<span class="number">2010</span>,com.xxx.community,<span class="number">100</span>]</span><br></pre></td></tr></table></figure>
+
+<ol>
+<li>进程是 6628，主线程 6628</li>
+<li>执行 android.view.accessibility.IAccessibilityManager 接口</li>
+<li>所对应方法 code &#x3D; 6 ( 即 TRANSACTION_addAccessibilityInteractionConnection ）</li>
+<li>所花费时间为 2010 ms</li>
+<li>该 block 所在 package 为 com.xxx.community</li>
+<li>最后一个参数是 sample 比例</li>
+</ol>
+<p>查找对应的接口函数，比如上面例子里面 IAccessibilityManager 中 Code &#x3D; 6 是对应的哪个函数，可以在 cs.android.com 里面 搜索 FIRST_CALL_TRANSACTION ,点击调用，然后查看 out 目录里面的对应的 IAccessibilityManager 文件（一直往下滑，直到可以搜索到 IAccessibilityManager ）</p>
+<p><img src="/../images/Android-ANR-02-How-to-analysis-ANR/53e8ee44-b1f7-4729-83e8-4ccb4f784a6a.png"></p>
+<p>其中对应的 static final int TRANSACTION_addAccessibilityInteractionConnection &#x3D; (android.os.IBinder.FIRST_CALL_TRANSACTION + 5)</p>
+<h2 id="Long-monitor-contention"><a href="#Long-monitor-contention" class="headerlink" title="Long monitor contention"></a>Long monitor contention</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="number">16809</span> <span class="number">14216</span> W system_server: Long monitor contention with owner <span class="title function_">InputDispatcher</span> <span class="params">(<span class="number">17039</span>)</span> at android.content.res.Configuration com.android.server.wm.ActivityTaskManagerService.getGlobalConfigurationForPid(<span class="type">int</span>)(ActivityTaskManagerService.java:<span class="number">1066</span>) waiters=<span class="number">0</span> in <span class="type">boolean</span> com.android.server.wm.WindowProcessController.hasActivities() <span class="keyword">for</span> 141ms</span><br></pre></td></tr></table></figure>
+
+<p>art&#x2F;runtime&#x2F;monitor.cc</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br></pre></td><td class="code"><pre><span class="line">std::string Monitor::PrettyContentionInfo(const std::string&amp; owner_name,</span><br><span class="line">                                          pid_t owner_tid,</span><br><span class="line">                                          ArtMethod* owners_method,</span><br><span class="line">                                          uint32_t owners_dex_pc,</span><br><span class="line">                                          size_t num_waiters) &#123;</span><br><span class="line">  Locks::mutator_lock_-&gt;AssertSharedHeld(Thread::Current());</span><br><span class="line">  const <span class="type">char</span>* owners_filename;</span><br><span class="line">  <span class="type">int32_t</span> <span class="variable">owners_line_number</span> <span class="operator">=</span> <span class="number">0</span>;</span><br><span class="line">  <span class="keyword">if</span> (owners_method != nullptr) &#123;</span><br><span class="line">    TranslateLocation(owners_method, owners_dex_pc, &amp;owners_filename, &amp;owners_line_number);</span><br><span class="line">  &#125;</span><br><span class="line">  std::ostringstream oss;</span><br><span class="line">  oss &lt;&lt; <span class="string">&quot;monitor contention with owner &quot;</span> &lt;&lt; owner_name &lt;&lt; <span class="string">&quot; (&quot;</span> &lt;&lt; owner_tid &lt;&lt; <span class="string">&quot;)&quot;</span>;</span><br><span class="line">  <span class="keyword">if</span> (owners_method != nullptr) &#123;</span><br><span class="line">    oss &lt;&lt; <span class="string">&quot; at &quot;</span> &lt;&lt; owners_method-&gt;PrettyMethod();</span><br><span class="line">    oss &lt;&lt; <span class="string">&quot;(&quot;</span> &lt;&lt; owners_filename &lt;&lt; <span class="string">&quot;:&quot;</span> &lt;&lt; owners_line_number &lt;&lt; <span class="string">&quot;)&quot;</span>;</span><br><span class="line">  &#125;</span><br><span class="line">  oss &lt;&lt; <span class="string">&quot; waiters=&quot;</span> &lt;&lt; num_waiters;</span><br><span class="line">  <span class="keyword">return</span> oss.str();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h2 id="Binder-Thread"><a href="#Binder-Thread" class="headerlink" title="Binder Thread"></a>Binder Thread</h2><p>当 system_server 等进程的线程池使用完, 无空闲线程时, 则 binder 通信都处于饥饿状态, 则饥饿状态超过一定阈值则输出信息.</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">E IPCThreadState: binder thread <span class="title function_">pool</span> <span class="params">(<span class="number">31</span> threads)</span> starved <span class="keyword">for</span> <span class="number">120</span> ms</span><br></pre></td></tr></table></figure>
+
+<h2 id="am-kill"><a href="#am-kill" class="headerlink" title="am_kill"></a>am_kill</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">am_kill : [<span class="number">0</span>,<span class="number">18555</span>,com.sina.weibo.image,<span class="number">945</span>,remove task]<span class="number">1</span></span><br></pre></td></tr></table></figure>
+
+<p>上面这句话里面，remove task 指的是这个应用被杀的原因</p>
+<p>下面是各种被杀的情况所对应的 Reason，有时候我们需要看应用被杀的原因，来判断系统是否正常或者用户的操作步骤：</p>
+<h3 id="force-stop"><a href="#force-stop" class="headerlink" title="force-stop"></a>force-stop</h3><p><img src="/../images/Android-ANR-02-How-to-analysis-ANR/7cfb4102-f137-426b-84f0-a6a06c58fd47.png"></p>
+<h3 id="异常杀进程"><a href="#异常杀进程" class="headerlink" title="异常杀进程"></a>异常杀进程</h3><p><img src="/../images/Android-ANR-02-How-to-analysis-ANR/e8f54015-0bf1-494c-8262-9a56e797d04d.png"></p>
+<h3 id="主动杀进程"><a href="#主动杀进程" class="headerlink" title="主动杀进程"></a>主动杀进程</h3><p><img src="/../images/Android-ANR-02-How-to-analysis-ANR/8d7d8da3-0171-4be5-921c-79eb33e276d7.png"></p>
+<h3 id="调度杀进程"><a href="#调度杀进程" class="headerlink" title="调度杀进程"></a>调度杀进程</h3><p><img src="/../images/Android-ANR-02-How-to-analysis-ANR/4e5b3f4e-4668-4d92-bb7f-83b90fd0de18.png"></p>
+<h3 id="其他杀进程"><a href="#其他杀进程" class="headerlink" title="其他杀进程"></a>其他杀进程</h3><p><img src="/../images/Android-ANR-02-How-to-analysis-ANR/933942df-43e8-4b74-8e12-768198a17667.png"></p>
+<p>以上介绍的所有杀进程都是调用 ProcessRecord.kill()方法, 必然会输出相应的 EventLog.那么还有哪些场景的杀进程不会输出 log 呢:</p>
+<ol>
+<li>Process.killProcess(int pid) &#x2F;&#x2F;可杀任何指定进程,或者直接发 signal</li>
+<li>adb shell kill -9 pid &#x2F;&#x2F;可杀任何指定的进程</li>
+<li>直接 lmk 杀进程</li>
+</ol>
+<p>也就是说进程被杀而无 log 输出,那么可能是通过直接调用 kill 或者发信号, 再或许是 lmk 所杀.</p>
+<h2 id="am-proc-died"><a href="#am-proc-died" class="headerlink" title="am_proc_died"></a>am_proc_died</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">am_proc_died: [<span class="number">0</span>,<span class="number">13210</span>,com.xxx.gallery3d,<span class="number">935</span>,<span class="number">19</span>]</span><br></pre></td></tr></table></figure>
+
+<h2 id="am-anr"><a href="#am-anr" class="headerlink" title="am_anr"></a>am_anr</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">am_anr : [<span class="number">0</span>,<span class="number">8769</span>,com.android.updater,<span class="number">952680005</span>,Broadcast of Intent &#123; act=android.intent.action.BOOT_COMPLETED flg=<span class="number">0x9000010</span> cmp=com.android.updater/.BootCompletedReceiver (has extras) &#125;]</span><br></pre></td></tr></table></figure>
+
+<ol>
+<li>进程 pid：8769</li>
+<li>进程名：com.android.updater</li>
+<li>发生 ANR 的类型是：BroadcastTimeout 的具体类或者原因：{ act&#x3D;android.intent.action.BOOT_COMPLETED flg&#x3D;0x9000010 cmp&#x3D;com.android.updater&#x2F;.BootCompletedReceiver (has extras) }</li>
+</ol>
+<h2 id="Lowmemorykiller"><a href="#Lowmemorykiller" class="headerlink" title="Lowmemorykiller"></a>Lowmemorykiller</h2><p>lowmemorykiller 的 log 在 kernel log 中</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">lowmemorykiller: Kill <span class="string">&#x27;com.heytap.themestore&#x27;</span> (<span class="number">15545</span>), uid <span class="number">10136</span>, oom_adj <span class="number">995</span> to free 105068kB</span><br><span class="line">lowmemorykiller: Reclaimed 105068kB at oom_adj <span class="number">606</span></span><br></pre></td></tr></table></figure>
+
+<p>通过 lowmemorykiller 机制杀应用：</p>
+<ol>
+<li>com.heytap.themestore 进程名</li>
+<li>15545：PID</li>
+<li>10136：UID</li>
+<li>995：oom_adj</li>
+<li>105068kB： 释放的内存</li>
+<li>606:min_adj</li>
+</ol>
+<h2 id="Blocked-msg"><a href="#Blocked-msg" class="headerlink" title="Blocked msg"></a>Blocked msg</h2><p>内部 加的 Log，当 Message 执行时间超过 1.5s 的时候，就会打印下面的 Log，从下面的 Log 可以看到：</p>
+<ol>
+<li>执行超时的 Message，和这个 Message 执行耗时</li>
+<li>被这个 Message 阻塞的 Message</li>
+</ol>
+<p>可以从这个 Log 里面观察是自己的 Message 执行阻塞了别的 Message 还是自己的 Message 被其他的 Message 阻塞</p>
+<figure class="highlight roboconf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line">E ANR_LOG : &gt;&gt;&gt; msg&#x27;s executing time is too long</span><br><span class="line">E ANR_LOG : Blocked msg = &#123; <span class="attribute">when=-32s683ms what=110 target=android.app.ActivityThread$H obj=AppBindData&#123;appInfo=ApplicationInfo&#123;bd8d51e com.android.contacts&#125;&#125; &#125; , cost  = 32436 ms</span></span><br><span class="line"><span class="attribute">E ANR_LOG</span> : &gt;&gt;&gt;Current msg List is:</span><br><span class="line">E ANR_LOG : Current msg &lt;1&gt;  = &#123; when=-32s672ms what=140 target=android<span class="variable">.app</span><span class="variable">.ActivityThread</span>$H arg1=5 &#125;</span><br><span class="line">E ANR_LOG : Current msg &lt;2&gt;  = &#123; when=-32s671ms what=114 target=android<span class="variable">.app</span><span class="variable">.ActivityThread</span>$H obj=CreateServiceData&#123;token=android<span class="variable">.os</span><span class="variable">.BinderProxy</span>@f7611ff className=com<span class="variable">.android</span><span class="variable">.contacts</span><span class="variable">.xxxAppServicesManagerClient</span> packageName=com<span class="variable">.android</span><span class="variable">.contacts</span> intent=null&#125; &#125;</span><br><span class="line">E ANR_LOG : Current msg &lt;3&gt;  = &#123; when=-32s671ms what=121 target=android<span class="variable">.app</span><span class="variable">.ActivityThread</span>$H obj=BindServiceData&#123;token=android<span class="variable">.os</span><span class="variable">.BinderProxy</span>@f7611ff intent=Intent &#123; cmp=com<span class="variable">.android</span><span class="variable">.contacts</span>/<span class="variable">.xxxAppServicesManagerClient</span> &#125;&#125; &#125;</span><br><span class="line">E ANR_LOG : Current msg &lt;4&gt;  = &#123; when=-31s658ms what=1 target=android<span class="variable">.os</span><span class="variable">.AsyncTask</span>$InternalHandler obj=android<span class="variable">.os</span><span class="variable">.AsyncTask</span>$AsyncTaskResult@75e517c &#125;</span><br><span class="line">E ANR_LOG : Current msg &lt;5&gt;  = &#123; when=-29s750ms what=140 target=android<span class="variable">.app</span><span class="variable">.ActivityThread</span>$H arg1=10 &#125;</span><br><span class="line">E ANR_LOG : Current msg &lt;6&gt;  = &#123; when=-29s103ms what=118 target=android<span class="variable">.app</span><span class="variable">.ActivityThread</span>$H obj=&#123;1.0 460mcc3mnc [zh_CN] ldltr sw360dp w360dp h622dp 480dpi nrml long port finger -keyb/v/h -nav/h appBounds=Rect(0, 0 - 1080, 1920) s.10mThemeChanged = 0mThemeChangedFlags = 0mFlipFont = 0&#125;</span><br><span class="line">E ANR_LOG : Current msg &lt;7&gt;  = &#123; when=-28s370ms what=118 target=android<span class="variable">.app</span><span class="variable">.ActivityThread</span>$H obj=&#123;1.0 460mcc11mnc [zh_CN] ldltr sw360dp w360dp h622dp 480dpi nrml long port finger -keyb/v/h -nav/h appBounds=Rect(0, 0 - 1080, 1920) s.11mThemeChanged = 0mThemeChangedFlags = 0mFlipFont = 0&#125; &#125;</span><br><span class="line">E ANR_LOG : Current msg &lt;8&gt;  = &#123; when=-27s821ms what=122 target=android<span class="variable">.app</span><span class="variable">.ActivityThread</span>$H obj=BindServiceData&#123;token=android<span class="variable">.os</span><span class="variable">.BinderProxy</span>@f7611ff intent=Intent &#123; cmp=com<span class="variable">.android</span><span class="variable">.contacts</span>/<span class="variable">.xxxAppServicesManagerClient</span> &#125;&#125; &#125;</span><br><span class="line">E ANR_LOG : Current msg &lt;9&gt;  = &#123; when=-27s821ms what=116 target=android<span class="variable">.app</span><span class="variable">.ActivityThread</span>$H obj=android<span class="variable">.os</span><span class="variable">.BinderProxy</span>@f7611ff &#125;</span><br><span class="line">E ANR_LOG : Current msg &lt;10&gt;  = &#123; when=-27s654ms what=114 target=android<span class="variable">.app</span><span class="variable">.ActivityThread</span>$H obj=CreateServiceData&#123;token=android<span class="variable">.os</span><span class="variable">.BinderProxy</span>@e23cf1b className=com<span class="variable">.android</span><span class="variable">.contacts</span><span class="variable">.xxxAppServicesManagerClient</span> packageName=com<span class="variable">.android</span><span class="variable">.contacts</span> intent=null&#125; &#125;</span><br><span class="line">E ANR_LOG : &gt;&gt;&gt;CURRENT MSG DUMP OVER&lt;&lt;&lt;</span><br></pre></td></tr></table></figure>
+
+<h1 id="通用场景-Log-介绍"><a href="#通用场景-Log-介绍" class="headerlink" title="通用场景 Log 介绍"></a>通用场景 Log 介绍</h1><h2 id="灭屏-Log"><a href="#灭屏-Log" class="headerlink" title="灭屏 Log"></a>灭屏 Log</h2><p>关键是 power_screen_broadcast_done、screen_toggled 和 power_screen_state</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="number">1810</span>  <span class="number">2470</span> I intercept_power: [ACTION_DOWN,<span class="number">1</span>,<span class="number">0</span>]</span><br><span class="line"><span class="number">1810</span>  <span class="number">2470</span> I intercept_power: [ACTION_UP,<span class="number">0</span>,<span class="number">0</span>]</span><br><span class="line"><span class="number">1810</span>  <span class="number">2470</span> I power_sleep_requested: <span class="number">0</span></span><br><span class="line"></span><br><span class="line"><span class="number">1810</span>  <span class="number">1810</span> I power_screen_state: [<span class="number">0</span>,<span class="number">2</span>,<span class="number">0</span>,<span class="number">0</span>,<span class="number">1254</span>]</span><br><span class="line"><span class="number">1810</span>  <span class="number">1810</span> I screen_toggled: <span class="number">0</span> <span class="comment">// 0 代表灭屏，1 代表亮屏</span></span><br><span class="line"><span class="number">1810</span>  <span class="number">1810</span> I power_screen_broadcast_send: <span class="number">1</span></span><br><span class="line"><span class="number">1810</span>  <span class="number">1825</span> I wm_set_keyguard_shown: [<span class="number">1</span>,<span class="number">0</span>,<span class="number">0</span>,setKeyguardShown] <span class="comment">// (keyguardShowing|1),(aodShowing|1),(keyguardGoingAway|1),(Reason|3)</span></span><br><span class="line"></span><br><span class="line"><span class="number">2768</span>  <span class="number">2768</span> I sysui_status_bar_state: [<span class="number">1</span>,<span class="number">1</span>,<span class="number">0</span>,<span class="number">0</span>,<span class="number">0</span>,<span class="number">1</span>]</span><br><span class="line"></span><br><span class="line"><span class="number">1810</span>  <span class="number">1810</span> I power_screen_broadcast_done: [<span class="number">0</span>,<span class="number">611</span>,<span class="number">1</span>] <span class="comment">// 0 代表灭屏，611 是灭屏时间</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="亮屏-Log"><a href="#亮屏-Log" class="headerlink" title="亮屏 Log"></a>亮屏 Log</h2><p>关键是 power_screen_broadcast_done、screen_toggled 和 power_screen_state</p>
+<p>其中<br>power_screen_state</p>
+<ol>
+<li>1.offOrOn|1|5</li>
+<li>2.becauseOfUser|1|5</li>
+<li>3.totalTouchDownTime|2|3</li>
+<li>4.touchCycles|1|1</li>
+<li>5.latency|1|3</li>
+</ol>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="number">1810</span>  <span class="number">2470</span> I intercept_power: [ACTION_DOWN,<span class="number">1</span>,<span class="number">0</span>]</span><br><span class="line"><span class="number">1810</span>  <span class="number">2470</span> I intercept_power: [ACTION_UP,<span class="number">1</span>,<span class="number">0</span>]</span><br><span class="line"><span class="number">1810</span>  <span class="number">1810</span> I screen_toggled: <span class="number">1</span> <span class="comment">// 1 代表亮屏</span></span><br><span class="line"><span class="number">1810</span>  <span class="number">1810</span> I power_screen_broadcast_send: <span class="number">1</span></span><br><span class="line"><span class="number">1810</span>  <span class="number">1810</span> I power_screen_state: [<span class="number">1</span>,<span class="number">0</span>,<span class="number">0</span>,<span class="number">0</span>,<span class="number">319</span>]</span><br><span class="line"><span class="number">1810</span>  <span class="number">1810</span> I power_screen_broadcast_done: [<span class="number">1</span>,<span class="number">633</span>,<span class="number">1</span>] <span class="comment">// 1 代表亮屏，633 是亮屏时间</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="解锁完整-Log"><a href="#解锁完整-Log" class="headerlink" title="解锁完整 Log"></a>解锁完整 Log</h2><p>wm_set_keyguard_shown 的值</p>
+<ol>
+<li>(keyguardShowing|1) ：Keyguard 是否在显示</li>
+<li>(aodShowing|1) ：aodShowing 是否在显示</li>
+<li>(keyguardGoingAway|1) ：Keyguard 消失</li>
+<li>(Reason|3) ：原因</li>
+</ol>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"> <span class="number">1810</span>  <span class="number">5711</span> I wm_set_keyguard_shown: [<span class="number">1</span>,<span class="number">0</span>,<span class="number">1</span>,keyguardGoingAway]</span><br><span class="line"><span class="comment">// 桌面 Resume</span></span><br><span class="line"> <span class="number">1810</span>  <span class="number">5711</span> I wm_set_resumed_activity: [<span class="number">0</span>,com.xxx.launcher/.Launcher,resumeTopActivityInnerLocked]</span><br><span class="line"> <span class="number">1810</span>  <span class="number">5711</span> I wm_resume_activity: [<span class="number">0</span>,<span class="number">93093883</span>,<span class="number">63</span>,com.xxx.launcher/.Launcher]</span><br><span class="line"><span class="number">20615</span> <span class="number">20615</span> I wm_on_restart_called: [<span class="number">93093883</span>,com.xxx.launcher.Launcher,performRestartActivity]</span><br><span class="line"><span class="number">20615</span> <span class="number">20615</span> I wm_on_start_called: [<span class="number">93093883</span>,com.xxx.launcher.Launcher,handleStartActivity]</span><br><span class="line"><span class="number">20615</span> <span class="number">20615</span> I wm_on_resume_called: [<span class="number">93093883</span>,com.xxx.launcher.Launcher,RESUME_ACTIVITY]</span><br><span class="line"><span class="number">20615</span> <span class="number">20615</span> I wm_on_top_resumed_gained_called: [<span class="number">93093883</span>,com.xxx.launcher.Launcher,topWhenResuming]</span><br><span class="line"></span><br><span class="line"> <span class="number">1810</span>  <span class="number">5711</span> I wm_set_keyguard_shown: [<span class="number">0</span>,<span class="number">0</span>,<span class="number">1</span>,setKeyguardShown] <span class="comment">// keyguard 不显示，aod 不显示，keyguardGoingAway，原因是调用了 setKeyguardShown 显示桌面</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="通知栏下拉完整-Log"><a href="#通知栏下拉完整-Log" class="headerlink" title="通知栏下拉完整 Log"></a>通知栏下拉完整 Log</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="number">2768</span>  <span class="number">2768</span> I sysui_multi_action: [<span class="number">757</span>,<span class="number">803</span>,<span class="number">799</span>,panel_open,<span class="number">802</span>,<span class="number">1</span>]</span><br><span class="line"><span class="number">2768</span>  <span class="number">2768</span> I sysui_multi_action: [<span class="number">757</span>,<span class="number">1328</span>,<span class="number">758</span>,<span class="number">4</span>,<span class="number">1326</span>,<span class="number">29</span>,<span class="number">1327</span>,<span class="number">0</span>,<span class="number">1329</span>,<span class="number">0</span>]</span><br><span class="line"><span class="number">1810</span>  <span class="number">3004</span> I notification_visibility: [-<span class="number">1</span>|android|<span class="number">55</span>|<span class="literal">null</span>|<span class="number">1000</span>,<span class="number">1</span>,<span class="number">457483196</span>,<span class="number">457483196</span>,<span class="number">0</span>,<span class="number">4</span>]</span><br><span class="line"><span class="number">1810</span>  <span class="number">3004</span> I notification_visibility: [<span class="number">0</span>|com.android.systemui|<span class="number">10005</span>|<span class="literal">null</span>|<span class="number">10132</span>,<span class="number">1</span>,<span class="number">97168545</span>,<span class="number">97168545</span>,<span class="number">0</span>,<span class="number">2</span>]</span><br><span class="line"><span class="number">1810</span>  <span class="number">3004</span> I notification_visibility: [<span class="number">0</span>|com.android.systemui|<span class="number">2147483647</span>|ranker_group|<span class="number">10132</span>|ranker_group,<span class="number">1</span>,<span class="number">97168236</span>,<span class="number">97168236</span>,<span class="number">0</span>,<span class="number">1</span>]</span><br><span class="line"><span class="number">1810</span>  <span class="number">3004</span> I notification_visibility: [-<span class="number">1</span>|com.android.systemui|<span class="number">10006</span>|<span class="literal">null</span>|<span class="number">10132</span>,<span class="number">1</span>,<span class="number">82586063</span>,<span class="number">82586063</span>,<span class="number">0</span>,<span class="number">0</span>]</span><br></pre></td></tr></table></figure>
+
+<h2 id="通知栏折叠完整-Log"><a href="#通知栏折叠完整-Log" class="headerlink" title="通知栏折叠完整 Log"></a>通知栏折叠完整 Log</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="number">2768</span>  <span class="number">2768</span> I sysui_multi_action: [<span class="number">757</span>,<span class="number">111</span>,<span class="number">758</span>,<span class="number">2</span>]</span><br><span class="line"><span class="number">1810</span>  <span class="number">5473</span> I notification_visibility: [-<span class="number">1</span>|android|<span class="number">55</span>|<span class="literal">null</span>|<span class="number">1000</span>,<span class="number">0</span>,<span class="number">457546516</span>,<span class="number">457546516</span>,<span class="number">0</span>,<span class="number">4</span>]</span><br><span class="line"><span class="number">1810</span>  <span class="number">5473</span> I notification_visibility: [<span class="number">0</span>|com.android.systemui|<span class="number">10005</span>|<span class="literal">null</span>|<span class="number">10132</span>,<span class="number">0</span>,<span class="number">97231865</span>,<span class="number">97231865</span>,<span class="number">0</span>,<span class="number">2</span>]</span><br><span class="line"><span class="number">1810</span>  <span class="number">5473</span> I notification_visibility: [<span class="number">0</span>|com.android.systemui|<span class="number">2147483647</span>|ranker_group|<span class="number">10132</span>|ranker_group,<span class="number">0</span>,<span class="number">97231557</span>,<span class="number">97231557</span>,<span class="number">0</span>,<span class="number">1</span>]</span><br><span class="line"><span class="number">1810</span>  <span class="number">5473</span> I notification_visibility: [-<span class="number">1</span>|com.android.systemui|<span class="number">10006</span>|<span class="literal">null</span>|<span class="number">10132</span>,<span class="number">0</span>,<span class="number">82649384</span>,<span class="number">82649384</span>,<span class="number">0</span>,<span class="number">0</span>]</span><br></pre></td></tr></table></figure>
+
+<h2 id="应用启动完整-Log"><a href="#应用启动完整-Log" class="headerlink" title="应用启动完整 Log"></a>应用启动完整 Log</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 创建 Task</span></span><br><span class="line"><span class="number">1810</span>  <span class="number">5473</span> I wm_task_created: [<span class="number">100</span>,-<span class="number">1</span>]</span><br><span class="line"><span class="number">1810</span>  <span class="number">5473</span> I wm_stack_created: <span class="number">100</span></span><br><span class="line"><span class="number">1810</span>  <span class="number">5473</span> I wm_create_task: [<span class="number">0</span>,<span class="number">100</span>]</span><br><span class="line"></span><br><span class="line"><span class="comment">// 创建 Activity</span></span><br><span class="line"><span class="number">1810</span>  <span class="number">5473</span> I wm_create_activity: [<span class="number">0</span>,<span class="number">231348670</span>,<span class="number">100</span>,com.androidperformance.memoryfix/.MainActivity,android.intent.action.MAIN,NULL,NULL,<span class="number">270532608</span>]</span><br><span class="line"></span><br><span class="line"><span class="comment">// 桌面走 pause 流程</span></span><br><span class="line"><span class="number">1810</span>  <span class="number">5473</span> I wm_pause_activity: [<span class="number">0</span>,<span class="number">93093883</span>,com.xxx.launcher/.Launcher,userLeaving=<span class="literal">true</span>]</span><br><span class="line"><span class="number">0615</span> <span class="number">20615</span> I wm_on_top_resumed_lost_called: [<span class="number">93093883</span>,com.xxx.launcher.Launcher,topStateChangedWhenResumed]</span><br><span class="line"><span class="number">0615</span> <span class="number">20615</span> I wm_on_paused_called: [<span class="number">93093883</span>,com.xxx.launcher.Launcher,performPause]</span><br><span class="line"><span class="number">1810</span>  <span class="number">3720</span> I wm_add_to_stopping: [<span class="number">0</span>,<span class="number">93093883</span>,com.xxx.launcher/.Launcher,makeInvisible]</span><br><span class="line"></span><br><span class="line"><span class="comment">//启动 Activity</span></span><br><span class="line"><span class="number">1810</span>  <span class="number">2045</span> I am_proc_start: [<span class="number">0</span>,<span class="number">18803</span>,<span class="number">10263</span>,com.androidperformance.memoryfix,pre-top-activity,&#123;com.androidperformance.memoryfix/com.androidperformance.memoryfix.MainActivity&#125;]</span><br><span class="line"><span class="number">1810</span>  <span class="number">3428</span> I am_proc_bound: [<span class="number">0</span>,<span class="number">18803</span>,com.androidperformance.memoryfix]</span><br><span class="line"><span class="number">1810</span>  <span class="number">3428</span> I wm_restart_activity: [<span class="number">0</span>,<span class="number">231348670</span>,<span class="number">100</span>,com.androidperformance.memoryfix/.MainActivity]</span><br><span class="line"><span class="number">1810</span>  <span class="number">3428</span> I wm_set_resumed_activity: [<span class="number">0</span>,com.androidperformance.memoryfix/.MainActivity,minimalResumeActivityLocked]</span><br><span class="line"><span class="number">8803</span> <span class="number">18803</span> I wm_on_create_called: [<span class="number">231348670</span>,com.androidperformance.memoryfix.MainActivity,performCreate]</span><br><span class="line"><span class="number">8803</span> <span class="number">18803</span> I wm_on_start_called: [<span class="number">231348670</span>,com.androidperformance.memoryfix.MainActivity,handleStartActivity]</span><br><span class="line"><span class="number">8803</span> <span class="number">18803</span> I wm_on_resume_called: [<span class="number">231348670</span>,com.androidperformance.memoryfix.MainActivity,RESUME_ACTIVITY]</span><br><span class="line"><span class="number">8803</span> <span class="number">18803</span> I wm_on_top_resumed_gained_called: [<span class="number">231348670</span>,com.androidperformance.memoryfix.MainActivity,topStateChangedWhenResumed]</span><br><span class="line"><span class="number">1810</span>  <span class="number">2034</span> I wm_activity_launch_time: [<span class="number">0</span>,<span class="number">231348670</span>,com.androidperformance.memoryfix/.MainActivity,<span class="number">471</span>]</span><br><span class="line"></span><br><span class="line"><span class="comment">// 桌面走 stop 流程</span></span><br><span class="line"><span class="number">1810</span>  <span class="number">1978</span> I wm_stop_activity: [<span class="number">0</span>,<span class="number">93093883</span>,com.xxx.launcher/.Launcher]</span><br><span class="line"><span class="number">0615</span> <span class="number">20615</span> I wm_on_stop_called: [<span class="number">93093883</span>,com.xxx.launcher.Launcher,STOP_ACTIVITY_ITEM]</span><br></pre></td></tr></table></figure>
+
+<h2 id="Window-Focus-相关的流程"><a href="#Window-Focus-相关的流程" class="headerlink" title="Window Focus 相关的流程"></a>Window Focus 相关的流程</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 从桌面启动 App，focus 变化 ：Launcher =&gt; null =&gt; App</span></span><br><span class="line">WindowManager: Changing focus from Window&#123;b0416d7 u0 com.xxx.launcher/com.xxx.launcher.Launcher&#125; to <span class="literal">null</span>,diplayid=<span class="number">0</span></span><br><span class="line">WindowManager: Changing focus from <span class="literal">null</span> to Window&#123;10f5145 u0 com.android.settings/com.android.settings.Settings&#125;,diplayid=<span class="number">0</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// 从 App 返回桌面，focus 变化 ：App =&gt; null =&gt; Launcher</span></span><br><span class="line">WindowManager: Changing focus from Window&#123;10f5145 u0 com.android.settings/com.android.settings.Settings&#125; to <span class="literal">null</span>,diplayid=<span class="number">0</span></span><br><span class="line">WindowManager: Changing focus from <span class="literal">null</span> to Window&#123;b0416d7 u0 com.xxx.launcher/com.xxx.launcher.Launcher&#125;,diplayid=<span class="number">0</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// 从 App 界面进入锁屏：focus 变化 ：App =&gt; null =&gt; 锁屏</span></span><br><span class="line">WindowManager: Changing focus from Window&#123;10f5145 u0 com.android.settings/com.android.settings.Settings&#125; to <span class="literal">null</span>,diplayid=<span class="number">0</span></span><br><span class="line">WindowManager: Changing focus from <span class="literal">null</span> to Window&#123;82e5f30 u0 NotificationShade&#125;,diplayid=<span class="number">0</span></span><br><span class="line"></span><br><span class="line"><span class="comment">// 从锁屏界面解锁进入 App，focus 变化 ：锁屏 =&gt; App</span></span><br><span class="line">WindowManager: Changing focus from Window&#123;82e5f30 u0 NotificationShade&#125; to Window&#123;10f5145 u0 com.android.settings/com.android.settings.Settings&#125;,diplayid=<span class="number">0</span></span><br></pre></td></tr></table></figure>
+
+<h1 id="ANR-相关资料分享"><a href="#ANR-相关资料分享" class="headerlink" title="ANR 相关资料分享"></a>ANR 相关资料分享</h1><ol>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s?__biz=MzI1MzYzMjE0MQ==&mid=2247487203&idx=1&sn=182584b69910c843ae95f60e74127249&chksm=e9d0c501dea74c178e16f95a2ffc5007c5dbca89a02d56895ed9b05883cf0562da689ac6146b&token=2044639920&lang=zh_CN&scene=21#wechat_redirect">西瓜视频稳定性治理体系建设一：Tailor 原理及实践</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s/RF3m9_v5bYTYbwY-d1RloQ">西瓜视频稳定性治理体系建设二：Raphael 原理及实践</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s?__biz=MzI1MzYzMjE0MQ==&mid=2247489902&idx=1&sn=bfdf9f48dc6dc973722b5dcab9cd5882&chksm=e9d0d28cdea75b9ad255eb5de227240d2e6f0e9d66e562d3f49cf69f8ed4127c9954ef21bb6d&scene=178&cur_album_id=1833937688379310087#rd">西瓜视频稳定性治理体系建设三：Sliver 原理及实践</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s?__biz=MzI1MzYzMjE0MQ==&mid=2247489949&idx=1&sn=01948c047c0ce203956a3cf81dd20e83&chksm=e9d0d27fdea75b697e70a665b4c6912a8081649700766cf007a7b75d420a57089fe06d2e85b0&scene=178&cur_album_id=1833937688379310087#rd">西瓜卡顿 &amp; ANR 优化治理及监控体系建设</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s?__biz=MzI1MzYzMjE0MQ==&mid=2247488116&idx=1&sn=fdf80fa52c57a3360ad1999da2a9656b&chksm=e9d0d996dea750807aadc62d7ed442948ad197607afb9409dd5a296b16fb3d5243f9224b5763&scene=178&cur_album_id=1780091311874686979#rd">今日头条 ANR 优化实践系列 - 设计原理及影响因素</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s?__biz=MzI1MzYzMjE0MQ==&mid=2247488182&idx=1&sn=6337f1b51d487057b162064c3e24c439&chksm=e9d0d954dea75042193ed09f30eb8ba0acd93870227c5d33b33361b739a03562afb685df9215&scene=178&cur_album_id=1780091311874686979#rd">今日头条 ANR 优化实践系列 - 监控工具与分析思路</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s?__biz=MzI1MzYzMjE0MQ==&mid=2247488243&idx=1&sn=1f948e0ef616c6dfe54513a2a94357be&chksm=e9d0d911dea75007f36b3701b51842b9fa40969fe8175c2cb4aecf96793504602c574945d636&scene=178&cur_album_id=1780091311874686979#rd">今日头条 ANR 优化实践系列分享 - 实例剖析集锦</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s?__biz=MzI1MzYzMjE0MQ==&mid=2247488314&idx=1&sn=559e52288ae2730a580fcd550f22d895&chksm=e9d0d8d8dea751ceecb715d472796f0c678a9358abf91eb279cdb0576329595e87531e221438&scene=178&cur_album_id=1780091311874686979#rd">今日头条 ANR 优化实践系列 - Barrier 导致主线程假死</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s?__biz=MzI1MzYzMjE0MQ==&mid=2247488558&idx=1&sn=27dda3c3630116d37ab56a8c7bdf1382&chksm=e9d0dfccdea756daed46b340fb8021b57ea8cc300e58bdb59f0305f8290704984308a089bf2d&scene=178&cur_album_id=1780091311874686979#rd">今日头条 ANR 优化实践系列 - 告别 SharedPreference 等待</a></li>
+<li><a target="_blank" rel="noopener" href="https://mp.weixin.qq.com/s/40T6ITvJNWR8F42530k4DA">Android ANR|原理解析及常见案例</a></li>
+</ol>
+<h1 id="参考资料"><a href="#参考资料" class="headerlink" title="参考资料"></a>参考资料</h1><ol>
+<li><a target="_blank" rel="noopener" href="https://duanqz.github.io/2015-10-12-ANR-Analysis#1-%E6%A6%82%E8%A7%88">https://duanqz.github.io/2015-10-12-ANR-Analysis#1-%E6%A6%82%E8%A7%88</a></li>
+<li><a target="_blank" rel="noopener" href="https://duanqz.github.io/2015-10-12-ANR-Analysis">https://duanqz.github.io/2015-10-12-ANR-Analysis</a></li>
+<li><a target="_blank" rel="noopener" href="http://gityuan.com/2016/12/02/app-not-response/">http://gityuan.com/2016/12/02/app-not-response/</a></li>
+<li><a target="_blank" rel="noopener" href="http://gityuan.com/2017/01/01/input-anr/">http://gityuan.com/2017/01/01/input-anr/</a></li>
+<li><a target="_blank" rel="noopener" href="https://xiaozhuanlan.com/topic/5097486132">https://xiaozhuanlan.com/topic/5097486132</a></li>
+</ol>
+<h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p>
+<ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li>
+<li><a href="https://androidperformance.com/2019/12/01/BlogMap/">本博客内容导航</a> ：个人博客内容的一个导航。</li>
+<li><a href="https://androidperformance.com/2018/05/07/Android-performance-optimization-skills-and-tools/">个人整理和搜集的优秀博客文章 - Android 性能优化必知必会</a> ：欢迎大家自荐和推荐 （微信私聊即可）</li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a> ： 欢迎加入，多谢支持～</li>
+</ol>
+<blockquote>
+<p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p>
+</blockquote>
+
+    </article>
+    <!-- license -->
+        <div class="license-wrapper">
+            <p>Author：<a href="https://androidperformance.com">Gracker</a>
+            <p>Link：<a href="https://androidperformance.com/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">https://androidperformance.com/2025/02/08/Android-ANR-02-How-to-analysis-ANR/</a>
+            <p>Publish date：<a href="https://androidperformance.com/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">February 8th 2025, 4:29:09 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">January 11th 2026, 1:36:33 pm</a>
+            <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
+        </div>
+    <!-- paginator -->
+    <ul class="post-paginator">
+        <li class="next">
+                <div class="nextSlogan">Next Post</div>
+                <a href="/2025/02/08/Android-ANR-03-ANR-Case-Share/" title="Android ANR 系列 3 ：ANR 案例分享">
+                    <div class="nextTitle">Android ANR 系列 3 ：ANR 案例分享</div>
+                </a>
+        </li>
+        <li class="previous">
+                <div class="prevSlogan">Previous Post</div>
+                <a href="/2025/02/08/Android-ANR-01-ANR-Design/" title="Android ANR 系列 1 ：理解 Android ANR 设计思想">
+                    <div class="prevTitle">Android ANR 系列 1 ：理解 Android ANR 设计思想</div>
+                </a>
+        </li>
+    </ul>
+    <!-- comment -->
+        <div class="post-comment">
+            <!-- 来必力 City 版安装代码 -->
+
+            
+            
+            
+            <!-- utteranc评论 -->
+
+            <!-- partial('_partial/comment/changyan') -->
+            <!--PC版-->
+
+            
+            
+            
+        </div>
+    <!-- timeliness note -->
+    <!-- idea from: https://hexo.fluid-dev.com/posts/hexo-injector/#%E6%96%87%E7%AB%A0%E6%97%B6%E6%95%88%E6%80%A7%E6%8F%90%E7%A4%BA -->
+    <!-- Mathjax -->
+</main>
+
+                <!-- profile -->
+            </div>
+            <footer class="footer footer-unloaded">
+    <!-- social  -->
+        <div class="social">
+                            <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title="email" ></a>
+                <a href="https://github.com/gracker" class="iconfont-archer github" target="_blank" title="github"></a>
+                <span class="iconfont-archer wechat" title="wechat">
+                    <img class="profile-qr" src="/assets/Wechat.jpeg" />
+                </span>
+                <span class="iconfont-archer qq" title="qq">
+                    <img class="profile-qr" src="/553000664" />
+                </span>
+                <a href="https://weibo.com/gracker520" class="iconfont-archer weibo" target="_blank" title="weibo"></a>
+                <a href="https://www.zhihu.com/people/gracker" class="iconfont-archer zhihu" target="_blank" title="zhihu"></a>
+                <a href="https://twitter.com/Gracker_Gao" class="iconfont-archer twitter" target="_blank" title="twitter"></a>
+                <a href="https://juejin.im/user/557b0590e4b052e031453d76" class="iconfont-archer juejin" target="_blank" title="juejin"></a>
+                <a href="/atom.xml" class="iconfont-archer rss" target="_blank" title="rss"></a>
+
+        </div>
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- website approve for Chinese user -->
+        <div class="website-approve">
+                <span id="icp-approve" class="icp-approve">
+                    <a href="https://beian.miit.gov.cn/" target="_blank">蜀 ICP 备 20016190 号</a>
+                </span>
+        </div>
+</footer>
+
+        </div>
+        <!-- toc -->
+            <div class="toc-wrapper toc-wrapper-loding" style=    top:50vh;
+>
+                <div class="toc-catalog">
+                    <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+                </div>
+                <ol class="toc"><li class="toc-item toc-level-1"><a class="toc-link" href="#ANR-%E5%88%86%E6%9E%90%E5%A5%97%E8%B7%AF"><span class="toc-number">1.</span> <span class="toc-text">ANR 分析套路</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#ANR-%E9%97%AE%E9%A2%98%E4%B8%80%E8%88%AC%E7%9A%84%E5%88%86%E6%9E%90%E6%AD%A5%E9%AA%A4%E5%A6%82%E4%B8%8B%EF%BC%9A"><span class="toc-number">2.</span> <span class="toc-text">ANR 问题一般的分析步骤如下：</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8C%BA%E5%88%86%E6%98%AF%E5%BA%94%E7%94%A8%E7%9A%84%E9%97%AE%E9%A2%98%E8%BF%98%E6%98%AF%E7%B3%BB%E7%BB%9F%E7%9A%84%E9%97%AE%E9%A2%98"><span class="toc-number">2.1.</span> <span class="toc-text">区分是应用的问题还是系统的问题</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%A6%96%E5%85%88%E5%BA%94%E8%AF%A5%E5%88%86%E6%9E%90%E6%98%AF%E5%90%A6%E6%98%AF%E5%BA%94%E7%94%A8%E7%9A%84%E9%97%AE%E9%A2%98"><span class="toc-number">2.1.1.</span> <span class="toc-text">首先应该分析是否是应用的问题</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%88%86%E6%9E%90%E7%B3%BB%E7%BB%9F%E7%9A%84%E7%8A%B6%E6%80%81"><span class="toc-number">2.1.2.</span> <span class="toc-text">分析系统的状态</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%BB%A7%E7%BB%AD%E5%88%86%E6%9E%90%EF%BC%9A%E5%BA%94%E7%94%A8%E5%8F%AF%E4%BB%A5%E8%A7%A3%E5%86%B3%E8%BF%98%E6%98%AF%E7%B3%BB%E7%BB%9F%E5%8F%AF%E4%BB%A5%E8%A7%A3%E5%86%B3"><span class="toc-number">2.2.</span> <span class="toc-text">继续分析：应用可以解决还是系统可以解决</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#ANR-Log-%E5%88%86%E6%9E%90"><span class="toc-number">3.</span> <span class="toc-text">ANR Log 分析</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%BA%BF%E7%A8%8B%E8%AF%A6%E7%BB%86%E6%95%B0%E6%8D%AE"><span class="toc-number">3.1.</span> <span class="toc-text">线程详细数据</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%BA%BF%E7%A8%8B%E5%A0%86%E6%A0%88"><span class="toc-number">3.2.</span> <span class="toc-text">线程堆栈</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%BA%BF%E7%A8%8B%E7%8A%B6%E6%80%81"><span class="toc-number">3.3.</span> <span class="toc-text">线程状态</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%AD%A3%E5%B8%B8%E4%B8%BB%E7%BA%BF%E7%A8%8B-Trace"><span class="toc-number">3.3.1.</span> <span class="toc-text">正常主线程 Trace</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%BC%82%E5%B8%B8%E4%B8%BB%E7%BA%BF%E7%A8%8B-Trace"><span class="toc-number">3.3.2.</span> <span class="toc-text">异常主线程 Trace</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-%E4%BD%BF%E7%94%A8%E7%8E%87%E5%88%86%E6%9E%90"><span class="toc-number">3.4.</span> <span class="toc-text">CPU 使用率分析</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-%E8%B4%9F%E8%BD%BD"><span class="toc-number">3.5.</span> <span class="toc-text">CPU 负载</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Memory-%E8%B4%9F%E8%BD%BD"><span class="toc-number">3.6.</span> <span class="toc-text">Memory 负载</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#IO-%E8%B4%9F%E8%BD%BD"><span class="toc-number">3.7.</span> <span class="toc-text">IO 负载</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%BF%9B%E7%A8%8B%E8%B4%9F%E8%BD%BD"><span class="toc-number">3.8.</span> <span class="toc-text">进程负载</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-%E5%BC%82%E5%B8%B8%E8%BF%9B%E7%A8%8B"><span class="toc-number">3.9.</span> <span class="toc-text">CPU 异常进程</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%B3%BB%E7%BB%9F%E5%85%B3%E9%94%AE-Log-%E4%BB%8B%E7%BB%8D"><span class="toc-number">4.</span> <span class="toc-text">系统关键 Log 介绍</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%BA%94%E7%94%A8%E5%86%BB%E7%BB%93"><span class="toc-number">4.1.</span> <span class="toc-text">应用冻结</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#ActivityManager-Slow-operation"><span class="toc-number">4.2.</span> <span class="toc-text">ActivityManager : Slow operation</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Looper-Slow-dispatch"><span class="toc-number">4.3.</span> <span class="toc-text">Looper : Slow dispatch</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Looper-Slow-delivery"><span class="toc-number">4.4.</span> <span class="toc-text">Looper : Slow delivery</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Looper%EF%BC%9ASlow-Looper"><span class="toc-number">4.5.</span> <span class="toc-text">Looper：Slow Looper</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#onTrimMemory"><span class="toc-number">4.6.</span> <span class="toc-text">onTrimMemory</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#dvm-lock-sample"><span class="toc-number">4.7.</span> <span class="toc-text">dvm_lock_sample</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#binder-sample"><span class="toc-number">4.8.</span> <span class="toc-text">binder_sample</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Long-monitor-contention"><span class="toc-number">4.9.</span> <span class="toc-text">Long monitor contention</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Binder-Thread"><span class="toc-number">4.10.</span> <span class="toc-text">Binder Thread</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#am-kill"><span class="toc-number">4.11.</span> <span class="toc-text">am_kill</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#force-stop"><span class="toc-number">4.11.1.</span> <span class="toc-text">force-stop</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%BC%82%E5%B8%B8%E6%9D%80%E8%BF%9B%E7%A8%8B"><span class="toc-number">4.11.2.</span> <span class="toc-text">异常杀进程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%B8%BB%E5%8A%A8%E6%9D%80%E8%BF%9B%E7%A8%8B"><span class="toc-number">4.11.3.</span> <span class="toc-text">主动杀进程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E8%B0%83%E5%BA%A6%E6%9D%80%E8%BF%9B%E7%A8%8B"><span class="toc-number">4.11.4.</span> <span class="toc-text">调度杀进程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%85%B6%E4%BB%96%E6%9D%80%E8%BF%9B%E7%A8%8B"><span class="toc-number">4.11.5.</span> <span class="toc-text">其他杀进程</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#am-proc-died"><span class="toc-number">4.12.</span> <span class="toc-text">am_proc_died</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#am-anr"><span class="toc-number">4.13.</span> <span class="toc-text">am_anr</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Lowmemorykiller"><span class="toc-number">4.14.</span> <span class="toc-text">Lowmemorykiller</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Blocked-msg"><span class="toc-number">4.15.</span> <span class="toc-text">Blocked msg</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E9%80%9A%E7%94%A8%E5%9C%BA%E6%99%AF-Log-%E4%BB%8B%E7%BB%8D"><span class="toc-number">5.</span> <span class="toc-text">通用场景 Log 介绍</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%81%AD%E5%B1%8F-Log"><span class="toc-number">5.1.</span> <span class="toc-text">灭屏 Log</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BA%AE%E5%B1%8F-Log"><span class="toc-number">5.2.</span> <span class="toc-text">亮屏 Log</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%A7%A3%E9%94%81%E5%AE%8C%E6%95%B4-Log"><span class="toc-number">5.3.</span> <span class="toc-text">解锁完整 Log</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E9%80%9A%E7%9F%A5%E6%A0%8F%E4%B8%8B%E6%8B%89%E5%AE%8C%E6%95%B4-Log"><span class="toc-number">5.4.</span> <span class="toc-text">通知栏下拉完整 Log</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E9%80%9A%E7%9F%A5%E6%A0%8F%E6%8A%98%E5%8F%A0%E5%AE%8C%E6%95%B4-Log"><span class="toc-number">5.5.</span> <span class="toc-text">通知栏折叠完整 Log</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%BA%94%E7%94%A8%E5%90%AF%E5%8A%A8%E5%AE%8C%E6%95%B4-Log"><span class="toc-number">5.6.</span> <span class="toc-text">应用启动完整 Log</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Window-Focus-%E7%9B%B8%E5%85%B3%E7%9A%84%E6%B5%81%E7%A8%8B"><span class="toc-number">5.7.</span> <span class="toc-text">Window Focus 相关的流程</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#ANR-%E7%9B%B8%E5%85%B3%E8%B5%84%E6%96%99%E5%88%86%E4%BA%AB"><span class="toc-number">6.</span> <span class="toc-text">ANR 相关资料分享</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E8%B5%84%E6%96%99"><span class="toc-number">7.</span> <span class="toc-text">参考资料</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number">8.</span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a></li></ol>
+            </div>
+        <!-- sidebar -->
+        <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+        <div class="sidebar-panel-archives">
+    <!-- 在 ejs 中将 archive 按照时间排序 -->
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 118
+        </div>
+        <!-- search  -->
+    </div>
+    <div class="post-archive">
+            <div class="archive-year"> 2025 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 9 - CPU 信息解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/02</span>
+            <a class="archive-post-title" href="/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7 - MainThread 和 RenderThread 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/26</span>
+            <a class="archive-post-title" href="/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/26</span>
+            <a class="archive-post-title" href="/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto 系列 5：Android App 基于 Choreographer 的渲染流程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto 系列 4：使用命令行在本地打开超大 Trace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR 系列 3 ：ANR 案例分享</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR 系列 2 ：ANR 分析套路和关键 Log 介绍</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-01-ANR-Design/">Android ANR 系列 1 ：理解 Android ANR 设计思想</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2024 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto 系列 3：熟悉 Perfetto View</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto 系列 2：Perfetto Trace 抓取</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto 系列 1：Perfetto 工具简介</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/2024/03/27/Android-Perfetto-101/">Android Perfetto 系列目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/01</span>
+            <a class="archive-post-title" href="/2024/01/01/2023-review/">2023 年的方方面面</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2023 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/30</span>
+            <a class="archive-post-title" href="/2023/12/30/the-performance/">关于 The Android Performance 知识星球介绍</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/15</span>
+            <a class="archive-post-title" href="/2023/10/15/the-performance-design-of-os-en/">The Performance Design Of OS</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/2023/08/21/the-performance-design-of-os/">OS 设计之性能设计</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/2023/05/14/bad-android-app-with-system-permissions/">当 App 有了系统权限，真的可以为所欲为？</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2022 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/2022/03/27/the-performance-tea-part-01/">The Performance 星球茶话会 - 第一期</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/2022/03/13/android-systrace-cpu-state-running/">Systrace 线程 CPU 运行状态分析技巧 - Running 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/2022/01/21/android-systrace-cpu-state-runnable/">Systrace 线程 CPU 运行状态分析技巧 - Runnable 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/03</span>
+            <a class="archive-post-title" href="/2022/01/03/2021-Review/">回顾 2021</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2021 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/27</span>
+            <a class="archive-post-title" href="/2021/10/27/if-i-write-a-book-about-performance/">一本讲 Android 流畅性的书，应该有什么内容？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/26</span>
+            <a class="archive-post-title" href="/2021/10/26/build-android-12/">Android 系统开发系列（1）：Android 12 源代码下载、编译和刷机</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace 响应速度实战 3 ：响应速度延伸知识</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace 响应速度实战 2 ：响应速度实战分析-以启动速度为例</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace 响应速度实战 1 ：了解响应速度原理</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace 流畅性实战 3 ：卡顿分析过程中的一些疑问</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace 流畅性实战 2 ：案例分析 - MIUI 桌面滑动卡顿分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace 流畅性实战 1 ：了解卡顿原理</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2020 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span>
+            <a class="archive-post-title" href="/2020/08/20/weibo-imageload-opt-on-huawei/">华为手机刷微博体验更好？技术角度的一些分析和思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/2020/05/26/samsung_crash/">一个「闰」字引发的事故 - 三星系统重启分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/2020/05/07/Android-App-Chain-Wakeup/">Android App 链式唤醒分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/14</span>
+            <a class="archive-post-title" href="/2020/02/14/Android-Systrace-SurfaceFlinger/">Android Systrace 基础知识 - SurfaceFlinger 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/03</span>
+            <a class="archive-post-title" href="/2020/02/03/android-development-learning-path-2020-edition/">Android 开发者学习路线(2020 版本)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span>
+            <a class="archive-post-title" href="/2020/01/28/2020-read/">我的 2020 年读书单</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2019 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/21</span>
+            <a class="archive-post-title" href="/2019/12/21/Android-Systrace-CPU/">Android Systrace 基础知识 - CPU Info 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/15</span>
+            <a class="archive-post-title" href="/2019/12/15/Android-Systrace-Triple-Buffer/">Android Systrace 基础知识 - Triple Buffer 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/06</span>
+            <a class="archive-post-title" href="/2019/12/06/Android-Systrace-Binder/">Android Systrace 基础知识 - Binder 和锁竞争解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/2019/12/01/BlogMap/">「置顶」博客文章目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/2019/12/01/Android-Systrace-Vsync/">Android Systrace 基础知识 - Vsync 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/2019/11/18/Android-App-Lunch-Optimize/">Android App 启动优化全记录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/06</span>
+            <a class="archive-post-title" href="/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Android Systrace 基础知识 - MainThread 和 RenderThread 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/04</span>
+            <a class="archive-post-title" href="/2019/11/04/Android-Systrace-Input/">Android Systrace 基础知识 - Input 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/24</span>
+            <a class="archive-post-title" href="/2019/10/24/Android-Background-Animation/">Android 中的“后台无效动画“行为分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/22</span>
+            <a class="archive-post-title" href="/2019/10/22/Android-Choreographer/">Android 基于 Choreographer 的渲染机制详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/2019/09/18/Android-Jank-Due-To-Low-Memory/">Android 中的卡顿丢帧原因概述 - 低内存篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/17</span>
+            <a class="archive-post-title" href="/2019/09/17/Android-Kill-Background-App-Debug/">Android 桌面被杀问题分析案例</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Due-To-App/">Android 中的卡顿丢帧原因概述 - 应用篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Due-To-System/">Android 中的卡顿丢帧原因概述 - 系统篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Debug/">Android 中的卡顿丢帧原因概述 - 方法论</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/2019/09/01/Android-Activity-Lunch-Mode/">Android 中的 Activity Launch Mode 详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/2019/07/27/Android-Hardware-Layer/">Android 中的 Hardware Layer 详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/23</span>
+            <a class="archive-post-title" href="/2019/07/23/Android-Systrace-Pre/">Android Systrace 基础知识 -- 分析 Systrace 预备知识</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/29</span>
+            <a class="archive-post-title" href="/2019/06/29/Android-Systrace-SystemServer/">Android Systrace 基础知识 - SystemServer 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/2019/05/28/Android-Systrace-About/">Android Systrace 基础知识 -- Systrace 简介</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/27</span>
+            <a class="archive-post-title" href="/2019/05/27/why-60-fps/">Android Systrace 基础知识 -- Why 60 fps ？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/2019/05/26/Android_Systrace_0/">Android Systrace -- 系列文章目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/15</span>
+            <a class="archive-post-title" href="/2019/05/15/90hz-on-android/">Android 新的流畅体验，90Hz 漫谈</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/2019/04/07/liqi/">利器 - 高效工具推荐</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/2019/01/21/android-performance-case-jank-accessbility/">Android 无障碍服务导致的整机卡顿案例分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/12</span>
+            <a class="archive-post-title" href="/2019/01/12/recommend-of-2018/">2018 年度好物推荐 - 给辛勤工作的自己一点奖励</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2018 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span>
+            <a class="archive-post-title" href="/2018/11/01/android-system-develop-0/">Android 系统开发源码环境搭建</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/25</span>
+            <a class="archive-post-title" href="/2018/10/25/How-do-engineers-count-well/">陆奇：除了好代码，工程师怎样才算优秀？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/01</span>
+            <a class="archive-post-title" href="/2018/10/01/how-to-stop-sucking-and-be-awesome-instead-8/">程序员的修炼-08-阅读之美</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/30</span>
+            <a class="archive-post-title" href="/2018/09/30/how-to-stop-sucking-and-be-awesome-instead-7/">程序员的修炼-07-游戏与编程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/29</span>
+            <a class="archive-post-title" href="/2018/09/29/how-to-stop-sucking-and-be-awesome-instead-6/">程序员的修炼-06-互联网那些事</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/28</span>
+            <a class="archive-post-title" href="/2018/09/28/how-to-stop-sucking-and-be-awesome-instead-5/">程序员的修炼-05-了解你的用户</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/27</span>
+            <a class="archive-post-title" href="/2018/09/27/how-to-stop-sucking-and-be-awesome-instead-4/">程序员的修炼-04-关于测试的一些思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/26</span>
+            <a class="archive-post-title" href="/2018/09/26/how-to-stop-sucking-and-be-awesome-instead-3/">程序员的修炼-03-Web 设计原则</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/20</span>
+            <a class="archive-post-title" href="/2018/09/20/how-to-stop-sucking-and-be-awesome-instead-2/">程序员的修炼-02-编程之道</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/2018/09/19/how-to-stop-sucking-and-be-awesome-instead-1/">程序员的修炼-01-绝地反击之术</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2018/09/13/android-memory/">Android 系统不释放内存吗？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/13</span>
+            <a class="archive-post-title" href="/2018/08/13/Some-Thoughts-on-the-Fluency-of-Android/">关于 Android 系统流畅性的一些思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/20</span>
+            <a class="archive-post-title" href="/2018/05/20/zhihu-startingwindow/">知乎 救救你的 StartingWindow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/2018/05/07/Android-performance-optimization-skills-and-tools/">「置顶」Android 性能优化必知必会</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/2018/01/06/2017%E5%B9%B4%E5%BA%A6%E6%9C%80%E6%8E%A8%E8%8D%90/">2017 年度好物推荐 - 给辛勤工作的自己一点奖励</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2017 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/23</span>
+            <a class="archive-post-title" href="/2017/04/23/About-work/">2017</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2016 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/2016/04/05/android-bottom-bar-2/">Android Bottom navigation 规范二：样式、行为与规格</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/2016/04/05/android-bottom-bar-1/">Android Bottom Navigation 规范一：使用方法</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2015 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/31</span>
+            <a class="archive-post-title" href="/2015/12/31/How-to-calculation-android-app-lunch-time/">Android 中如何计算 App 的启动时间？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/29</span>
+            <a class="archive-post-title" href="/2015/12/29/Android%E5%BA%94%E7%94%A8%E5%90%AF%E5%8A%A8%E4%BC%98%E5%8C%96-%E4%B8%80%E7%A7%8DDelayLoad%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%92%8C%E5%8E%9F%E7%90%86-%E4%B8%8B%E7%AF%87/">Android 应用启动优化:一种 DelayLoad 的实现和原理(下篇)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/2015/11/18/Android-app-lunch-optimize-delay-load/">Android 应用启动优化 - 一种 DelayLoad 的实现和原理(上篇)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/12</span>
+            <a class="archive-post-title" href="/2015/08/12/AndroidL-hwui-RenderThread-workflow/">Android hwui 中 RenderThread 工作流程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/2015/08/05/HashMap/">Java7 HashMap 源码分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-onTrimMemory/">Android 代码内存优化建议 - OnTrimMemory 优化</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-AndroidResource/">Android 代码内存优化建议 - Android 资源篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-Google/">Android 代码内存优化建议 - Android 官方篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-Java/">Android 代码内存优化建议 - Java 官方篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/29</span>
+            <a class="archive-post-title" href="/2015/05/29/Nexus6-with-Android-M/">Nexus6 with Android M 开启多窗口模式</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/06</span>
+            <a class="archive-post-title" href="/2015/05/06/Java-Singleton/">细说 Java 单例模式</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-4/">Android 性能优化典范 - Profile GPU Rendering</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-3/">Android 性能优化典范 - Understanding VSYNC</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-2/">Android 性能优化典范之 Understanding Overdraw</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-1/">Android 性能优化典范 - Render Performance</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns/">Android 性能优化典范综述</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/">Android 内存优化之三 - 打开 MAT 中的 Bitmap 原图</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android 内存优化之二 - MAT使用进阶</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android 内存优化(1) - MAT 使用入门</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/31</span>
+            <a class="archive-post-title" href="/2015/03/31/android-performance-case-study-follow-up/">Android性能优化后续</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-5/">Android 小技巧 - 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-4/">Android 小技巧 - 4</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-3/">Android 小技巧 -3</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/04</span>
+            <a class="archive-post-title" href="/2015/02/04/build-rom-for-nexus5/">为 Nexus5 编译 AndroidL 固件</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/30</span>
+            <a class="archive-post-title" href="/2015/01/30/android-performance-tools-systrace-1/">Android 性能优化之 Systrace 工具介绍(一)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/16</span>
+            <a class="archive-post-title" href="/2015/01/16/view-android-source-code-with-androidstudio/">使用 Android Studio 查看 Android Lollipop 源码</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/13</span>
+            <a class="archive-post-title" href="/2015/01/13/android-performance-optimization-overdraw-2/">Android 性能优化之过渡绘制 - 实战篇</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2014 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/2014/10/20/android-performance-optimization-overdraw-1/">Android 性能优化之过渡绘制 - 理论篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/03</span>
+            <a class="archive-post-title" href="/2014/06/03/android-edittext-do-not-auto-get-focus/">Android 小技巧 - 如何让EditText不自动获取焦点</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/31</span>
+            <a class="archive-post-title" href="/2014/05/31/android-tips-round-up-2/">Android 小技巧 -2</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/2014/05/28/android-tips-round-up-1/">Android 小技巧 - 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/02</span>
+            <a class="archive-post-title" href="/2014/05/02/android_log_to_file/">Android Tools - Log2File</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/01</span>
+            <a class="archive-post-title" href="/2014/04/01/android-service-build-your-own-notification-servers-app/">Android Service：开发自己的通知中心(2):辅助性服务实战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/25</span>
+            <a class="archive-post-title" href="/2014/03/25/ubuntu-adb-can-not-find-devices/">Android:Ubuntu 下执行 Adb 命令找不到设备</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/17</span>
+            <a class="archive-post-title" href="/2014/03/17/android-build-your-own-android-notification-service-app/">Android Service：开发自己的通知中心(1):辅助性服务介绍</a>
+        </li>
+            </ul>
+    </div>
+</div>
+
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="年度推荐">
+                <span class="iconfont-archer">&#xe606;</span>
+                年度推荐
+            </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="随笔">
+                <span class="iconfont-archer">&#xe606;</span>
+                随笔
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="年终总结">
+                <span class="iconfont-archer">&#xe606;</span>
+                年终总结
+            </span>
+            <span class="sidebar-tag-name" data-tags="知识星球">
+                <span class="iconfont-archer">&#xe606;</span>
+                知识星球
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="性能优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                性能优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="线程优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                线程优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR分析">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR分析
+            </span>
+            <span class="sidebar-tag-name" data-tags="页面响应">
+                <span class="iconfont-archer">&#xe606;</span>
+                页面响应
+            </span>
+            <span class="sidebar-tag-name" data-tags="电量优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                电量优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Kotlin">
+                <span class="iconfont-archer">&#xe606;</span>
+                Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="程序员">
+                <span class="iconfont-archer">&#xe606;</span>
+                程序员
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计规范">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计规范
+            </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿
+            </span>
+            <span class="sidebar-tag-name" data-tags="读书笔记">
+                <span class="iconfont-archer">&#xe606;</span>
+                读书笔记
+            </span>
+            <span class="sidebar-tag-name" data-tags="程序员的修炼">
+                <span class="iconfont-archer">&#xe606;</span>
+                程序员的修炼
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计原则">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计原则
+            </span>
+            <span class="sidebar-tag-name" data-tags="测试">
+                <span class="iconfont-archer">&#xe606;</span>
+                测试
+            </span>
+            <span class="sidebar-tag-name" data-tags="了解你的用户">
+                <span class="iconfont-archer">&#xe606;</span>
+                了解你的用户
+            </span>
+            <span class="sidebar-tag-name" data-tags="游戏与编程">
+                <span class="iconfont-archer">&#xe606;</span>
+                游戏与编程
+            </span>
+            <span class="sidebar-tag-name" data-tags="互联网那些事">
+                <span class="iconfont-archer">&#xe606;</span>
+                互联网那些事
+            </span>
+            <span class="sidebar-tag-name" data-tags="阅读之美">
+                <span class="iconfont-archer">&#xe606;</span>
+                阅读之美
+            </span>
+            <span class="sidebar-tag-name" data-tags="利器">
+                <span class="iconfont-archer">&#xe606;</span>
+                利器
+            </span>
+            <span class="sidebar-tag-name" data-tags="iOS">
+                <span class="iconfont-archer">&#xe606;</span>
+                iOS
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design
+            </span>
+            <span class="sidebar-tag-name" data-tags="Smooth">
+                <span class="iconfont-archer">&#xe606;</span>
+                Smooth
+            </span>
+            <span class="sidebar-tag-name" data-tags="体验优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                体验优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="用户体验">
+                <span class="iconfont-archer">&#xe606;</span>
+                用户体验
+            </span>
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+        缺失模块，请参考主题文档进行安装配置：https://github.com/fi3ework/hexo-theme-archer#%E5%AE%89%E8%A3%85%E4%B8%BB%E9%A2%98
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="随笔">
+            <span class="iconfont-archer">&#xe60a;</span>
+            随笔
+        </span>
+        <span class="sidebar-category-name" data-categories="读书笔记">
+            <span class="iconfont-archer">&#xe60a;</span>
+            读书笔记
+        </span>
+        <span class="sidebar-category-name" data-categories="Android">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
+        </span>
+        <span class="sidebar-category-name" data-categories="iOS">
+            <span class="iconfont-archer">&#xe60a;</span>
+            iOS
+        </span>
+        <span class="sidebar-category-name" data-categories="Android性能优化">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android性能优化
+        </span>
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+
+    </div>
+</div>
+
+        <!-- site-meta -->
+        <script>
+    var siteMetaRoot = "/"
+    if (siteMetaRoot === "undefined") {
+        siteMetaRoot = '/'
+    }
+    var siteMeta = {
+        url: "https://androidperformance.com",
+        root: siteMetaRoot,
+        author: "Gracker"
+    }
+</script>
+
+        <!-- import experimental options here -->
+        <!-- Custom Font -->
+
+        <!-- jquery (must load before main.js) -->
+        <script defer src="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+        <!-- main func (depends on jQuery) -->
+        <script src="/scripts/main.js" defer></script>
+        <!-- fancybox -->
+        <script>
+            (function(){
+              var urls = [
+                'https://cdn.bootcdn.net/ajax/libs/fancyapps-ui/5.0.36/fancybox/fancybox.umd.js',
+                'https://cdn.jsdelivr.net/npm/@fancyapps/ui@5.0.36/dist/fancybox/fancybox.umd.js'
+              ];
+              function loadNext(){
+                var u = urls.shift();
+                if(!u) return;
+                var s = document.createElement('script');
+                s.src = u; s.defer = true;
+                s.onload = function(){ if (window.Fancybox) { window.Fancybox.bind('[data-fancybox]'); } };
+                s.onerror = loadNext;
+                document.head.appendChild(s);
+              }
+              loadNext();
+            })();
+        </script>
+        <!-- algolia -->
+        <!-- busuanzi (delay load + silent fail) -->
+        <!-- async load share.js on first click -->
+            <script>
+                (function(){
+                  var loaded = false
+                  function loadShare(){
+                    if (loaded) return
+                    loaded = true
+                    var s = document.createElement('script')
+                    s.src = '/scripts/share.js'
+                    s.async = true
+                    document.head.appendChild(s)
+                  }
+                  document.addEventListener('click', function(e){
+                    var t = e.target
+                    if (!t) return
+                    if (t.closest && t.closest('.share-wrapper')) { loadShare() }
+                    else if (t.classList && t.classList.contains('share-wrapper')) { loadShare() }
+                  }, true)
+                })();
+            </script>
+        <!-- mermaid -->
+    </body>
+</html>

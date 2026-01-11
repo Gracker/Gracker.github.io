@@ -1,0 +1,1907 @@
+<!DOCTYPE html>
+<html lang="zh,en">
+    <!-- title -->
+            <!-- keywords -->
+
+                  <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <meta name="author" content="Gracker">
+                    <meta name="renderer" content="webkit">
+                    <meta name="copyright" content="Gracker">
+                      <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,启动优化,Startup,Perfetto,Systrace,RenderThread,Java">
+                          <meta name="description" content="Focus On Android Performance">
+                          <meta name="description" content="本篇是 Perfetto 系列文章的第八篇，主要深入介绍 Android 中的 Vsync 机制及其在 Perfetto 中的表现形式。文章将从 Perfetto 的角度来分析 Android 系统如何基于 Vsync 信号进行帧渲染和合成，涵盖 Vsync、Vsync-app、Vsync-sf、VsyncWorkDuration 等核心概念。 随着高刷新率屏幕的普及，理解 Vsync 机制变得更">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析">
+<meta property="og:url" content="https://androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/index.html">
+<meta property="og:site_name" content="Android Performance">
+<meta property="og:description" content="本篇是 Perfetto 系列文章的第八篇，主要深入介绍 Android 中的 Vsync 机制及其在 Perfetto 中的表现形式。文章将从 Perfetto 的角度来分析 Android 系统如何基于 Vsync 信号进行帧渲染和合成，涵盖 Vsync、Vsync-app、Vsync-sf、VsyncWorkDuration 等核心概念。 随着高刷新率屏幕的普及，理解 Vsync 机制变得更">
+<meta property="og:locale">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250811221826847.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250811221902646.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250811222036489.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250811222159253.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918220632473.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918220709655.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918220730872.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918221821265.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918221936675.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918222045731.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918222258536.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918222626100.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918222707300.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918223035361.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918223148748.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918222707300.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918223220718.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918223340940.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918224205093.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918223441117.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918223517315.png">
+<meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250918223532482.png">
+<meta property="og:image" content="https://androidperformance.com/images/WechatIMG581.png">
+<meta property="article:published_time" content="2025-08-05T02:15:30.000Z">
+<meta property="article:modified_time" content="2026-01-11T05:36:33.442Z">
+<meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Android">
+<meta property="article:tag" content="Perfetto">
+<meta property="article:tag" content="Systrace">
+<meta property="article:tag" content="Performance">
+<meta property="article:tag" content="RenderThread">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://androidperformance.com/images/Android-Perfetto-08-Vsync/image-20250811221826847.png">
+                            <meta http-equiv="Cache-control" content="no-cache">
+                            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+                            <link rel="icon" href="/assets/favicon.ico">
+                                <title>
+                                  Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析 · Android Performance
+                                </title>
+                                <!-- /*! loadCSS. [c]2017 Filament Group, Inc. MIT License */
+/* This file is meant as a standalone workflow for
+- testing support for link[rel=preload]
+- enabling async CSS loading in browsers that do not support rel=preload
+- applying rel preload css once loaded, whether supported or not.
+*/ -->
+<script>
+    (function (w) {
+        'use strict'
+        // rel=preload support test
+        if (!w.loadCSS) {
+            w.loadCSS = function () {}
+        }
+        // define on the loadCSS obj
+        var rp = (loadCSS.relpreload = {})
+        // rel=preload feature support test
+        // runs once and returns a function for compat purposes
+        rp.support = (function () {
+            var ret
+            try {
+                ret = w.document.createElement('link').relList.supports('preload')
+            } catch (e) {
+                ret = false
+            }
+            return function () {
+                return ret
+            }
+        })()
+
+        // if preload isn't supported, get an asynchronous load by using a non-matching media attribute
+        // then change that media back to its intended value on load
+        rp.bindMediaToggle = function (link) {
+            // remember existing media attr for ultimate state, or default to 'all'
+            var finalMedia = link.media || 'all'
+
+            function enableStylesheet() {
+                link.media = finalMedia
+            }
+
+            // bind load handlers to enable media
+            if (link.addEventListener) {
+                link.addEventListener('load', enableStylesheet)
+            } else if (link.attachEvent) {
+                link.attachEvent('onload', enableStylesheet)
+            }
+
+            // Set rel and non-applicable media type to start an async request
+            // note: timeout allows this to happen async to let rendering continue in IE
+            setTimeout(function () {
+                link.rel = 'stylesheet'
+                link.media = 'only x'
+            })
+            // also enable media after 3 seconds,
+            // which will catch very old browsers (android 2.x, old firefox) that don't support onload on link
+            setTimeout(enableStylesheet, 3000)
+        }
+
+        // loop through link elements in DOM
+        rp.poly = function () {
+            // double check this to prevent external calls from running
+            if (rp.support()) {
+                return
+            }
+            var links = w.document.getElementsByTagName('link')
+            for (var i = 0; i < links.length; i++) {
+                var link = links[i]
+                // qualify links to those with rel=preload and as=style attrs
+                if (
+                    link.rel === 'preload' &&
+                    link.getAttribute('as') === 'style' &&
+                    !link.getAttribute('data-loadcss')
+                ) {
+                    // prevent rerunning on link
+                    link.setAttribute('data-loadcss', true)
+                    // bind listeners to toggle media back
+                    rp.bindMediaToggle(link)
+                }
+            }
+        }
+
+        // if unsupported, run the polyfill
+        if (!rp.support()) {
+            // run once at least
+            rp.poly()
+
+            // rerun poly on an interval until onload
+            var run = w.setInterval(rp.poly, 500)
+            if (w.addEventListener) {
+                w.addEventListener('load', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            } else if (w.attachEvent) {
+                w.attachEvent('onload', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            }
+        }
+
+        // commonjs
+        if (typeof exports !== 'undefined') {
+            exports.loadCSS = loadCSS
+        } else {
+            w.loadCSS = loadCSS
+        }
+    })(typeof global !== 'undefined' ? global : this)
+</script>
+
+                                  <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/font/Oswald-Regular.woff2") format('woff2'),
+             url("/font/Oswald-Regular.ttf") format('truetype');
+        font-display: swap;
+    }
+
+    body {
+        margin: 0;
+    }
+
+    /* Removed initial hide to show content immediately */
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(
+            -45deg,
+            #444 0,
+            #444 80px,
+            #333 80px,
+            #333 160px
+        );
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+</style>
+
+                                    <link id="stylesheet-base" rel="preload" href="/css/style.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <link id="stylesheet-mobile" rel="preload" href="/css/mobile.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet';this.media='screen and
+                                    (max-width: 960px)'">
+                                    <link id="stylesheet-theme-dark" rel="preload" href="/css/dark.css
+                                    " as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <!-- Font Awesome CSS (with CDN fallback) -->
+                                    <link id="stylesheet-fontawesome" rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+                                      as="style" onload="this.onload=null;this.rel='stylesheet'"
+                                      onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css';this.rel='stylesheet'">
+                                    <link rel="preconnect" href="https://cdn.bootcdn.net" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.bootcdn.net">
+                                    <link rel="preconnect" href="https://cdn.staticfile.org" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.staticfile.org">
+                                    <link rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js" as="script">
+                                    <link rel="preload" href="/scripts/main.js" as="script">
+                                    <!-- use compressed font format to reduce transfer size -->
+                                    <link rel="preload" href="/font/Source%5C%20Sans%5C%20Pro.woff2"
+                                      as="font" type="font/woff2" crossorigin>
+                                    <link rel="preload" href="/font/Source%5C%20Sans%5C%20Pro.woff" as="font"
+                                      type="font/woff" crossorigin>
+                                    <link rel="preload" href="https://at.alicdn.com/t/font_327081_1dta1rlogw17zaor.woff"
+                                      as="font" crossorigin>
+                                    <!-- algolia -->
+                                        <!-- 百度统计（延迟加载，失败静默）  -->
+                                            <!-- CNZZ（延迟加载，失败静默）  -->
+                                                <!-- Google tag (gtag.js) 延迟加载，失败静默 -->
+                                                  <script>
+                                                    (function () {
+                                                      function loadGtag() {
+                                                        try {
+                                                          window.dataLayer = window.dataLayer || []
+                                                          function gtag() { dataLayer.push(arguments) }
+                                                          window.gtag = gtag
+                                                          gtag('js', new Date())
+                                                          var s = document.createElement('script')
+                                                          s.async = true
+                                                          s.src = 'https://www.googletagmanager.com/gtag/js?id=UA-50993302-2'
+                                                          s.onerror = function () { }
+                                                          s.onload = function () { gtag('config', 'UA-50993302-2') }
+                                                          document.head.appendChild(s)
+                                                        } catch (e) { }
+                                                      }
+                                                      if (window.requestIdleCallback) {
+                                                        requestIdleCallback(loadGtag, { timeout: 5000 })
+                                                      } else {
+                                                        window.addEventListener('load', function () { setTimeout(loadGtag, 3000) })
+                                                      }
+                                                    })();
+                                                  </script>
+                                                    <!-- Hreflang Tags -->
+                                                    
+                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/" />
+                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2025/08/05/Android-Perfetto-08-Vsync/" />
+                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2025/08/05/Android-Perfetto-08-Vsync/" />
+                  <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/atom.xml" title="Android Performance" type="application/atom+xml">
+</head>
+        <body class="post-body">
+        <!-- header -->
+        <header class="header header-mobile">
+    <!-- top read progress line -->
+    <div class="header-element">
+        <div class="read-progress"></div>
+    </div>
+    <!-- sidebar menu button -->
+    <div class="header-element">
+        <div class="header-sidebar-menu">
+            <div style="padding-left: 1px;">&#xe775;</div>
+        </div>
+    </div>
+    <!-- header actions -->
+    <div class="header-actions">
+        <!-- theme mode switch button -->
+        <span class="header-theme-btn header-element">
+            <i class="fas fa-adjust"></i>
+        </span>
+        <!-- back to home page text -->
+        <span class="home-link header-element">
+            <a href="/">Android Performance</a>
+        </span>
+    </div>
+    <!-- toggle banner -->
+    <div class="banner">
+        <div class="blog-title header-element">
+            <a href="/">Android Performance</a>
+        </div>
+        <div class="post-title header-element">
+            <a href="#" class="post-name">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</a>
+        </div>
+    </div>
+</header>
+
+        <!-- fixed footer -->
+        <footer class="footer-fixed">
+    <!-- donate button -->
+    <div class="donate-popup donate-popup--hidden">
+    <div class="donate-popup__title">Buy Me A Coffee</div>
+    <div class="donate-popup__content">
+        <div class="donate-popup__content-description">如果觉得文章还不错，打赏一杯咖啡吧.</div>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Wechat"
+            alt="Wechat"
+            src="/assets/donate-wechat.png"
+        ></img>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Alipay"
+            alt="Alipay"
+            src="/assets/donate-alipay.png"
+        ></img>
+    </div>
+</div>
+
+    <div
+        title="Donate to the author"
+        class="footer-fixed-btn footer-fixed-btn--hidden donate-btn"
+    >
+        <i class="fas fa-donate"></i>
+    </div>
+
+    <!-- back to top button -->
+    <div class="footer-fixed-btn footer-fixed-btn--hidden back-top">
+        <div>&#xe639;</div>
+    </div>
+</footer>
+
+        <!-- wrapper -->
+        <div class="wrapper">
+            <div class="site-intro" style="    height:50vh;
+">
+    <!-- 主页  -->
+    <!-- 404页  -->
+    <div class="site-intro-placeholder"></div>
+    <picture>
+            <source type="image/webp" srcset="/intro/post-bg.webp">
+        <img class="site-intro-img"
+             src="/intro/post-bg.jpg"
+             alt=""
+loading="lazy"             decoding="async"
+             fetchpriority="auto"
+             sizes="100vw">
+    </picture>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+                Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析
+            <!-- 404 -->
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            <!-- 404 -->
+        </p>
+        <!-- 文章页 meta -->
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                    <div class="post-intro-tags" >
+        <span class="post-category" data-categories="Java">
+            <i class="fas fa-folder post-category-icon"></i>
+            <span class="post-category-text">
+                Java
+            </span>
+        </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Systrace">Systrace</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="RenderThread">RenderThread</a>
+</div>
+
+                <!-- 文章字数统计 -->
+                    <div class="post-intro-read">
+                        <span>Word count: <span class="post-count word-count">6.3k</span>Reading time: <span class="post-count reading-time">26 min</span></span>
+                    </div>
+                <div class="post-intro-meta">
+                    <!-- 撰写日期 -->
+                    <span class="iconfont-archer post-intro-calander">&#xe676;</span>
+                    <span class="post-intro-time">2025/08/05</span>
+                    <!-- 文章分享 -->
+                    <span class="share-wrapper">
+                        <span class="iconfont-archer share-icon">&#xe71d;</span>
+                        <span class="share-text">Share</span>
+                        <ul class="share-list">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+    </div>
+</div>
+
+            
+            <script>
+  // get user agent
+  function getBrowserVersions() {
+    var u = window.navigator.userAgent
+    return {
+      userAgent: u,
+      trident: u.indexOf('Trident') > -1, //IE内核
+      presto: u.indexOf('Presto') > -1, //opera内核
+      webKit: u.indexOf('AppleWebKit') > -1, //苹果、谷歌内核
+      gecko: u.indexOf('Gecko') > -1 && u.indexOf('KHTML') == -1, //火狐内核
+      mobile: !!u.match(/AppleWebKit.*Mobile.*/), //是否为移动终端
+      ios: !!u.match(/\(i[^;]+;( U;)? CPU.+Mac OS X/), //ios终端
+      android: u.indexOf('Android') > -1 || u.indexOf('Linux') > -1, //android终端或者uc浏览器
+      iPhone: u.indexOf('iPhone') > -1 || u.indexOf('Mac') > -1, //是否为iPhone或者安卓QQ浏览器
+      iPad: u.indexOf('iPad') > -1, //是否为iPad
+      webApp: u.indexOf('Safari') == -1, //是否为web应用程序，没有头部与底部
+      weixin: u.indexOf('MicroMessenger') == -1, //是否为微信浏览器
+      uc: u.indexOf('UCBrowser') > -1, //是否为android下的UC浏览器
+    }
+  }
+  var browser = {
+    versions: getBrowserVersions(),
+  }
+  console.log('userAgent: ' + browser.versions.userAgent)
+
+  // callback
+  function fontLoaded() {
+    console.log('font loaded')
+    if (document.getElementsByClassName('site-intro-meta')) {
+      document
+        .getElementsByClassName('intro-title')[0]
+        .classList.add('intro-fade-in')
+      document
+        .getElementsByClassName('intro-subtitle')[0]
+        .classList.add('intro-fade-in')
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+      if (postIntros) {
+        postIntros.classList.add('post-fade-in')
+      }
+    }
+  }
+
+  // UC不支持跨域，所以直接显示
+  function asyncCb() {
+    if (browser.versions.uc) {
+      console.log('UCBrowser')
+      fontLoaded()
+    } else {
+      WebFont.load({
+        custom: {
+          families: ['Oswald-Regular'],
+        },
+        loading: function () {
+          // 所有字体开始加载
+          // console.log('font loading');
+        },
+        active: function () {
+          // 所有字体已渲染
+          fontLoaded()
+        },
+        inactive: function () {
+          // 字体预加载失败，无效字体或浏览器不支持加载
+          console.log('inactive: timeout')
+          fontLoaded()
+        },
+        timeout: 5000, // Set the timeout to two seconds
+      })
+    }
+  }
+
+  function asyncErr() {
+    console.warn('script load from CDN failed, will load local script')
+  }
+
+  // load webfont-loader async, and add callback function
+  function async(u, cb, err) {
+    var d = document,
+      t = 'script',
+      o = d.createElement(t),
+      s = d.getElementsByTagName(t)[0]
+    o.src = u
+    if (cb) {
+      o.addEventListener(
+        'load',
+        function (e) {
+          cb(null, e)
+        },
+        false
+      )
+    }
+    if (err) {
+      o.addEventListener(
+        'error',
+        function (e) {
+          err(null, e)
+        },
+        false
+      )
+    }
+    s.parentNode.insertBefore(o, s)
+  }
+
+  var asyncLoadWithFallBack = function (arr, success, reject) {
+    var currReject = function () {
+      reject()
+      arr.shift()
+      if (arr.length) async(arr[0], success, currReject)
+    }
+
+    async(arr[0], success, currReject)
+  }
+
+  asyncLoadWithFallBack(
+    [
+      'https://cdn.bootcdn.net/ajax/libs/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.staticfile.org/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.jsdelivr.net/npm/webfontloader@1.6.28/webfontloader.min.js',
+      "/lib/webfontloader.min.js",
+    ],
+    asyncCb,
+    asyncErr
+  )
+</script>
+
+            <img class="loading" src="/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" alt="loading">
+            <div class="container container-unloaded">
+                <main class="main post-page">
+    <article class="article-entry">
+        <p>本篇是 Perfetto 系列文章的第八篇，主要深入介绍 Android 中的 Vsync 机制及其在 Perfetto 中的表现形式。文章将从 Perfetto 的角度来分析 Android 系统如何基于 Vsync 信号进行帧渲染和合成，涵盖 Vsync、Vsync-app、Vsync-sf、VsyncWorkDuration 等核心概念。</p>
+<p>随着高刷新率屏幕的普及，理解 Vsync 机制变得更加重要。本文将以 120Hz 刷新率为主要叙事线，帮助开发者理解现代 Android 设备中 Vsync 的工作原理，以及如何在 Perfetto 中观察和分析 Vsync 相关的性能问题。</p>
+<blockquote>
+<p><strong>注：本文内容基于 Android 16 的最新架构和实现</strong></p>
+</blockquote>
+<span id="more"></span>
+
+<h2 id="本文目录"><a href="#本文目录" class="headerlink" title="本文目录"></a>本文目录</h2><ul>
+<li><a href="#series">系列文章目录</a></li>
+<li><a href="#what-is-vsync">什么是 Vsync</a></li>
+<li><a href="#principle">Android 中 Vsync 的基本工作原理</a></li>
+<li><a href="#perfetto-observe">在 Perfetto 中观察 Vsync</a></li>
+<li><a href="#app-frames">Android App 每一帧是如何基于 Vsync 工作的</a></li>
+<li><a href="#refs">参考文档</a></li>
+<li><a href="#about">关于我 &amp;&amp; 博客</a></li>
+</ul>
+<p><a id="series"></a></p>
+<h1 id="系列文章目录"><a href="#系列文章目录" class="headerlink" title="系列文章目录"></a>系列文章目录</h1><ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/03/27/Android-Perfetto-101/#/Perfetto-%E7%B3%BB%E5%88%97%E7%9B%AE%E5%BD%95">Android Perfetto 系列目录</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto 系列 1：Perfetto 工具简介</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto 系列 2：Perfetto Trace 抓取</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto 系列 3：熟悉 Perfetto View</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto 系列 4：使用命令行在本地打开超大 Trace</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto 系列 5：Android App 基于 Choreographer 的渲染流程</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</a></li>
+<li><a href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7 - MainThread 和 RenderThread 解读</a></li>
+<li><a href="https://androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 9 - CPU 信息解读</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV1oi82efE4D/?vd_source=0c6d2191e785de0a36dc21a9da7e664e">视频(B站) - Android Perfetto 基础和案例分享</a></li>
+</ol>
+<p>如果大家还没看过 Systrace 系列，下面是传送门：</p>
+<ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/05/26/Android_Systrace_0/#/%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0%E7%9B%AE%E5%BD%95">Systrace 系列目录</a> ： 系统介绍了 Perfetto 的前身 Systrace 的使用，并通过 Systrace 来学习和了解 Android 性能优化和 Android 系统运行的基本规则。</li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/">个人博客</a> ：个人博客，主要是 Android 相关的内容，也放了一些生活和工作相关的内容。</li>
+</ol>
+<p>欢迎大家在 <a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">关于我</a> 页面加入微信群或者星球，讨论你的问题、你最想看到的关于 Perfetto 的部分，以及跟各位群友讨论所有 Android 开发相关的内容</p>
+<p><a id="what-is-vsync"></a></p>
+<h2 id="什么是-Vsync"><a href="#什么是-Vsync" class="headerlink" title="什么是 Vsync"></a>什么是 Vsync</h2><p>Vsync（Vertical Synchronization，垂直同步）是 Android 图形系统的核心机制，它的存在是为了解决一个根本性的问题：如何让软件的渲染节奏与硬件的显示节奏保持同步。</p>
+<p>在没有 Vsync 机制之前，常见问题是屏幕撕裂（Screen Tearing）。当显示器读取 framebuffer 的同时，GPU 写入了下一帧，就会在同一次刷新中出现上下两部分不一致的画面。</p>
+<h3 id="Vsync-解决什么问题？"><a href="#Vsync-解决什么问题？" class="headerlink" title="Vsync 解决什么问题？"></a>Vsync 解决什么问题？</h3><p>Vsync 机制的核心思想非常简单：<strong>让所有的渲染工作都按照显示器的刷新节拍来进行</strong>。具体来说：</p>
+<ol>
+<li><strong>同步信号</strong>：显示器每次开始新的刷新周期时，都会发出一个 Vsync 信号。</li>
+<li><strong>帧节拍与生产</strong>：应用侧在 Vsync 到来时由 Choreographer 驱动开始一帧的生产（Input&#x2F;Animation&#x2F;Traversal）；CPU 提交渲染命令后，GPU 异步流水执行。SurfaceFlinger 侧在 Vsync 到来时进行 Buffer 的合成操作。</li>
+<li><strong>缓冲机制</strong>：使用双缓冲或三缓冲技术，确保显示器总是读取完整的帧数据。</li>
+</ol>
+<p>这样，帧的生产与显示以 Vsync 为节拍对齐。以 120Hz 为例，每 8.333ms 会有一个显示机会；应用需要在该窗口前把可合成的 Buffer 提交给 SurfaceFlinger。关键约束是 <code>queueBuffer</code>&#x2F;<code>acquire_fence</code>&#x2F;<code>present_fence</code> 的时序；若未赶上本周期，会顺延到下一个周期显示。</p>
+<p><a id="principle"></a></p>
+<h2 id="Android-中-Vsync-的基本工作原理"><a href="#Android-中-Vsync-的基本工作原理" class="headerlink" title="Android 中 Vsync 的基本工作原理"></a>Android 中 Vsync 的基本工作原理</h2><p>Android 系统的 Vsync 实现比基本概念复杂得多，需要考虑多个不同的渲染组件，以及它们之间的协调工作。</p>
+<h3 id="Vsync-信号的分层架构"><a href="#Vsync-信号的分层架构" class="headerlink" title="Vsync 信号的分层架构"></a>Vsync 信号的分层架构</h3><p>在 Android 系统中，并不是只有一个简单的 Vsync 信号。实际上，系统维护着多个不同用途的 Vsync 信号：</p>
+<p><strong>硬件 Vsync（HW Vsync）</strong>：<br>这是最底层的 Vsync 信号，由显示硬件（HWC，Hardware Composer）产生。它的频率严格对应显示器的刷新率，比如 60Hz 的显示器会每 16.67ms 产生一次 HW Vsync，120Hz 的显示器会每 8.333ms 产生一次。（硬件 Vsync 回调由 HWC&#x2F;SurfaceFlinger 管理，详见 <code>frameworks/native/services/surfaceflinger</code> 相关实现）</p>
+<p>但是，HW Vsync 并不是一直开启的。由于频繁的硬件中断会消耗较多的电量，Android 系统采用了一种智能的策略：只有在需要精确同步的时候才开启 HW Vsync，大部分时间使用软件预测的方式生成 Vsync 信号。</p>
+<p><strong>Vsync-app（应用 Vsync）</strong>：<br>这是专门用于驱动应用层渲染的 Vsync 信号。当应用需要进行 UI 更新时（比如用户触摸、动画运行、界面滚动等），应用会向系统申请接收 Vsync-app 信号。</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/base/core/java/android/view/Choreographer.java</span></span><br><span class="line"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title function_">scheduleFrameLocked</span><span class="params">(<span class="type">long</span> now)</span> &#123;</span><br><span class="line">    <span class="keyword">if</span> (!mFrameScheduled) &#123;</span><br><span class="line">        mFrameScheduled = <span class="literal">true</span>;</span><br><span class="line">        <span class="keyword">if</span> (USE_VSYNC) &#123;</span><br><span class="line">            <span class="comment">// 向系统申请下一个 Vsync 信号</span></span><br><span class="line">            mDisplayEventReceiver.scheduleVsync();</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>Vsync-app 是按需申请的。如果应用界面是静态的，没有任何动画或用户交互，那么应用不会申请 Vsync-app 信号，系统也就不会为这个应用生成 Vsync 事件。</p>
+<p><strong>Vsync-sf（SurfaceFlinger Vsync）</strong>：<br>这是专门用于驱动 SurfaceFlinger 进行图层合成的 Vsync 信号。SurfaceFlinger 是 Android 系统中负责将所有应用的图层合成为最终画面的服务。</p>
+<p><strong>Vsync-appSf（应用-SurfaceFlinger Vsync）</strong>：<br>Android 13 引入的新信号类型。为消除旧设计中 sf EventThread 既唤醒 SurfaceFlinger 又服务部分 Choreographer 客户端带来的时序歧义，系统将两类职责分离：<code>vsync-sf</code> 专注唤醒 SurfaceFlinger，<code>vsync-appSf</code> 面向需要与 SurfaceFlinger 同步的客户端。</p>
+<p><a id="perfetto-observe"></a></p>
+<h2 id="在-Perfetto-中观察-Vsync"><a href="#在-Perfetto-中观察-Vsync" class="headerlink" title="在 Perfetto 中观察 Vsync"></a>在 Perfetto 中观察 Vsync</h2><p>Perfetto trace 中包含多个与 Vsync 相关的 Track，理解这些 Track 的含义有助于分析性能问题。</p>
+<p><strong>在 SurfaceFlinger 进程中</strong>：</p>
+<ol>
+<li><p><strong>vsync-app</strong><br>显示应用 Vsync 信号状态，数值在 0 和 1 之间变化。每次数值变化代表一个 Vsync 信号。<br><img src="/images/Android-Perfetto-08-Vsync/image-20250811221826847.png" alt="image-20250811221826847"></p>
+</li>
+<li><p>**vsync-sf **<br>显示 SurfaceFlinger Vsync 信号状态。无 Vsync Offset 时与 <code>vsync-app</code> 同步变化。<br><img src="/images/Android-Perfetto-08-Vsync/image-20250811221902646.png" alt="image-20250811221902646"></p>
+</li>
+<li><p><strong>vsync-appSf</strong><br>Android 13+ 新增，服务于需要与 SurfaceFlinger 同步的特殊 Choreographer 客户端。<br><img src="/images/Android-Perfetto-08-Vsync/image-20250811222036489.png" alt="image-20250811222036489"></p>
+</li>
+<li><p><strong>HW_VSYNC</strong><br>显示硬件 Vsync 开启状态。值为 1 表示开启，值为 0 表示关闭。为节省电量，硬件 Vsync 仅在需要精确同步时开启。<br><img src="/images/Android-Perfetto-08-Vsync/image-20250811222159253.png" alt="image-20250811222159253"></p>
+</li>
+</ol>
+<p><strong>在应用进程中</strong>：</p>
+<p><code>FrameDisplayEventReceiver.onVsync</code> Slice Track：<br>显示应用接收 Vsync 信号的时间点。由于信号通过 Binder 传递，时间可能略晚于 SurfaceFlinger 中的 <code>vsync-app</code>。</p>
+<p><img src="/images/Android-Perfetto-08-Vsync/image-20250918220632473.png" alt="image-20250918220632473"></p>
+<p><code>UI Thread</code> Slice Track：<br>包含 <code>Choreographer#doFrame</code> 及相关的 Input、Animation、Traversal 等 Slice。每个 <code>doFrame</code> 对应一帧的处理工作。</p>
+<p><img src="/images/Android-Perfetto-08-Vsync/image-20250918220709655.png" alt="image-20250918220709655"></p>
+<p><code>RenderThread</code> Slice Track：<br>包含 <code>DrawFrame</code>、<code>syncAndDrawFrame</code>、<code>queueBuffer</code> 等 Slice，对应渲染线程工作。</p>
+<p><img src="/images/Android-Perfetto-08-Vsync/image-20250918220730872.png" alt="image-20250918220730872"></p>
+<p><a id="app-frames"></a></p>
+<h2 id="Android-App-每一帧是如何基于-Vsync-工作的"><a href="#Android-App-每一帧是如何基于-Vsync-工作的" class="headerlink" title="Android App 每一帧是如何基于 Vsync 工作的"></a>Android App 每一帧是如何基于 Vsync 工作的</h2><p>Android 应用的每一帧基于 Vsync 机制完成从渲染到显示的完整过程涉及多个关键步骤。</p>
+<p><img src="/images/Android-Perfetto-08-Vsync/image-20250918221821265.png" alt="image-20250918221821265"></p>
+<h3 id="流程总览（按顺序）"><a href="#流程总览（按顺序）" class="headerlink" title="流程总览（按顺序）"></a>流程总览（按顺序）</h3><ol>
+<li>触发重绘&#x2F;输入：<code>View.invalidate()</code>、动画、数据变化或输入事件触发 → <code>ViewRootImpl.scheduleTraversals()</code> → <code>Choreographer.postCallback(TRAVERSAL)</code></li>
+<li>申请 Vsync：<code>Choreographer</code> 通过 <code>DisplayEventReceiver.scheduleVsync()</code> 申请下一次 Vsync（app 相位）</li>
+<li>接收 Vsync：<code>DisplayEventReceiver.onVsync()</code> 收到 Vsync 后，向主线程消息队列投递异步消息</li>
+<li>主线程帧处理：<code>Choreographer.doFrame()</code> 按顺序执行五类回调：<code>INPUT → ANIMATION → INSETS_ANIMATION → TRAVERSAL → COMMIT</code></li>
+<li>渲染提交：<code>RenderThread</code> 执行 <code>syncAndDrawFrame/DrawFrame</code>，CPU 记录 GPU 命令，<code>queueBuffer</code> 提交到 BufferQueue</li>
+<li>合成显示：<code>SurfaceFlinger</code> 在 <code>vsync-sf</code> 到来时合成（GPU&#x2F;或HWC），生成 <code>present_fence</code>，输出到显示</li>
+<li>帧完成度量：通过 <code>FrameTimeline</code>（PresentType&#x2F;JankType）与 <code>acquire/present_fence</code> 判定是否按期显示</li>
+</ol>
+<p>下面分别展开每一步的关键实现与 Perfetto 观测点。</p>
+<h3 id="App-什么时候会申请-Vsync-信号"><a href="#App-什么时候会申请-Vsync-信号" class="headerlink" title="App 什么时候会申请 Vsync 信号"></a>App 什么时候会申请 Vsync 信号</h3><p>应用并不是时刻都在申请 Vsync 信号的。Vsync 信号是按需申请的，只有在以下情况下，应用才会向系统申请下一个 Vsync：</p>
+<p><strong>触发申请 Vsync 的场景</strong>：</p>
+<ol>
+<li><strong>UI 更新需求</strong>：当 View 调用 <code>invalidate()</code> 时</li>
+<li><strong>动画执行</strong>：ValueAnimator、ObjectAnimator 等动画开始时  </li>
+<li><strong>用户交互</strong>：触摸事件、按键事件等需要 UI 响应时</li>
+<li><strong>数据变化</strong>：RecyclerView 数据更新、TextView 文本改变等</li>
+</ol>
+<h3 id="App-申请-Vsync-的完整流程"><a href="#App-申请-Vsync-的完整流程" class="headerlink" title="App 申请 Vsync 的完整流程"></a>App 申请 Vsync 的完整流程</h3><p>当应用需要更新 UI 时，会通过以下流程申请 Vsync 信号：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 1. UI 组件请求重绘</span></span><br><span class="line"><span class="comment">// frameworks/base/core/java/android/view/View.java</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">invalidate</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="comment">// 标记为需要重绘，但不立即执行</span></span><br><span class="line">    mPrivateFlags |= PFLAG_DIRTY;</span><br><span class="line">    </span><br><span class="line">    <span class="keyword">if</span> (mParent != <span class="literal">null</span> &amp;&amp; mAttachInfo != <span class="literal">null</span>) &#123;</span><br><span class="line">        <span class="comment">// 向父容器请求重绘</span></span><br><span class="line">        mParent.invalidateChild(<span class="built_in">this</span>, <span class="literal">null</span>);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 2. ViewRootImpl 调度遍历</span></span><br><span class="line"><span class="comment">// frameworks/base/core/java/android/view/ViewRootImpl.java</span></span><br><span class="line"><span class="keyword">void</span> <span class="title function_">scheduleTraversals</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="keyword">if</span> (!mTraversalScheduled) &#123;</span><br><span class="line">        mTraversalScheduled = <span class="literal">true</span>;</span><br><span class="line">        <span class="comment">// 关键：向 Choreographer 注册回调，等待下一个 Vsync</span></span><br><span class="line">        mChoreographer.postCallback(</span><br><span class="line">            Choreographer.CALLBACK_TRAVERSAL, mTraversalRunnable, <span class="literal">null</span>);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 3. Choreographer 申请 Vsync</span></span><br><span class="line"><span class="comment">// frameworks/base/core/java/android/view/Choreographer.java</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">postCallback</span><span class="params">(<span class="type">int</span> callbackType, Runnable action, Object token)</span> &#123;</span><br><span class="line">    <span class="comment">// 添加回调到队列</span></span><br><span class="line">    mCallbackQueues[callbackType].addCallbackLocked(action, token);</span><br><span class="line">    </span><br><span class="line">    <span class="keyword">if</span> (callbackType == CALLBACK_TRAVERSAL) &#123;</span><br><span class="line">        <span class="comment">// 如果是 UI 遍历回调，立即申请 Vsync</span></span><br><span class="line">        scheduleFrameLocked(now);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title function_">scheduleFrameLocked</span><span class="params">(<span class="type">long</span> now)</span> &#123;</span><br><span class="line">    <span class="keyword">if</span> (!mFrameScheduled) &#123;</span><br><span class="line">        mFrameScheduled = <span class="literal">true</span>;</span><br><span class="line">        <span class="comment">// 关键：向系统申请 Vsync 信号</span></span><br><span class="line">        mDisplayEventReceiver.scheduleVsync();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h3 id="主线程如何监听-Vsync-信号"><a href="#主线程如何监听-Vsync-信号" class="headerlink" title="主线程如何监听 Vsync 信号"></a>主线程如何监听 Vsync 信号</h3><p>应用主线程通过 <code>DisplayEventReceiver</code> 来监听 Vsync 信号。这个过程涉及几个关键步骤：</p>
+<p><strong>1. 建立连接</strong>：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/base/core/java/android/view/Choreographer.java</span></span><br><span class="line"><span class="keyword">private</span> <span class="keyword">final</span> <span class="keyword">class</span> <span class="title class_">FrameDisplayEventReceiver</span> <span class="keyword">extends</span> <span class="title class_">DisplayEventReceiver</span></span><br><span class="line">        <span class="keyword">implements</span> <span class="title class_">Runnable</span> &#123;</span><br><span class="line">    </span><br><span class="line">    <span class="keyword">public</span> <span class="title function_">FrameDisplayEventReceiver</span><span class="params">(Looper looper, <span class="type">int</span> vsyncSource)</span> &#123;</span><br><span class="line">        <span class="built_in">super</span>(looper, vsyncSource);</span><br><span class="line">        <span class="comment">// 在构造时建立与 SurfaceFlinger 的连接</span></span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p><strong>2. 接收 Vsync 信号</strong>：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@Override</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">onVsync</span><span class="params">(<span class="type">long</span> timestampNanos, <span class="type">long</span> physicalDisplayId, <span class="type">int</span> frame)</span> &#123;</span><br><span class="line">    <span class="comment">// 接收到 Vsync 信号，但注意：这里并不直接执行 doFrame</span></span><br><span class="line">    mTimestampNanos = timestampNanos;</span><br><span class="line">    mFrame = frame;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 关键：将工作 post 到主线程的 MessageQueue 中</span></span><br><span class="line">    <span class="type">Message</span> <span class="variable">msg</span> <span class="operator">=</span> Message.obtain(mHandler, <span class="built_in">this</span>);</span><br><span class="line">    msg.setAsynchronous(<span class="literal">true</span>);  <span class="comment">// 设为异步消息，优先处理</span></span><br><span class="line">    mHandler.sendMessageAtTime(msg, timestampNanos / TimeUtils.NANOS_PER_MS);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="meta">@Override</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">run</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="comment">// 这里才真正开始执行一帧的工作</span></span><br><span class="line">    doFrame(mTimestampNanos, mFrame);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h3 id="几个遗留问题"><a href="#几个遗留问题" class="headerlink" title="几个遗留问题"></a>几个遗留问题</h3><p><strong>Q1：为什么不在 <code>onVsync()</code> 中直接执行 <code>doFrame()</code>？</strong><br><img src="/images/Android-Perfetto-08-Vsync/image-20250918221936675.png" alt="image-20250918221936675"></p>
+<ul>
+<li>线程边界：<code>onVsync()</code> 可能不在主线程，UI 必须在主线程执行</li>
+<li>调度控制：通过 <code>sendMessageAtTime()</code> 精确对齐执行时刻</li>
+<li>队列语义：进入主线程 MessageQueue，确保与其他高优先级任务协同</li>
+</ul>
+<p><strong>Q2：Vsync 消息来了但主线程在忙，会丢吗？</strong><br><img src="/images/Android-Perfetto-08-Vsync/image-20250918222045731.png" alt="image-20250918222045731"></p>
+<ul>
+<li>不会。Vsync 消息入队后等待执行</li>
+</ul>
+<p><strong>Q3：CPU&#x2F;GPU 是否必须在单个 Vsync 周期内完成？</strong>如果任何一个环节超过 1 个 vsync ，都会导致掉帧？</p>
+<ul>
+<li><p>现代 Android 系统采用多缓冲（通常是三缓冲）机制：</p>
+<ul>
+<li><p><strong>应用端</strong>：Front Buffer（显示中）+ Back Buffer（渲染中）+ 可能的第三个 Buffer</p>
+</li>
+<li><p><strong>SurfaceFlinger 端</strong>：也有类似的缓冲机制</p>
+</li>
+<li><p>这意味着即使应用的某一帧超过了 Vsync 周期，也不一定会立即掉帧。</p>
+</li>
+</ul>
+</li>
+<li><p>GPU 异步流水；关键是 <code>queueBuffer</code> 是否赶上 SF 合成窗口，多缓冲可掩盖单帧延迟但可能引入额外时延，可以看到下图里面，App 端的 BufferQueue 和 SurfaceFlinger 端的 Buffer 都是充足的，且有冗余，所以没有掉帧。</p>
+</li>
+<li><p>但是如果 App 在之前没有堆积 Buffer ，则还是会出现掉帧。</p>
+</li>
+</ul>
+<p><img src="/images/Android-Perfetto-08-Vsync/image-20250918222258536.png" alt="image-20250918222258536"></p>
+<p><strong>Q5：GPU 和 CPU 是怎么协同的？</strong>：</p>
+<ul>
+<li><p>GPU 渲染是异步的，这带来了额外的复杂性：</p>
+<ul>
+<li><strong>CPU 工作正常，GPU 成为瓶颈</strong>：即使应用主线程在 Vsync 周期内完成工作，GPU 渲染耗时过长仍会导致掉帧</li>
+<li><strong>GPU Fence 机制</strong>：<code>presentFence</code> 是连接 GPU 渲染和 SurfaceFlinger 合成的关键同步机制。根据系统 <code>Latch Unsignaled Buffers</code> 策略，SurfaceFlinger 并非总是等待 GPU 完成，而是可以“抢跑”提前开始合成，仅在最终需要使用 Buffer 内容时才等待 fence 信号，以此来隐藏延迟。</li>
+</ul>
+<p><img src="/images/Android-Perfetto-08-Vsync/image-20250918222626100.png" alt="image-20250918222626100"></p>
+</li>
+</ul>
+<p><strong>Q6：Vsync Phase（相位差）的真正作用是什么？</strong>：</p>
+<ul>
+<li><strong>提升跟手性</strong>：通过调整 sf vsync 的相位差，可以让应用从开始绘制到显示在屏幕上的时间从 3 个 Vsync 周期缩短到 2 个 Vsync 周期。这对于触摸响应等交互场景非常重要。</li>
+<li><strong>解决应用绘制超时问题</strong>：当应用绘制超时时，合理的 sf 相位差可以为应用争取更多的处理时间，避免因为时序不当导致的掉帧。</li>
+<li>通过观察 Perfetto 中的 VsyncWorkDuration 指标可以了解系统的 Vsync Offset 配置。</li>
+<li>下图中显示的时间段就是我手上的手机配置的 app offset （13.3ms）</li>
+</ul>
+<p><img src="/images/Android-Perfetto-08-Vsync/image-20250918222707300.png" alt="image-20250918222707300"></p>
+<h3 id="Vsync-Offset-的技术实现"><a href="#Vsync-Offset-的技术实现" class="headerlink" title="Vsync Offset 的技术实现"></a>Vsync Offset 的技术实现</h3><p>在 Android 系统中，Vsync Offset 是通过 VsyncConfiguration 来实现的：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/native/services/surfaceflinger/Scheduler/VsyncConfiguration.cpp</span></span><br><span class="line"><span class="keyword">struct</span> <span class="title class_">VsyncConfiguration</span> &#123;</span><br><span class="line">    <span class="comment">// 应用 Vsync 相对于硬件 Vsync 的偏移</span></span><br><span class="line">    <span class="type">nsecs_t</span> appOffset;</span><br><span class="line">    <span class="comment">// SurfaceFlinger Vsync 相对于硬件 Vsync 的偏移  </span></span><br><span class="line">    <span class="type">nsecs_t</span> sfOffset;</span><br><span class="line">    <span class="comment">// 早期应用 Vsync 偏移（用于特殊情况）</span></span><br><span class="line">    <span class="type">nsecs_t</span> appOffsetEarly;</span><br><span class="line">    <span class="comment">// 早期 SurfaceFlinger Vsync 偏移</span></span><br><span class="line">    <span class="type">nsecs_t</span> sfOffsetEarly;</span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure>
+
+<p><strong>关键概念</strong>：</p>
+<ul>
+<li><code>appOffset</code>：应用 Vsync 相对于硬件 Vsync 的时间偏移</li>
+<li><code>sfOffset</code>：SurfaceFlinger Vsync 相对于硬件 Vsync 的时间偏移</li>
+<li><code>Vsync Offset = sfOffset - appOffset</code>：应用和 SurfaceFlinger 接收信号的时间差</li>
+</ul>
+<h3 id="实际的优化效果"><a href="#实际的优化效果" class="headerlink" title="实际的优化效果"></a>实际的优化效果</h3><p>以 120Hz 设备为例，配置 3ms Offset 的效果：</p>
+<p><strong>无 Offset（传统方式）</strong>：</p>
+<ul>
+<li>T0：应用和 SurfaceFlinger 同时接收 Vsync</li>
+<li>T0+3ms：应用完成渲染</li>
+<li>T0+8.333ms：下一个 Vsync，SurfaceFlinger 开始合成</li>
+<li>T0+16.666ms：用户看到画面（总延迟 16.666ms）</li>
+</ul>
+<p><strong>有 Offset（优化方式）</strong>：</p>
+<ul>
+<li>T0+1ms：应用接收 Vsync-app，开始渲染</li>
+<li>T0+3ms：应用完成渲染，提交 Buffer</li>
+<li>T0+4ms：SurfaceFlinger 接收 Vsync-sf，立即开始合成</li>
+<li>T0+6ms：SurfaceFlinger 完成合成</li>
+<li>T0+8.333ms：用户看到画面（总延迟 8.333ms）</li>
+</ul>
+<p>通过合理配置 Offset，可以将延迟从 16.666ms 减少到 8.333ms，提升一倍的响应性能。</p>
+<p><strong>实际的时间预算分配</strong>：</p>
+<p>以 120Hz 设备为例（8.333ms 周期）：</p>
+<ul>
+<li><strong>理想情况</strong>：应用 4ms + SurfaceFlinger 2ms + 缓冲 2.333ms</li>
+<li><strong>但实际可以接受</strong>：应用 6ms + SurfaceFlinger 3ms（如果有足够的 Buffer 缓冲）</li>
+<li><strong>GPU 限制</strong>：在低端设备上，GPU 渲染可能需要 10-15ms，成为真正的瓶颈</li>
+</ul>
+<p><strong>掉帧的真正原因</strong>：</p>
+<ol>
+<li><strong>应用端超时 + Buffer 耗尽</strong>：连续多帧超时导致 BufferQueue 没有可用 Buffer</li>
+<li><strong>GPU 渲染超时</strong>：即使 CPU 工作正常，GPU 渲染超时也会掉帧</li>
+<li><strong>SurfaceFlinger 超时</strong>：系统级合成超时，影响所有应用</li>
+<li><strong>系统资源竞争</strong>：CPU&#x2F;GPU&#x2F;内存等资源被其他进程占用</li>
+</ol>
+<h2 id="Vsync-信号的完整代码流程"><a href="#Vsync-信号的完整代码流程" class="headerlink" title="Vsync 信号的完整代码流程"></a>Vsync 信号的完整代码流程</h2><p>Vsync 信号从硬件传递到应用层的完整链路如下。</p>
+<h3 id="Native-层：Vsync-信号的产生与管理"><a href="#Native-层：Vsync-信号的产生与管理" class="headerlink" title="Native 层：Vsync 信号的产生与管理"></a>Native 层：Vsync 信号的产生与管理</h3><p><strong>硬件 Vsync 的产生</strong></p>
+<p>Vsync 信号最初由显示硬件产生。在 HWC（Hardware Composer）层面，硬件会定期产生 Vsync 中断：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// hardware/interfaces/graphics/composer/2.1/utils/hwc2on1adapter/HWC2On1Adapter.cpp</span></span><br><span class="line"><span class="comment">// 注意：这是 HWC 1.x 到 2.x 的兼容性适配器，现代设备通常使用原生 HWC 2.x+</span></span><br><span class="line"><span class="comment">// 基于 Android 16 AOSP 最新代码</span></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">HWC2On1Adapter::vsyncThread</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="keyword">while</span> (!mVsyncEnded) &#123;</span><br><span class="line">        <span class="keyword">if</span> (mVsyncEnabled) &#123;</span><br><span class="line">            <span class="type">const</span> <span class="keyword">auto</span> now = std::chrono::steady_clock::<span class="built_in">now</span>();</span><br><span class="line">            <span class="type">const</span> <span class="keyword">auto</span> vsyncPeriod = std::chrono::<span class="built_in">nanoseconds</span>(mVsyncPeriod);</span><br><span class="line">            <span class="type">const</span> <span class="keyword">auto</span> nextVsync = mLastVsync + vsyncPeriod;</span><br><span class="line">            </span><br><span class="line">            <span class="keyword">if</span> (now &gt;= nextVsync) &#123;</span><br><span class="line">                <span class="comment">// 产生硬件 Vsync 时间戳</span></span><br><span class="line">                <span class="keyword">auto</span> timestamp = std::chrono::<span class="built_in">duration_cast</span>&lt;std::chrono::nanoseconds&gt;(</span><br><span class="line">                    nextVsync.<span class="built_in">time_since_epoch</span>()).<span class="built_in">count</span>();</span><br><span class="line">                </span><br><span class="line">                <span class="comment">// 回调到 SurfaceFlinger</span></span><br><span class="line">                <span class="keyword">if</span> (mVsyncCallback) &#123;</span><br><span class="line">                    mVsyncCallback-&gt;<span class="built_in">onVsync</span>(timestamp, mDisplayId);</span><br><span class="line">                &#125;</span><br><span class="line">                mLastVsync = nextVsync;</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">        std::this_thread::<span class="built_in">sleep_for</span>(std::chrono::<span class="built_in">microseconds</span>(<span class="number">100</span>));</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p><strong>VsyncController：核心控制器</strong></p>
+<p>VsyncController 是整个 Vsync 系统的大脑，它接收硬件 Vsync 并管理软件预测：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/native/services/surfaceflinger/Scheduler/VsyncController.h</span></span><br><span class="line"><span class="comment">// 实际实现通常在 VSyncReactor.cpp 中</span></span><br><span class="line"><span class="comment">// 基于 Android 16 AOSP 最新代码</span></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">VsyncController::onVsync</span><span class="params">(<span class="type">nsecs_t</span> timestamp, <span class="type">int32_t</span> hwcDisplayId)</span> </span>&#123;</span><br><span class="line">    <span class="function">std::lock_guard&lt;std::mutex&gt; <span class="title">lock</span><span class="params">(mMutex)</span></span>;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 记录硬件 Vsync 时间戳到追踪器</span></span><br><span class="line">    mVsyncTracker-&gt;<span class="built_in">addVsyncTimestamp</span>(timestamp);</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 检查是否需要更多硬件 Vsync 样本来校准预测模型</span></span><br><span class="line">    <span class="keyword">if</span> (mVsyncTracker-&gt;<span class="built_in">needsMoreSamples</span>()) &#123;</span><br><span class="line">        <span class="comment">// 模型还需要更多样本，继续启用硬件 Vsync</span></span><br><span class="line">        <span class="built_in">ALOGV</span>(<span class="string">&quot;VsyncController: Need more samples, keeping HW Vsync enabled&quot;</span>);</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        <span class="comment">// 模型已经稳定，可以关闭硬件 Vsync 节省电量</span></span><br><span class="line">        <span class="built_in">ALOGV</span>(<span class="string">&quot;VsyncController: Model stable, disabling HW Vsync&quot;</span>);</span><br><span class="line">        <span class="built_in">enableHardwareVsync</span>(<span class="literal">false</span>);</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 通知所有等待的客户端</span></span><br><span class="line">    <span class="keyword">for</span> (<span class="keyword">auto</span>&amp; callback : mCallbacks) &#123;</span><br><span class="line">        callback-&gt;<span class="built_in">onVsync</span>(timestamp);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">VsyncController::enableHardwareVsync</span><span class="params">(<span class="type">bool</span> enable)</span> </span>&#123;</span><br><span class="line">    <span class="keyword">if</span> (mHwVsyncEnabled != enable) &#123;</span><br><span class="line">        mHwVsyncEnabled = enable;</span><br><span class="line">        <span class="comment">// 通过 HWC 接口控制硬件 Vsync</span></span><br><span class="line">        mHwc.<span class="built_in">setVsyncEnabled</span>(mDisplayId, enable);</span><br><span class="line">        </span><br><span class="line">        <span class="comment">// 在 Perfetto trace 中可以看到这个状态变化</span></span><br><span class="line">        <span class="built_in">ATRACE_INT</span>(<span class="string">&quot;HW_VSYNC&quot;</span>, enable ? <span class="number">1</span> : <span class="number">0</span>);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p><strong>VsyncDispatch：信号分发机制</strong></p>
+<p>VsyncDispatch 负责将 Vsync 信号精确地分发给不同的消费者，每个消费者可以有不同的触发时间：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/native/services/surfaceflinger/Scheduler/VSyncDispatch.h</span></span><br><span class="line"><span class="comment">// 实际实现在 VSyncDispatchTimerQueue.cpp 中</span></span><br><span class="line"><span class="comment">// 基于 Android 16 AOSP 最新代码</span></span><br><span class="line"><span class="function">VsyncDispatch::CallbackToken <span class="title">VsyncDispatch::registerCallback</span><span class="params">(</span></span></span><br><span class="line"><span class="params"><span class="function">        Callback callback, std::string callbackName)</span> </span>&#123;</span><br><span class="line">    <span class="function">std::lock_guard&lt;<span class="title">decltype</span><span class="params">(mMutex)</span>&gt; <span class="title">lock</span><span class="params">(mMutex)</span></span>;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 为每个回调生成唯一的 token</span></span><br><span class="line">    <span class="keyword">auto</span> token = <span class="built_in">CallbackToken</span>(mCallbackMap.<span class="built_in">size</span>());</span><br><span class="line">    mCallbackMap[token] = std::<span class="built_in">make_unique</span>&lt;CallbackEntry&gt;(</span><br><span class="line">        std::<span class="built_in">move</span>(callback), std::<span class="built_in">move</span>(callbackName));</span><br><span class="line">    </span><br><span class="line">    <span class="keyword">return</span> token;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="type">nsecs_t</span> <span class="title">VsyncDispatch::schedule</span><span class="params">(CallbackToken token, </span></span></span><br><span class="line"><span class="params"><span class="function">                               <span class="type">nsecs_t</span> workDuration, </span></span></span><br><span class="line"><span class="params"><span class="function">                               <span class="type">nsecs_t</span> earliestVsync)</span> </span>&#123;</span><br><span class="line">    <span class="function">std::lock_guard&lt;<span class="title">decltype</span><span class="params">(mMutex)</span>&gt; <span class="title">lock</span><span class="params">(mMutex)</span></span>;</span><br><span class="line">    </span><br><span class="line">    <span class="keyword">auto</span> it = mCallbackMap.<span class="built_in">find</span>(token);</span><br><span class="line">    <span class="keyword">if</span> (it == mCallbackMap.<span class="built_in">end</span>()) &#123;</span><br><span class="line">        <span class="keyword">return</span> kInvalidTime;</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 计算目标 Vsync 时间</span></span><br><span class="line">    <span class="keyword">auto</span> targetVsync = mVsyncTracker-&gt;<span class="built_in">nextVsyncTime</span>(earliestVsync);</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 计算唤醒时间 = 目标 Vsync - 工作时长</span></span><br><span class="line">    <span class="keyword">auto</span> wakeupTime = targetVsync - workDuration;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 如果唤醒时间已经过了，推到下一个 Vsync</span></span><br><span class="line">    <span class="keyword">auto</span> now = <span class="built_in">systemTime</span>(SYSTEM_TIME_MONOTONIC);</span><br><span class="line">    <span class="keyword">if</span> (wakeupTime &lt; now) &#123;</span><br><span class="line">        targetVsync = mVsyncTracker-&gt;<span class="built_in">nextVsyncTime</span>(targetVsync + <span class="number">1</span>);</span><br><span class="line">        wakeupTime = targetVsync - workDuration;</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 设置回调的触发时间</span></span><br><span class="line">    it-&gt;second-&gt;wakeupTime = wakeupTime;</span><br><span class="line">    it-&gt;second-&gt;targetVsync = targetVsync;</span><br><span class="line">    it-&gt;second-&gt;workDuration = workDuration;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 重新调度定时器</span></span><br><span class="line">    <span class="built_in">reschedule</span>();</span><br><span class="line">    </span><br><span class="line">    <span class="keyword">return</span> targetVsync;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">VsyncDispatch::reschedule</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="comment">// 找到最早需要触发的回调</span></span><br><span class="line">    <span class="type">nsecs_t</span> nextWakeup = std::numeric_limits&lt;<span class="type">nsecs_t</span>&gt;::<span class="built_in">max</span>();</span><br><span class="line">    <span class="keyword">for</span> (<span class="type">const</span> <span class="keyword">auto</span>&amp; [token, entry] : mCallbackMap) &#123;</span><br><span class="line">        <span class="keyword">if</span> (entry-&gt;wakeupTime &gt; <span class="number">0</span> &amp;&amp; entry-&gt;wakeupTime &lt; nextWakeup) &#123;</span><br><span class="line">            nextWakeup = entry-&gt;wakeupTime;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    <span class="keyword">if</span> (nextWakeup != std::numeric_limits&lt;<span class="type">nsecs_t</span>&gt;::<span class="built_in">max</span>()) &#123;</span><br><span class="line">        <span class="comment">// 设置定时器在 nextWakeup 时间触发</span></span><br><span class="line">        mTimeKeeper-&gt;<span class="built_in">alarmAt</span>(std::<span class="built_in">bind</span>(&amp;VsyncDispatch::timerCallback, <span class="keyword">this</span>), nextWakeup);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">VsyncDispatch::timerCallback</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    std::vector&lt;std::pair&lt;CallbackToken, CallbackEntry*&gt;&gt; firedCallbacks;</span><br><span class="line">    </span><br><span class="line">    &#123;</span><br><span class="line">        <span class="function">std::lock_guard&lt;<span class="title">decltype</span><span class="params">(mMutex)</span>&gt; <span class="title">lock</span><span class="params">(mMutex)</span></span>;</span><br><span class="line">        <span class="keyword">auto</span> now = <span class="built_in">systemTime</span>(SYSTEM_TIME_MONOTONIC);</span><br><span class="line">        </span><br><span class="line">        <span class="comment">// 找到所有应该触发的回调</span></span><br><span class="line">        <span class="keyword">for</span> (<span class="keyword">auto</span>&amp; [token, entry] : mCallbackMap) &#123;</span><br><span class="line">            <span class="keyword">if</span> (entry-&gt;wakeupTime &gt; <span class="number">0</span> &amp;&amp; now &gt;= entry-&gt;wakeupTime) &#123;</span><br><span class="line">                firedCallbacks.<span class="built_in">push_back</span>(&#123;token, entry.<span class="built_in">get</span>()&#125;);</span><br><span class="line">                entry-&gt;wakeupTime = <span class="number">0</span>; <span class="comment">// 重置</span></span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 在锁外执行回调，避免死锁</span></span><br><span class="line">    <span class="keyword">for</span> (<span class="keyword">auto</span>&amp; [token, entry] : firedCallbacks) &#123;</span><br><span class="line">        entry-&gt;<span class="built_in">callback</span>(entry-&gt;targetVsync, entry-&gt;wakeupTime);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p><strong>EventThread：连接 Native 和 Framework</strong></p>
+<p>EventThread 是连接 Native 层 Vsync 系统和 Framework 层的桥梁：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/native/services/surfaceflinger/Scheduler/EventThread.cpp</span></span><br><span class="line">EventThread::<span class="built_in">EventThread</span>(std::unique_ptr&lt;VSyncSource&gt; vsyncSource,</span><br><span class="line">                        std::unique_ptr&lt;InterceptVSyncCallback&gt; interceptVSyncCallback,</span><br><span class="line">                        <span class="type">const</span> <span class="type">char</span>* threadName)</span><br><span class="line">    : <span class="built_in">mVSyncSource</span>(std::<span class="built_in">move</span>(vsyncSource))</span><br><span class="line">    , <span class="built_in">mInterceptVSyncCallback</span>(std::<span class="built_in">move</span>(interceptVSyncCallback))</span><br><span class="line">    , <span class="built_in">mThreadName</span>(threadName) &#123;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 向 VsyncDispatch 注册回调</span></span><br><span class="line">    mVSyncSource-&gt;<span class="built_in">setCallback</span>(<span class="keyword">this</span>);</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 启动 EventThread 线程</span></span><br><span class="line">    mThread = std::<span class="built_in">thread</span>([<span class="keyword">this</span>] &#123; <span class="built_in">threadMain</span>(); &#125;);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">EventThread::threadMain</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="function">std::unique_lock&lt;std::mutex&gt; <span class="title">lock</span><span class="params">(mMutex)</span></span>;</span><br><span class="line">    </span><br><span class="line">    <span class="keyword">while</span> (mKeepRunning) &#123;</span><br><span class="line">        <span class="comment">// 等待 Vsync 事件或连接变化</span></span><br><span class="line">        mCondition.<span class="built_in">wait</span>(lock, [<span class="keyword">this</span>] &#123;</span><br><span class="line">            <span class="keyword">return</span> !mPendingEvents.<span class="built_in">empty</span>() || !mKeepRunning;</span><br><span class="line">        &#125;);</span><br><span class="line">        </span><br><span class="line">        <span class="comment">// 处理所有待处理的事件</span></span><br><span class="line">        <span class="keyword">auto</span> pendingEvents = std::<span class="built_in">move</span>(mPendingEvents);</span><br><span class="line">        lock.<span class="built_in">unlock</span>();</span><br><span class="line">        </span><br><span class="line">        <span class="keyword">for</span> (<span class="type">const</span> <span class="keyword">auto</span>&amp; event : pendingEvents) &#123;</span><br><span class="line">            <span class="comment">// 分发给所有连接的客户端</span></span><br><span class="line">            <span class="keyword">for</span> (<span class="type">const</span> <span class="keyword">auto</span>&amp; connection : mConnections) &#123;</span><br><span class="line">                <span class="keyword">if</span> (connection-&gt;vsyncRequest != VSyncRequest::None) &#123;</span><br><span class="line">                    connection-&gt;<span class="built_in">postEvent</span>(event);</span><br><span class="line">                &#125;</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">        </span><br><span class="line">        lock.<span class="built_in">lock</span>();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">EventThread::onVSyncEvent</span><span class="params">(<span class="type">nsecs_t</span> timestamp, <span class="type">int32_t</span> displayId)</span> </span>&#123;</span><br><span class="line">    <span class="function">std::lock_guard&lt;std::mutex&gt; <span class="title">lock</span><span class="params">(mMutex)</span></span>;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 创建 Vsync 事件</span></span><br><span class="line">    DisplayEventReceiver::Event event;</span><br><span class="line">    event.header.type = DisplayEventReceiver::DISPLAY_EVENT_VSYNC;</span><br><span class="line">    event.header.id = displayId;</span><br><span class="line">    event.header.timestamp = timestamp;</span><br><span class="line">    event.vsync.count = ++mVSyncCount;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 添加到待处理事件队列</span></span><br><span class="line">    mPendingEvents.<span class="built_in">push_back</span>(event);</span><br><span class="line">    mCondition.<span class="built_in">notify_all</span>();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h3 id="Framework-层：Vsync-信号的接收与处理"><a href="#Framework-层：Vsync-信号的接收与处理" class="headerlink" title="Framework 层：Vsync 信号的接收与处理"></a>Framework 层：Vsync 信号的接收与处理</h3><p><strong>DisplayEventReceiver：Java 和 Native 的桥梁</strong></p>
+<p>DisplayEventReceiver 是 Framework 层接收 Vsync 信号的关键组件：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/base/core/jni/android_view_DisplayEventReceiver.cpp</span></span><br><span class="line"><span class="function"><span class="type">static</span> jlong <span class="title">nativeInit</span><span class="params">(JNIEnv* env, jclass clazz, jobject receiverWeak,</span></span></span><br><span class="line"><span class="params"><span class="function">        jobject messageQueueObj, jint vsyncSource, jint configChanged)</span> </span>&#123;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 获取 Java 层的 MessageQueue</span></span><br><span class="line">    sp&lt;MessageQueue&gt; messageQueue = <span class="built_in">android_os_MessageQueue_getMessageQueue</span>(env, messageQueueObj);</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 创建 Native 层的 DisplayEventReceiver</span></span><br><span class="line">    sp&lt;NativeDisplayEventReceiver&gt; receiver = <span class="keyword">new</span> <span class="built_in">NativeDisplayEventReceiver</span>(</span><br><span class="line">        env, receiverWeak, messageQueue, vsyncSource, configChanged);</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 注册到 EventThread</span></span><br><span class="line">    <span class="type">status_t</span> status = receiver-&gt;<span class="built_in">initialize</span>();</span><br><span class="line">    <span class="keyword">if</span> (status) &#123;</span><br><span class="line">        <span class="built_in">ALOGE</span>(<span class="string">&quot;Failed to initialize display event receiver, status=%d&quot;</span>, status);</span><br><span class="line">        <span class="keyword">return</span> <span class="number">0</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    receiver-&gt;<span class="built_in">incStrong</span>(gDisplayEventReceiverClassInfo.clazz);</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">reinterpret_cast</span>&lt;jlong&gt;(receiver.<span class="built_in">get</span>());</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">class</span> <span class="title class_">NativeDisplayEventReceiver</span> : <span class="keyword">public</span> DisplayEventReceiver, <span class="keyword">public</span> MessageHandler &#123;</span><br><span class="line"><span class="keyword">public</span>:</span><br><span class="line">    <span class="built_in">NativeDisplayEventReceiver</span>(JNIEnv* env, jobject receiverWeak, </span><br><span class="line">                              <span class="type">const</span> sp&lt;MessageQueue&gt;&amp; messageQueue,</span><br><span class="line">                              jint vsyncSource, jint configChanged)</span><br><span class="line">        : <span class="built_in">DisplayEventReceiver</span>(<span class="built_in">static_cast</span>&lt;ISurfaceComposer::VsyncSource&gt;(vsyncSource),</span><br><span class="line">                             <span class="built_in">static_cast</span>&lt;ISurfaceComposer::ConfigChanged&gt;(configChanged))</span><br><span class="line">        , <span class="built_in">mReceiverWeakGlobal</span>(env-&gt;<span class="built_in">NewGlobalWeakRef</span>(receiverWeak))</span><br><span class="line">        , <span class="built_in">mMessageQueue</span>(messageQueue) &#123;</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 当 Vsync 事件到达时的回调</span></span><br><span class="line">    <span class="function"><span class="keyword">virtual</span> <span class="type">void</span> <span class="title">onVsync</span><span class="params">(<span class="type">nsecs_t</span> timestamp, <span class="type">nsecs_t</span> physicalDisplayId, <span class="type">uint32_t</span> count)</span> <span class="keyword">override</span> </span>&#123;</span><br><span class="line">        <span class="built_in">ALOGV</span>(<span class="string">&quot;NativeDisplayEventReceiver: onVsync timestamp=%lld&quot;</span>, (<span class="type">long</span> <span class="type">long</span>)timestamp);</span><br><span class="line">        </span><br><span class="line">        <span class="comment">// 将事件保存并 post 到 MessageQueue</span></span><br><span class="line">        mTimestamp = timestamp;</span><br><span class="line">        mDisplayId = physicalDisplayId;</span><br><span class="line">        mCount = count;</span><br><span class="line">        </span><br><span class="line">        <span class="comment">// 发送消息到 Java 层的 MessageQueue</span></span><br><span class="line">        mMessageQueue-&gt;<span class="built_in">getLooper</span>()-&gt;<span class="built_in">sendMessage</span>(<span class="keyword">this</span>, <span class="built_in">Message</span>(MSG_VSYNC));</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// MessageHandler 的实现，在 Java 层 Looper 中执行</span></span><br><span class="line">    <span class="function"><span class="keyword">virtual</span> <span class="type">void</span> <span class="title">handleMessage</span><span class="params">(<span class="type">const</span> Message&amp; message)</span> <span class="keyword">override</span> </span>&#123;</span><br><span class="line">        <span class="keyword">switch</span> (message.what) &#123;</span><br><span class="line">        <span class="keyword">case</span> MSG_VSYNC:</span><br><span class="line">            <span class="comment">// 调用 Java 层的 onVsync 方法</span></span><br><span class="line">            <span class="built_in">dispatchVsync</span>(mTimestamp, mDisplayId, mCount);</span><br><span class="line">            <span class="keyword">break</span>;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line"><span class="keyword">private</span>:</span><br><span class="line">    <span class="function"><span class="type">void</span> <span class="title">dispatchVsync</span><span class="params">(<span class="type">nsecs_t</span> timestamp, <span class="type">nsecs_t</span> displayId, <span class="type">uint32_t</span> count)</span> </span>&#123;</span><br><span class="line">        JNIEnv* env = AndroidRuntime::<span class="built_in">getJNIEnv</span>();</span><br><span class="line">        </span><br><span class="line">        jobject receiverObj = env-&gt;<span class="built_in">NewLocalRef</span>(mReceiverWeakGlobal);</span><br><span class="line">        <span class="keyword">if</span> (receiverObj) &#123;</span><br><span class="line">            <span class="comment">// 调用 Java 层 DisplayEventReceiver.onVsync()</span></span><br><span class="line">            env-&gt;<span class="built_in">CallVoidMethod</span>(receiverObj, gDisplayEventReceiverClassInfo.onVsync,</span><br><span class="line">                    <span class="built_in">ns2ms</span>(timestamp), displayId, count);</span><br><span class="line">            env-&gt;<span class="built_in">DeleteLocalRef</span>(receiverObj);</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure>
+
+<p><strong>Choreographer 中的 Vsync 处理</strong></p>
+<p>在 Java 层，Choreographer 的 FrameDisplayEventReceiver 负责处理 Vsync 信号：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/base/core/java/android/view/Choreographer.java</span></span><br><span class="line"><span class="keyword">private</span> <span class="keyword">final</span> <span class="keyword">class</span> <span class="title class_">FrameDisplayEventReceiver</span> <span class="keyword">extends</span> <span class="title class_">DisplayEventReceiver</span></span><br><span class="line">        <span class="keyword">implements</span> <span class="title class_">Runnable</span> &#123;</span><br><span class="line">    </span><br><span class="line">    <span class="keyword">private</span> <span class="type">boolean</span> mHavePendingVsync;</span><br><span class="line">    <span class="keyword">private</span> <span class="type">long</span> mTimestampNanos;</span><br><span class="line">    <span class="keyword">private</span> <span class="type">int</span> mFrame;</span><br><span class="line">    </span><br><span class="line">    <span class="keyword">public</span> <span class="title function_">FrameDisplayEventReceiver</span><span class="params">(Looper looper, <span class="type">int</span> vsyncSource)</span> &#123;</span><br><span class="line">        <span class="built_in">super</span>(looper, vsyncSource);</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// Native 层回调到这里</span></span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">onVsync</span><span class="params">(<span class="type">long</span> timestampNanos, <span class="type">int</span> builtInDisplayId, <span class="type">int</span> frame)</span> &#123;</span><br><span class="line">        <span class="comment">// 检查是否有重复的 Vsync（防御性编程）</span></span><br><span class="line">        <span class="keyword">if</span> (mHavePendingVsync) &#123;</span><br><span class="line">            Log.w(TAG, <span class="string">&quot;Already have a pending vsync event. There should only be one&quot;</span></span><br><span class="line">                    + <span class="string">&quot; at a time.&quot;</span>);</span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            mHavePendingVsync = <span class="literal">true</span>;</span><br><span class="line">        &#125;</span><br><span class="line">        </span><br><span class="line">        <span class="comment">// 保存 Vsync 信息</span></span><br><span class="line">        mTimestampNanos = timestampNanos;</span><br><span class="line">        mFrame = frame;</span><br><span class="line">        </span><br><span class="line">        <span class="comment">// 关键：将处理工作 post 到主线程的 MessageQueue</span></span><br><span class="line">        <span class="comment">// 注意这里使用了 timestampNanos 作为执行时间</span></span><br><span class="line">        <span class="type">Message</span> <span class="variable">msg</span> <span class="operator">=</span> Message.obtain(mHandler, <span class="built_in">this</span>);</span><br><span class="line">        msg.setAsynchronous(<span class="literal">true</span>); <span class="comment">// 异步消息，有更高优先级</span></span><br><span class="line">        mHandler.sendMessageAtTime(msg, timestampNanos / TimeUtils.NANOS_PER_MS);</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// Runnable 接口的实现，在主线程中执行</span></span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">run</span><span class="params">()</span> &#123;</span><br><span class="line">        mHavePendingVsync = <span class="literal">false</span>;</span><br><span class="line">        <span class="comment">// 开始处理一帧的工作</span></span><br><span class="line">        doFrame(mTimestampNanos, mFrame);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// Choreographer 处理一帧的核心逻辑（简化摘录，详见 AOSP 源码）</span></span><br><span class="line"><span class="keyword">void</span> <span class="title function_">doFrame</span><span class="params">(<span class="type">long</span> frameTimeNanos, <span class="type">int</span> frame)</span> &#123;</span><br><span class="line">    <span class="comment">// … 省略前置检查与时间校正 …</span></span><br><span class="line">    <span class="comment">// 按顺序执行五类回调</span></span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_INPUT, frameTimeNanos);</span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_ANIMATION, frameTimeNanos);</span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_INSETS_ANIMATION, frameTimeNanos);</span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_TRAVERSAL, frameTimeNanos);</span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_COMMIT, frameTimeNanos);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h3 id="关键时序点分析"><a href="#关键时序点分析" class="headerlink" title="关键时序点分析"></a>关键时序点分析</h3><p>通过上述代码流程，我们可以看到完整的时序链路：</p>
+<ol>
+<li><strong>HWC 产生硬件中断</strong> → <code>VsyncController::onVsync()</code></li>
+<li><strong>VsyncController 处理</strong> → <code>VsyncDispatch::schedule()</code> </li>
+<li><strong>VsyncDispatch 分发</strong> → <code>EventThread::onVSyncEvent()</code></li>
+<li><strong>EventThread 通知</strong> → <code>NativeDisplayEventReceiver::onVsync()</code></li>
+<li><strong>Native 传递到 Java</strong> → <code>FrameDisplayEventReceiver::onVsync()</code></li>
+<li><strong>主线程处理</strong> → <code>Choreographer::doFrame()</code></li>
+</ol>
+<p>各环节的职责和优化点不同，理解完整流程有助于在 Perfetto 中分析 Vsync 相关性能问题。</p>
+<h3 id="FrameTimeline"><a href="#FrameTimeline" class="headerlink" title="FrameTimeline"></a>FrameTimeline</h3><p>App 和 SurfaceFlinger 都有 FrameTimeline</p>
+<p><img src="/images/Android-Perfetto-08-Vsync/image-20250918223035361.png" alt="image-20250918223035361"></p>
+<ul>
+<li><strong>轨道</strong>：<code>Expected Timeline</code>、<code>Actual Timeline</code></li>
+<li><strong>PresentType&#x2F;JankType</strong>：<ul>
+<li>PresentType 指示本帧呈现方式（例如 On-time、Late），JankType 指示卡顿类型来源</li>
+<li>常见 JankType：<code>AppDeadlineMissed</code>、<code>BufferStuffing</code>、<code>SfCpuDeadlineMissed</code>、<code>SfGpuDeadlineMissed</code> 等</li>
+</ul>
+</li>
+<li><strong>操作步骤（Perfetto UI）</strong>：<ol>
+<li>在应用进程选择目标 <code>Surface/Layer</code> 或使用 FrameToken 过滤</li>
+<li>对齐 Expected 与 Actual，查看偏移与颜色编码</li>
+<li>向上钻取：<code>Choreographer#doFrame</code>、<code>RenderThread</code>、<code>queueBuffer</code>、<code>acquire/present_fence</code></li>
+</ol>
+</li>
+<li><strong>误判规避</strong>：<ul>
+<li>仅凭 <code>doFrame</code> 时长判断掉帧不可靠；以 FrameTimeline 的 PresentType&#x2F;JankType 为准</li>
+<li>多缓冲可能掩盖单帧超时，需要看连续帧与 Buffer 可用性</li>
+</ul>
+</li>
+</ul>
+<h3 id="刷新率-x2F-显示模式-x2F-VRR-对-Vsync-与-Offset-x2F-预测的影响"><a href="#刷新率-x2F-显示模式-x2F-VRR-对-Vsync-与-Offset-x2F-预测的影响" class="headerlink" title="刷新率&#x2F;显示模式&#x2F;VRR 对 Vsync 与 Offset&#x2F;预测的影响"></a>刷新率&#x2F;显示模式&#x2F;VRR 对 Vsync 与 Offset&#x2F;预测的影响</h3><ul>
+<li><strong>模式切换</strong>：刷新率变更会重新配置 <code>VsyncConfiguration</code>，影响 app&#x2F;sf Offset 与预测模型；<ul>
+<li>Perfetto：查 <code>display mode change</code> 事件与随后的 <code>vsync</code> 间隔变化</li>
+</ul>
+</li>
+<li><strong>VRR（可变刷新率）</strong>：目标周期不恒定，软件预测更依赖 present_fence 反馈校准；<ul>
+<li>Perfetto：观察 <code>vsync</code> 间隔分布与 <code>present_fence</code> 偏差</li>
+</ul>
+</li>
+<li><strong>多显示&#x2F;外接显示</strong>：不同 <code>physicalDisplayId</code> 的 vsync 源独立，注意 app&#x2F;sf&#x2F;appSf 的选择与对齐；<ul>
+<li>Perfetto：按显示 ID 过滤相关 Counter&#x2F;Slice</li>
+</ul>
+</li>
+</ul>
+<h3 id="Perfetto-实战-Checklist（建议按序查看）"><a href="#Perfetto-实战-Checklist（建议按序查看）" class="headerlink" title="Perfetto 实战 Checklist（建议按序查看）"></a>Perfetto 实战 Checklist（建议按序查看）</h3><ol>
+<li><strong>Vsync 信号与周期</strong><ul>
+<li><code>vsync-app / vsync-sf / vsync-appSf</code> 间隔是否稳定（60&#x2F;90&#x2F;120Hz 对应周期）</li>
+<li>是否存在异常密集&#x2F;稀疏的 Vsync（预测抖动）<br><img src="/images/Android-Perfetto-08-Vsync/image-20250918223148748.png" alt="image-20250918223148748"></li>
+</ul>
+</li>
+<li><strong>Vsync 相位差配置</strong><ul>
+<li><code>VsyncWorkDuration</code> 是否符合机型预期的 app&#x2F;sf Offset</li>
+<li>app 与 sf 的先后是否匹配“先绘制后合成”的策略<br><img src="/images/Android-Perfetto-08-Vsync/image-20250918222707300.png" alt="image-20250918222707300"></li>
+</ul>
+</li>
+<li><strong>FrameTimeline 判读</strong><ul>
+<li>先看 <code>PresentType</code>，再看 <code>JankType</code>；确认是 app 还是 SF&#x2F;GPU 侧问题</li>
+<li>选择目标 Surface&#x2F;FrameToken 定位具体帧<br><img src="/images/Android-Perfetto-08-Vsync/image-20250918223220718.png" alt="image-20250918223220718"></li>
+</ul>
+</li>
+<li><strong>应用主线程与渲染线程</strong><ul>
+<li><code>Choreographer#doFrame</code> 各阶段耗时（Input&#x2F;Animation&#x2F;Traversal）</li>
+<li><code>RenderThread</code> 的 <code>syncAndDrawFrame/DrawFrame</code> 耗时是否异常<br><img src="/images/Android-Perfetto-08-Vsync/image-20250918223340940.png" alt="image-20250918223340940"></li>
+</ul>
+</li>
+<li><strong>BufferQueue 与 Fence</strong><ul>
+<li>生产者：RenderThread queueBuffer 之后，这个 Buffer 就被标记可以被消费了，在经过一次 Transaction 之后就可以被 sf 消费。刚刚 queueBuffer 之后 Buffer 还需要让 GPU 实际进行渲染，这里是用的 Fence 来追踪 GPU 的执行耗时。SF 也需要看这个 Fence 来决定这个 Buffer 是不是 Ready （新版本 SF 有个属性值配置，也可以不等这个 Fence，等后面实际要合成的时候才去看）。<br><img src="/images/Android-Perfetto-08-Vsync/image-20250918224205093.png" alt="image-20250918224205093"></li>
+<li>消费者 SF 与 BufferTX：SF 作为 Buffer 的消费者，会在 vsync 到来的时候是会取一个 Buffer 进行合成的，这里 App 的 Buffer 是以 BufferTX-xxxx 的名字存在的，下图可以看到每次 SF 取走一个 Buffer，BufferTX 个数就会减1，这就是正常的。如果 BufferTX 为 0，说明 App 没有及时送 Buffer 上来，SF 也就停止合成了，这就会出现卡顿 （当然如果同时有多个出图源，SF 会取其他的 Buffer，但是对于 App 来说依然是卡顿的）<br><img src="/images/Android-Perfetto-08-Vsync/image-20250918223441117.png" alt="image-20250918223441117"></li>
+</ul>
+</li>
+<li><strong>合成策略与显示</strong><ul>
+<li>SF 是否频繁走 ClientComposition；HWC validate&#x2F;present 是否异常</li>
+<li>多显示&#x2F;模式切换&#x2F;VRR 时是否伴随明显预测偏差<br><img src="/images/Android-Perfetto-08-Vsync/image-20250918223517315.png" alt="image-20250918223517315"></li>
+</ul>
+</li>
+<li><strong>资源与其他干扰</strong><ul>
+<li>CPU 竞争（大核占用）、GPU 忙、IO&#x2F;内存抖动（GC&#x2F;compaction）</li>
+<li>其他前台应用&#x2F;系统服务是否占用关键资源<br><img src="/images/Android-Perfetto-08-Vsync/image-20250918223532482.png" alt="image-20250918223532482"></li>
+</ul>
+</li>
+</ol>
+<p><a id="refs"></a></p>
+<h2 id="参考文档"><a href="#参考文档" class="headerlink" title="参考文档"></a>参考文档</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://source.android.com/docs/core/graphics">Android Graphics Architecture</a></li>
+<li><a target="_blank" rel="noopener" href="https://source.android.com/docs/core/graphics/implement-vsync">VSYNC Implementation Guide</a></li>
+<li><a target="_blank" rel="noopener" href="https://source.android.com/docs/core/graphics/frame-pacing">Frame Pacing</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/">Perfetto Documentation</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto 系列 5：Android App 基于 Choreographer 的渲染流程</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</a></li>
+<li><a target="_blank" rel="noopener" href="https://cloud.tencent.com/developer/article/1905184">Vsync offset 相关技术分析</a></li>
+<li><a target="_blank" rel="noopener" href="https://blog.csdn.net/learnframework/article/details/133964332">Android 13&#x2F;14高版本SurfaceFlinger出现VSYNC-app&#x2F;VSYNC-appSf&#x2F;VSYNC-sf剖析</a></li>
+</ol>
+<p><a id="about"></a></p>
+<h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p>
+<ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/12/01/BlogMap/">本博客内容导航</a> ：个人博客内容的一个导航。</li>
+<li><a href="https://androidperformance.com/2018/05/07/Android-performance-optimization-skills-and-tools/">个人整理和搜集的优秀博客文章 - Android 性能优化必知必会</a> ：欢迎大家自荐和推荐 （微信私聊即可）</li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a> ： 欢迎加入，多谢支持～</li>
+</ol>
+<blockquote>
+<p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p>
+</blockquote>
+<p><img src="/images/WechatIMG581.png" alt="微信扫一扫"></p>
+
+    </article>
+    <!-- license -->
+        <div class="license-wrapper">
+            <p>Author：<a href="https://androidperformance.com">Gracker</a>
+            <p>Link：<a href="https://androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/">https://androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/</a>
+            <p>Publish date：<a href="https://androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/">August 5th 2025, 10:15:30 am</a>
+            <p>Update date：<a href="https://androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/">January 11th 2026, 1:36:33 pm</a>
+            <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
+        </div>
+    <!-- paginator -->
+    <ul class="post-paginator">
+        <li class="next">
+                <div class="nextSlogan">Next Post</div>
+                <a href="/2025/11/12/Android-Perfetto-09-CPU/" title="Android Perfetto 系列 9 - CPU 信息解读">
+                    <div class="nextTitle">Android Perfetto 系列 9 - CPU 信息解读</div>
+                </a>
+        </li>
+        <li class="previous">
+                <div class="prevSlogan">Previous Post</div>
+                <a href="/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/" title="Android Perfetto 系列 7 - MainThread 和 RenderThread 解读">
+                    <div class="prevTitle">Android Perfetto 系列 7 - MainThread 和 RenderThread 解读</div>
+                </a>
+        </li>
+    </ul>
+    <!-- comment -->
+        <div class="post-comment">
+            <!-- 来必力 City 版安装代码 -->
+
+            
+            
+            
+            <!-- utteranc评论 -->
+
+            <!-- partial('_partial/comment/changyan') -->
+            <!--PC版-->
+
+            
+            
+            
+        </div>
+    <!-- timeliness note -->
+    <!-- idea from: https://hexo.fluid-dev.com/posts/hexo-injector/#%E6%96%87%E7%AB%A0%E6%97%B6%E6%95%88%E6%80%A7%E6%8F%90%E7%A4%BA -->
+    <!-- Mathjax -->
+</main>
+
+                <!-- profile -->
+            </div>
+            <footer class="footer footer-unloaded">
+    <!-- social  -->
+        <div class="social">
+                            <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title="email" ></a>
+                <a href="https://github.com/gracker" class="iconfont-archer github" target="_blank" title="github"></a>
+                <span class="iconfont-archer wechat" title="wechat">
+                    <img class="profile-qr" src="/assets/Wechat.jpeg" />
+                </span>
+                <span class="iconfont-archer qq" title="qq">
+                    <img class="profile-qr" src="/553000664" />
+                </span>
+                <a href="https://weibo.com/gracker520" class="iconfont-archer weibo" target="_blank" title="weibo"></a>
+                <a href="https://www.zhihu.com/people/gracker" class="iconfont-archer zhihu" target="_blank" title="zhihu"></a>
+                <a href="https://twitter.com/Gracker_Gao" class="iconfont-archer twitter" target="_blank" title="twitter"></a>
+                <a href="https://juejin.im/user/557b0590e4b052e031453d76" class="iconfont-archer juejin" target="_blank" title="juejin"></a>
+                <a href="/atom.xml" class="iconfont-archer rss" target="_blank" title="rss"></a>
+
+        </div>
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- website approve for Chinese user -->
+        <div class="website-approve">
+                <span id="icp-approve" class="icp-approve">
+                    <a href="https://beian.miit.gov.cn/" target="_blank">蜀 ICP 备 20016190 号</a>
+                </span>
+        </div>
+</footer>
+
+        </div>
+        <!-- toc -->
+            <div class="toc-wrapper toc-wrapper-loding" style=    top:50vh;
+>
+                <div class="toc-catalog">
+                    <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+                </div>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%9C%AC%E6%96%87%E7%9B%AE%E5%BD%95"><span class="toc-number">1.</span> <span class="toc-text">本文目录</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0%E7%9B%AE%E5%BD%95"><span class="toc-number"></span> <span class="toc-text">系列文章目录</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BB%80%E4%B9%88%E6%98%AF-Vsync"><span class="toc-number">1.</span> <span class="toc-text">什么是 Vsync</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Vsync-%E8%A7%A3%E5%86%B3%E4%BB%80%E4%B9%88%E9%97%AE%E9%A2%98%EF%BC%9F"><span class="toc-number">1.1.</span> <span class="toc-text">Vsync 解决什么问题？</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Android-%E4%B8%AD-Vsync-%E7%9A%84%E5%9F%BA%E6%9C%AC%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86"><span class="toc-number">2.</span> <span class="toc-text">Android 中 Vsync 的基本工作原理</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Vsync-%E4%BF%A1%E5%8F%B7%E7%9A%84%E5%88%86%E5%B1%82%E6%9E%B6%E6%9E%84"><span class="toc-number">2.1.</span> <span class="toc-text">Vsync 信号的分层架构</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%9C%A8-Perfetto-%E4%B8%AD%E8%A7%82%E5%AF%9F-Vsync"><span class="toc-number">3.</span> <span class="toc-text">在 Perfetto 中观察 Vsync</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Android-App-%E6%AF%8F%E4%B8%80%E5%B8%A7%E6%98%AF%E5%A6%82%E4%BD%95%E5%9F%BA%E4%BA%8E-Vsync-%E5%B7%A5%E4%BD%9C%E7%9A%84"><span class="toc-number">4.</span> <span class="toc-text">Android App 每一帧是如何基于 Vsync 工作的</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%B5%81%E7%A8%8B%E6%80%BB%E8%A7%88%EF%BC%88%E6%8C%89%E9%A1%BA%E5%BA%8F%EF%BC%89"><span class="toc-number">4.1.</span> <span class="toc-text">流程总览（按顺序）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#App-%E4%BB%80%E4%B9%88%E6%97%B6%E5%80%99%E4%BC%9A%E7%94%B3%E8%AF%B7-Vsync-%E4%BF%A1%E5%8F%B7"><span class="toc-number">4.2.</span> <span class="toc-text">App 什么时候会申请 Vsync 信号</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#App-%E7%94%B3%E8%AF%B7-Vsync-%E7%9A%84%E5%AE%8C%E6%95%B4%E6%B5%81%E7%A8%8B"><span class="toc-number">4.3.</span> <span class="toc-text">App 申请 Vsync 的完整流程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%B8%BB%E7%BA%BF%E7%A8%8B%E5%A6%82%E4%BD%95%E7%9B%91%E5%90%AC-Vsync-%E4%BF%A1%E5%8F%B7"><span class="toc-number">4.4.</span> <span class="toc-text">主线程如何监听 Vsync 信号</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%87%A0%E4%B8%AA%E9%81%97%E7%95%99%E9%97%AE%E9%A2%98"><span class="toc-number">4.5.</span> <span class="toc-text">几个遗留问题</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Vsync-Offset-%E7%9A%84%E6%8A%80%E6%9C%AF%E5%AE%9E%E7%8E%B0"><span class="toc-number">4.6.</span> <span class="toc-text">Vsync Offset 的技术实现</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%AE%9E%E9%99%85%E7%9A%84%E4%BC%98%E5%8C%96%E6%95%88%E6%9E%9C"><span class="toc-number">4.7.</span> <span class="toc-text">实际的优化效果</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Vsync-%E4%BF%A1%E5%8F%B7%E7%9A%84%E5%AE%8C%E6%95%B4%E4%BB%A3%E7%A0%81%E6%B5%81%E7%A8%8B"><span class="toc-number">5.</span> <span class="toc-text">Vsync 信号的完整代码流程</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Native-%E5%B1%82%EF%BC%9AVsync-%E4%BF%A1%E5%8F%B7%E7%9A%84%E4%BA%A7%E7%94%9F%E4%B8%8E%E7%AE%A1%E7%90%86"><span class="toc-number">5.1.</span> <span class="toc-text">Native 层：Vsync 信号的产生与管理</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Framework-%E5%B1%82%EF%BC%9AVsync-%E4%BF%A1%E5%8F%B7%E7%9A%84%E6%8E%A5%E6%94%B6%E4%B8%8E%E5%A4%84%E7%90%86"><span class="toc-number">5.2.</span> <span class="toc-text">Framework 层：Vsync 信号的接收与处理</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%85%B3%E9%94%AE%E6%97%B6%E5%BA%8F%E7%82%B9%E5%88%86%E6%9E%90"><span class="toc-number">5.3.</span> <span class="toc-text">关键时序点分析</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#FrameTimeline"><span class="toc-number">5.4.</span> <span class="toc-text">FrameTimeline</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%88%B7%E6%96%B0%E7%8E%87-x2F-%E6%98%BE%E7%A4%BA%E6%A8%A1%E5%BC%8F-x2F-VRR-%E5%AF%B9-Vsync-%E4%B8%8E-Offset-x2F-%E9%A2%84%E6%B5%8B%E7%9A%84%E5%BD%B1%E5%93%8D"><span class="toc-number">5.5.</span> <span class="toc-text">刷新率&#x2F;显示模式&#x2F;VRR 对 Vsync 与 Offset&#x2F;预测的影响</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Perfetto-%E5%AE%9E%E6%88%98-Checklist%EF%BC%88%E5%BB%BA%E8%AE%AE%E6%8C%89%E5%BA%8F%E6%9F%A5%E7%9C%8B%EF%BC%89"><span class="toc-number">5.6.</span> <span class="toc-text">Perfetto 实战 Checklist（建议按序查看）</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E6%96%87%E6%A1%A3"><span class="toc-number">6.</span> <span class="toc-text">参考文档</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number"></span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a>
+            </div>
+        <!-- sidebar -->
+        <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+        <div class="sidebar-panel-archives">
+    <!-- 在 ejs 中将 archive 按照时间排序 -->
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 118
+        </div>
+        <!-- search  -->
+    </div>
+    <div class="post-archive">
+            <div class="archive-year"> 2025 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 9 - CPU 信息解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/02</span>
+            <a class="archive-post-title" href="/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7 - MainThread 和 RenderThread 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/26</span>
+            <a class="archive-post-title" href="/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/26</span>
+            <a class="archive-post-title" href="/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto 系列 5：Android App 基于 Choreographer 的渲染流程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto 系列 4：使用命令行在本地打开超大 Trace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR 系列 3 ：ANR 案例分享</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR 系列 2 ：ANR 分析套路和关键 Log 介绍</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-01-ANR-Design/">Android ANR 系列 1 ：理解 Android ANR 设计思想</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2024 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto 系列 3：熟悉 Perfetto View</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto 系列 2：Perfetto Trace 抓取</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto 系列 1：Perfetto 工具简介</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/2024/03/27/Android-Perfetto-101/">Android Perfetto 系列目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/01</span>
+            <a class="archive-post-title" href="/2024/01/01/2023-review/">2023 年的方方面面</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2023 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/30</span>
+            <a class="archive-post-title" href="/2023/12/30/the-performance/">关于 The Android Performance 知识星球介绍</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/15</span>
+            <a class="archive-post-title" href="/2023/10/15/the-performance-design-of-os-en/">The Performance Design Of OS</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/2023/08/21/the-performance-design-of-os/">OS 设计之性能设计</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/2023/05/14/bad-android-app-with-system-permissions/">当 App 有了系统权限，真的可以为所欲为？</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2022 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/2022/03/27/the-performance-tea-part-01/">The Performance 星球茶话会 - 第一期</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/2022/03/13/android-systrace-cpu-state-running/">Systrace 线程 CPU 运行状态分析技巧 - Running 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/2022/01/21/android-systrace-cpu-state-runnable/">Systrace 线程 CPU 运行状态分析技巧 - Runnable 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/03</span>
+            <a class="archive-post-title" href="/2022/01/03/2021-Review/">回顾 2021</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2021 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/27</span>
+            <a class="archive-post-title" href="/2021/10/27/if-i-write-a-book-about-performance/">一本讲 Android 流畅性的书，应该有什么内容？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/26</span>
+            <a class="archive-post-title" href="/2021/10/26/build-android-12/">Android 系统开发系列（1）：Android 12 源代码下载、编译和刷机</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace 响应速度实战 3 ：响应速度延伸知识</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace 响应速度实战 2 ：响应速度实战分析-以启动速度为例</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace 响应速度实战 1 ：了解响应速度原理</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace 流畅性实战 3 ：卡顿分析过程中的一些疑问</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace 流畅性实战 2 ：案例分析 - MIUI 桌面滑动卡顿分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace 流畅性实战 1 ：了解卡顿原理</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2020 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span>
+            <a class="archive-post-title" href="/2020/08/20/weibo-imageload-opt-on-huawei/">华为手机刷微博体验更好？技术角度的一些分析和思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/2020/05/26/samsung_crash/">一个「闰」字引发的事故 - 三星系统重启分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/2020/05/07/Android-App-Chain-Wakeup/">Android App 链式唤醒分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/14</span>
+            <a class="archive-post-title" href="/2020/02/14/Android-Systrace-SurfaceFlinger/">Android Systrace 基础知识 - SurfaceFlinger 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/03</span>
+            <a class="archive-post-title" href="/2020/02/03/android-development-learning-path-2020-edition/">Android 开发者学习路线(2020 版本)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span>
+            <a class="archive-post-title" href="/2020/01/28/2020-read/">我的 2020 年读书单</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2019 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/21</span>
+            <a class="archive-post-title" href="/2019/12/21/Android-Systrace-CPU/">Android Systrace 基础知识 - CPU Info 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/15</span>
+            <a class="archive-post-title" href="/2019/12/15/Android-Systrace-Triple-Buffer/">Android Systrace 基础知识 - Triple Buffer 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/06</span>
+            <a class="archive-post-title" href="/2019/12/06/Android-Systrace-Binder/">Android Systrace 基础知识 - Binder 和锁竞争解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/2019/12/01/BlogMap/">「置顶」博客文章目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/2019/12/01/Android-Systrace-Vsync/">Android Systrace 基础知识 - Vsync 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/2019/11/18/Android-App-Lunch-Optimize/">Android App 启动优化全记录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/06</span>
+            <a class="archive-post-title" href="/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Android Systrace 基础知识 - MainThread 和 RenderThread 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/04</span>
+            <a class="archive-post-title" href="/2019/11/04/Android-Systrace-Input/">Android Systrace 基础知识 - Input 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/24</span>
+            <a class="archive-post-title" href="/2019/10/24/Android-Background-Animation/">Android 中的“后台无效动画“行为分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/22</span>
+            <a class="archive-post-title" href="/2019/10/22/Android-Choreographer/">Android 基于 Choreographer 的渲染机制详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/2019/09/18/Android-Jank-Due-To-Low-Memory/">Android 中的卡顿丢帧原因概述 - 低内存篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/17</span>
+            <a class="archive-post-title" href="/2019/09/17/Android-Kill-Background-App-Debug/">Android 桌面被杀问题分析案例</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Due-To-App/">Android 中的卡顿丢帧原因概述 - 应用篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Due-To-System/">Android 中的卡顿丢帧原因概述 - 系统篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Debug/">Android 中的卡顿丢帧原因概述 - 方法论</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/2019/09/01/Android-Activity-Lunch-Mode/">Android 中的 Activity Launch Mode 详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/2019/07/27/Android-Hardware-Layer/">Android 中的 Hardware Layer 详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/23</span>
+            <a class="archive-post-title" href="/2019/07/23/Android-Systrace-Pre/">Android Systrace 基础知识 -- 分析 Systrace 预备知识</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/29</span>
+            <a class="archive-post-title" href="/2019/06/29/Android-Systrace-SystemServer/">Android Systrace 基础知识 - SystemServer 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/2019/05/28/Android-Systrace-About/">Android Systrace 基础知识 -- Systrace 简介</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/27</span>
+            <a class="archive-post-title" href="/2019/05/27/why-60-fps/">Android Systrace 基础知识 -- Why 60 fps ？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/2019/05/26/Android_Systrace_0/">Android Systrace -- 系列文章目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/15</span>
+            <a class="archive-post-title" href="/2019/05/15/90hz-on-android/">Android 新的流畅体验，90Hz 漫谈</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/2019/04/07/liqi/">利器 - 高效工具推荐</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/2019/01/21/android-performance-case-jank-accessbility/">Android 无障碍服务导致的整机卡顿案例分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/12</span>
+            <a class="archive-post-title" href="/2019/01/12/recommend-of-2018/">2018 年度好物推荐 - 给辛勤工作的自己一点奖励</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2018 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span>
+            <a class="archive-post-title" href="/2018/11/01/android-system-develop-0/">Android 系统开发源码环境搭建</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/25</span>
+            <a class="archive-post-title" href="/2018/10/25/How-do-engineers-count-well/">陆奇：除了好代码，工程师怎样才算优秀？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/01</span>
+            <a class="archive-post-title" href="/2018/10/01/how-to-stop-sucking-and-be-awesome-instead-8/">程序员的修炼-08-阅读之美</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/30</span>
+            <a class="archive-post-title" href="/2018/09/30/how-to-stop-sucking-and-be-awesome-instead-7/">程序员的修炼-07-游戏与编程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/29</span>
+            <a class="archive-post-title" href="/2018/09/29/how-to-stop-sucking-and-be-awesome-instead-6/">程序员的修炼-06-互联网那些事</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/28</span>
+            <a class="archive-post-title" href="/2018/09/28/how-to-stop-sucking-and-be-awesome-instead-5/">程序员的修炼-05-了解你的用户</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/27</span>
+            <a class="archive-post-title" href="/2018/09/27/how-to-stop-sucking-and-be-awesome-instead-4/">程序员的修炼-04-关于测试的一些思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/26</span>
+            <a class="archive-post-title" href="/2018/09/26/how-to-stop-sucking-and-be-awesome-instead-3/">程序员的修炼-03-Web 设计原则</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/20</span>
+            <a class="archive-post-title" href="/2018/09/20/how-to-stop-sucking-and-be-awesome-instead-2/">程序员的修炼-02-编程之道</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/2018/09/19/how-to-stop-sucking-and-be-awesome-instead-1/">程序员的修炼-01-绝地反击之术</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2018/09/13/android-memory/">Android 系统不释放内存吗？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/13</span>
+            <a class="archive-post-title" href="/2018/08/13/Some-Thoughts-on-the-Fluency-of-Android/">关于 Android 系统流畅性的一些思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/20</span>
+            <a class="archive-post-title" href="/2018/05/20/zhihu-startingwindow/">知乎 救救你的 StartingWindow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/2018/05/07/Android-performance-optimization-skills-and-tools/">「置顶」Android 性能优化必知必会</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/2018/01/06/2017%E5%B9%B4%E5%BA%A6%E6%9C%80%E6%8E%A8%E8%8D%90/">2017 年度好物推荐 - 给辛勤工作的自己一点奖励</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2017 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/23</span>
+            <a class="archive-post-title" href="/2017/04/23/About-work/">2017</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2016 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/2016/04/05/android-bottom-bar-2/">Android Bottom navigation 规范二：样式、行为与规格</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/2016/04/05/android-bottom-bar-1/">Android Bottom Navigation 规范一：使用方法</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2015 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/31</span>
+            <a class="archive-post-title" href="/2015/12/31/How-to-calculation-android-app-lunch-time/">Android 中如何计算 App 的启动时间？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/29</span>
+            <a class="archive-post-title" href="/2015/12/29/Android%E5%BA%94%E7%94%A8%E5%90%AF%E5%8A%A8%E4%BC%98%E5%8C%96-%E4%B8%80%E7%A7%8DDelayLoad%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%92%8C%E5%8E%9F%E7%90%86-%E4%B8%8B%E7%AF%87/">Android 应用启动优化:一种 DelayLoad 的实现和原理(下篇)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/2015/11/18/Android-app-lunch-optimize-delay-load/">Android 应用启动优化 - 一种 DelayLoad 的实现和原理(上篇)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/12</span>
+            <a class="archive-post-title" href="/2015/08/12/AndroidL-hwui-RenderThread-workflow/">Android hwui 中 RenderThread 工作流程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/2015/08/05/HashMap/">Java7 HashMap 源码分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-onTrimMemory/">Android 代码内存优化建议 - OnTrimMemory 优化</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-AndroidResource/">Android 代码内存优化建议 - Android 资源篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-Google/">Android 代码内存优化建议 - Android 官方篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-Java/">Android 代码内存优化建议 - Java 官方篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/29</span>
+            <a class="archive-post-title" href="/2015/05/29/Nexus6-with-Android-M/">Nexus6 with Android M 开启多窗口模式</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/06</span>
+            <a class="archive-post-title" href="/2015/05/06/Java-Singleton/">细说 Java 单例模式</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-4/">Android 性能优化典范 - Profile GPU Rendering</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-3/">Android 性能优化典范 - Understanding VSYNC</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-2/">Android 性能优化典范之 Understanding Overdraw</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-1/">Android 性能优化典范 - Render Performance</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns/">Android 性能优化典范综述</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/">Android 内存优化之三 - 打开 MAT 中的 Bitmap 原图</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android 内存优化之二 - MAT使用进阶</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android 内存优化(1) - MAT 使用入门</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/31</span>
+            <a class="archive-post-title" href="/2015/03/31/android-performance-case-study-follow-up/">Android性能优化后续</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-5/">Android 小技巧 - 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-4/">Android 小技巧 - 4</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-3/">Android 小技巧 -3</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/04</span>
+            <a class="archive-post-title" href="/2015/02/04/build-rom-for-nexus5/">为 Nexus5 编译 AndroidL 固件</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/30</span>
+            <a class="archive-post-title" href="/2015/01/30/android-performance-tools-systrace-1/">Android 性能优化之 Systrace 工具介绍(一)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/16</span>
+            <a class="archive-post-title" href="/2015/01/16/view-android-source-code-with-androidstudio/">使用 Android Studio 查看 Android Lollipop 源码</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/13</span>
+            <a class="archive-post-title" href="/2015/01/13/android-performance-optimization-overdraw-2/">Android 性能优化之过渡绘制 - 实战篇</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2014 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/2014/10/20/android-performance-optimization-overdraw-1/">Android 性能优化之过渡绘制 - 理论篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/03</span>
+            <a class="archive-post-title" href="/2014/06/03/android-edittext-do-not-auto-get-focus/">Android 小技巧 - 如何让EditText不自动获取焦点</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/31</span>
+            <a class="archive-post-title" href="/2014/05/31/android-tips-round-up-2/">Android 小技巧 -2</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/2014/05/28/android-tips-round-up-1/">Android 小技巧 - 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/02</span>
+            <a class="archive-post-title" href="/2014/05/02/android_log_to_file/">Android Tools - Log2File</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/01</span>
+            <a class="archive-post-title" href="/2014/04/01/android-service-build-your-own-notification-servers-app/">Android Service：开发自己的通知中心(2):辅助性服务实战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/25</span>
+            <a class="archive-post-title" href="/2014/03/25/ubuntu-adb-can-not-find-devices/">Android:Ubuntu 下执行 Adb 命令找不到设备</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/17</span>
+            <a class="archive-post-title" href="/2014/03/17/android-build-your-own-android-notification-service-app/">Android Service：开发自己的通知中心(1):辅助性服务介绍</a>
+        </li>
+            </ul>
+    </div>
+</div>
+
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="年度推荐">
+                <span class="iconfont-archer">&#xe606;</span>
+                年度推荐
+            </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="随笔">
+                <span class="iconfont-archer">&#xe606;</span>
+                随笔
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="年终总结">
+                <span class="iconfont-archer">&#xe606;</span>
+                年终总结
+            </span>
+            <span class="sidebar-tag-name" data-tags="知识星球">
+                <span class="iconfont-archer">&#xe606;</span>
+                知识星球
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="性能优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                性能优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="线程优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                线程优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR分析">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR分析
+            </span>
+            <span class="sidebar-tag-name" data-tags="页面响应">
+                <span class="iconfont-archer">&#xe606;</span>
+                页面响应
+            </span>
+            <span class="sidebar-tag-name" data-tags="电量优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                电量优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Kotlin">
+                <span class="iconfont-archer">&#xe606;</span>
+                Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="程序员">
+                <span class="iconfont-archer">&#xe606;</span>
+                程序员
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计规范">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计规范
+            </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿
+            </span>
+            <span class="sidebar-tag-name" data-tags="读书笔记">
+                <span class="iconfont-archer">&#xe606;</span>
+                读书笔记
+            </span>
+            <span class="sidebar-tag-name" data-tags="程序员的修炼">
+                <span class="iconfont-archer">&#xe606;</span>
+                程序员的修炼
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计原则">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计原则
+            </span>
+            <span class="sidebar-tag-name" data-tags="测试">
+                <span class="iconfont-archer">&#xe606;</span>
+                测试
+            </span>
+            <span class="sidebar-tag-name" data-tags="了解你的用户">
+                <span class="iconfont-archer">&#xe606;</span>
+                了解你的用户
+            </span>
+            <span class="sidebar-tag-name" data-tags="游戏与编程">
+                <span class="iconfont-archer">&#xe606;</span>
+                游戏与编程
+            </span>
+            <span class="sidebar-tag-name" data-tags="互联网那些事">
+                <span class="iconfont-archer">&#xe606;</span>
+                互联网那些事
+            </span>
+            <span class="sidebar-tag-name" data-tags="阅读之美">
+                <span class="iconfont-archer">&#xe606;</span>
+                阅读之美
+            </span>
+            <span class="sidebar-tag-name" data-tags="利器">
+                <span class="iconfont-archer">&#xe606;</span>
+                利器
+            </span>
+            <span class="sidebar-tag-name" data-tags="iOS">
+                <span class="iconfont-archer">&#xe606;</span>
+                iOS
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design
+            </span>
+            <span class="sidebar-tag-name" data-tags="Smooth">
+                <span class="iconfont-archer">&#xe606;</span>
+                Smooth
+            </span>
+            <span class="sidebar-tag-name" data-tags="体验优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                体验优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="用户体验">
+                <span class="iconfont-archer">&#xe606;</span>
+                用户体验
+            </span>
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+        缺失模块，请参考主题文档进行安装配置：https://github.com/fi3ework/hexo-theme-archer#%E5%AE%89%E8%A3%85%E4%B8%BB%E9%A2%98
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="随笔">
+            <span class="iconfont-archer">&#xe60a;</span>
+            随笔
+        </span>
+        <span class="sidebar-category-name" data-categories="读书笔记">
+            <span class="iconfont-archer">&#xe60a;</span>
+            读书笔记
+        </span>
+        <span class="sidebar-category-name" data-categories="Android">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
+        </span>
+        <span class="sidebar-category-name" data-categories="iOS">
+            <span class="iconfont-archer">&#xe60a;</span>
+            iOS
+        </span>
+        <span class="sidebar-category-name" data-categories="Android性能优化">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android性能优化
+        </span>
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+
+    </div>
+</div>
+
+        <!-- site-meta -->
+        <script>
+    var siteMetaRoot = "/"
+    if (siteMetaRoot === "undefined") {
+        siteMetaRoot = '/'
+    }
+    var siteMeta = {
+        url: "https://androidperformance.com",
+        root: siteMetaRoot,
+        author: "Gracker"
+    }
+</script>
+
+        <!-- import experimental options here -->
+        <!-- Custom Font -->
+
+        <!-- jquery (must load before main.js) -->
+        <script defer src="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+        <!-- main func (depends on jQuery) -->
+        <script src="/scripts/main.js" defer></script>
+        <!-- fancybox -->
+        <script>
+            (function(){
+              var urls = [
+                'https://cdn.bootcdn.net/ajax/libs/fancyapps-ui/5.0.36/fancybox/fancybox.umd.js',
+                'https://cdn.jsdelivr.net/npm/@fancyapps/ui@5.0.36/dist/fancybox/fancybox.umd.js'
+              ];
+              function loadNext(){
+                var u = urls.shift();
+                if(!u) return;
+                var s = document.createElement('script');
+                s.src = u; s.defer = true;
+                s.onload = function(){ if (window.Fancybox) { window.Fancybox.bind('[data-fancybox]'); } };
+                s.onerror = loadNext;
+                document.head.appendChild(s);
+              }
+              loadNext();
+            })();
+        </script>
+        <!-- algolia -->
+        <!-- busuanzi (delay load + silent fail) -->
+        <!-- async load share.js on first click -->
+            <script>
+                (function(){
+                  var loaded = false
+                  function loadShare(){
+                    if (loaded) return
+                    loaded = true
+                    var s = document.createElement('script')
+                    s.src = '/scripts/share.js'
+                    s.async = true
+                    document.head.appendChild(s)
+                  }
+                  document.addEventListener('click', function(e){
+                    var t = e.target
+                    if (!t) return
+                    if (t.closest && t.closest('.share-wrapper')) { loadShare() }
+                    else if (t.classList && t.classList.contains('share-wrapper')) { loadShare() }
+                  }, true)
+                })();
+            </script>
+        <!-- mermaid -->
+    </body>
+</html>

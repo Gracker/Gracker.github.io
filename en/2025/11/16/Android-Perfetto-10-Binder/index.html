@@ -1,0 +1,1905 @@
+<!DOCTYPE html>
+<html lang="en">
+    <!-- title -->
+            <!-- keywords -->
+
+                  <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <meta name="author" content="Gracker">
+                    <meta name="renderer" content="webkit">
+                    <meta name="copyright" content="Gracker">
+                      <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,Optimization,Startup,Perfetto,Systrace,RenderThread,Java,Responsiveness,Smoothness">
+                          <meta name="description" content="Technical blog about Android system performance optimization">
+                          <meta name="description" content="The tenth article in the Perfetto series focuses on Binder, the core Inter-Process Communication (IPC) mechanism of Android. Binder carries almost all interactions between system services and applicat">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Android Perfetto Series 10: Binder Scheduling and Lock Contention">
+<meta property="og:url" content="https://androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/index.html">
+<meta property="og:site_name" content="Android Performance">
+<meta property="og:description" content="The tenth article in the Perfetto series focuses on Binder, the core Inter-Process Communication (IPC) mechanism of Android. Binder carries almost all interactions between system services and applicat">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://androidperformance.com/en/images/WechatIMG581.png">
+<meta property="article:published_time" content="2025-11-16T07:33:30.000Z">
+<meta property="article:modified_time" content="2026-01-11T12:56:53.322Z">
+<meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Android">
+<meta property="article:tag" content="Perfetto">
+<meta property="article:tag" content="Performance">
+<meta property="article:tag" content="Binder">
+<meta property="article:tag" content="Locking">
+<meta property="article:tag" content="Scheduling">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://androidperformance.com/en/images/WechatIMG581.png">
+                            <meta http-equiv="Cache-control" content="no-cache">
+                            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+                            <link rel="icon" href="/en/assets/favicon.ico">
+                                <title>
+                                  Android Perfetto Series 10: Binder Scheduling and Lock Contention · Android Performance
+                                </title>
+                                <!-- /*! loadCSS. [c]2017 Filament Group, Inc. MIT License */
+/* This file is meant as a standalone workflow for
+- testing support for link[rel=preload]
+- enabling async CSS loading in browsers that do not support rel=preload
+- applying rel preload css once loaded, whether supported or not.
+*/ -->
+<script>
+    (function (w) {
+        'use strict'
+        // rel=preload support test
+        if (!w.loadCSS) {
+            w.loadCSS = function () {}
+        }
+        // define on the loadCSS obj
+        var rp = (loadCSS.relpreload = {})
+        // rel=preload feature support test
+        // runs once and returns a function for compat purposes
+        rp.support = (function () {
+            var ret
+            try {
+                ret = w.document.createElement('link').relList.supports('preload')
+            } catch (e) {
+                ret = false
+            }
+            return function () {
+                return ret
+            }
+        })()
+
+        // if preload isn't supported, get an asynchronous load by using a non-matching media attribute
+        // then change that media back to its intended value on load
+        rp.bindMediaToggle = function (link) {
+            // remember existing media attr for ultimate state, or default to 'all'
+            var finalMedia = link.media || 'all'
+
+            function enableStylesheet() {
+                link.media = finalMedia
+            }
+
+            // bind load handlers to enable media
+            if (link.addEventListener) {
+                link.addEventListener('load', enableStylesheet)
+            } else if (link.attachEvent) {
+                link.attachEvent('onload', enableStylesheet)
+            }
+
+            // Set rel and non-applicable media type to start an async request
+            // note: timeout allows this to happen async to let rendering continue in IE
+            setTimeout(function () {
+                link.rel = 'stylesheet'
+                link.media = 'only x'
+            })
+            // also enable media after 3 seconds,
+            // which will catch very old browsers (android 2.x, old firefox) that don't support onload on link
+            setTimeout(enableStylesheet, 3000)
+        }
+
+        // loop through link elements in DOM
+        rp.poly = function () {
+            // double check this to prevent external calls from running
+            if (rp.support()) {
+                return
+            }
+            var links = w.document.getElementsByTagName('link')
+            for (var i = 0; i < links.length; i++) {
+                var link = links[i]
+                // qualify links to those with rel=preload and as=style attrs
+                if (
+                    link.rel === 'preload' &&
+                    link.getAttribute('as') === 'style' &&
+                    !link.getAttribute('data-loadcss')
+                ) {
+                    // prevent rerunning on link
+                    link.setAttribute('data-loadcss', true)
+                    // bind listeners to toggle media back
+                    rp.bindMediaToggle(link)
+                }
+            }
+        }
+
+        // if unsupported, run the polyfill
+        if (!rp.support()) {
+            // run once at least
+            rp.poly()
+
+            // rerun poly on an interval until onload
+            var run = w.setInterval(rp.poly, 500)
+            if (w.addEventListener) {
+                w.addEventListener('load', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            } else if (w.attachEvent) {
+                w.attachEvent('onload', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            }
+        }
+
+        // commonjs
+        if (typeof exports !== 'undefined') {
+            exports.loadCSS = loadCSS
+        } else {
+            w.loadCSS = loadCSS
+        }
+    })(typeof global !== 'undefined' ? global : this)
+</script>
+
+                                  <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/en/font/Oswald-Regular.woff2") format('woff2'),
+             url("/en/font/Oswald-Regular.ttf") format('truetype');
+        font-display: swap;
+    }
+
+    body {
+        margin: 0;
+    }
+
+    /* Removed initial hide to show content immediately */
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(
+            -45deg,
+            #444 0,
+            #444 80px,
+            #333 80px,
+            #333 160px
+        );
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+</style>
+
+                                    <link id="stylesheet-base" rel="preload" href="/en/css/style.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <link id="stylesheet-mobile" rel="preload" href="/en/css/mobile.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet';this.media='screen and
+                                    (max-width: 960px)'">
+                                    <link id="stylesheet-theme-dark" rel="preload" href="/en/css/dark.css
+                                    " as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <!-- Font Awesome CSS (with CDN fallback) -->
+                                    <link id="stylesheet-fontawesome" rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+                                      as="style" onload="this.onload=null;this.rel='stylesheet'"
+                                      onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css';this.rel='stylesheet'">
+                                    <link rel="preconnect" href="https://cdn.bootcdn.net" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.bootcdn.net">
+                                    <link rel="preconnect" href="https://cdn.staticfile.org" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.staticfile.org">
+                                    <link rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js" as="script">
+                                    <link rel="preload" href="/en/scripts/main.js" as="script">
+                                    <!-- use compressed font format to reduce transfer size -->
+                                    <link rel="preload" href="/en/font/Source%5C%20Sans%5C%20Pro.woff2"
+                                      as="font" type="font/woff2" crossorigin>
+                                    <link rel="preload" href="/en/font/Source%5C%20Sans%5C%20Pro.woff" as="font"
+                                      type="font/woff" crossorigin>
+                                    <link rel="preload" href="https://at.alicdn.com/t/font_327081_1dta1rlogw17zaor.woff"
+                                      as="font" crossorigin>
+                                    <!-- algolia -->
+                                        <!-- 百度统计（延迟加载，失败静默）  -->
+                                            <!-- CNZZ（延迟加载，失败静默）  -->
+                                                <!-- Google tag (gtag.js) 延迟加载，失败静默 -->
+                                                  <script>
+                                                    (function () {
+                                                      function loadGtag() {
+                                                        try {
+                                                          window.dataLayer = window.dataLayer || []
+                                                          function gtag() { dataLayer.push(arguments) }
+                                                          window.gtag = gtag
+                                                          gtag('js', new Date())
+                                                          var s = document.createElement('script')
+                                                          s.async = true
+                                                          s.src = 'https://www.googletagmanager.com/gtag/js?id=UA-50993302-2'
+                                                          s.onerror = function () { }
+                                                          s.onload = function () { gtag('config', 'UA-50993302-2') }
+                                                          document.head.appendChild(s)
+                                                        } catch (e) { }
+                                                      }
+                                                      if (window.requestIdleCallback) {
+                                                        requestIdleCallback(loadGtag, { timeout: 5000 })
+                                                      } else {
+                                                        window.addEventListener('load', function () { setTimeout(loadGtag, 3000) })
+                                                      }
+                                                    })();
+                                                  </script>
+                                                    <!-- Hreflang Tags -->
+                                                    
+                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/" />
+                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/" />
+                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/" />
+                  <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/en/atom.xml" title="Android Performance" type="application/atom+xml">
+</head>
+        <body class="post-body">
+        <!-- header -->
+        <header class="header header-mobile">
+    <!-- top read progress line -->
+    <div class="header-element">
+        <div class="read-progress"></div>
+    </div>
+    <!-- sidebar menu button -->
+    <div class="header-element">
+        <div class="header-sidebar-menu">
+            <div style="padding-left: 1px;">&#xe775;</div>
+        </div>
+    </div>
+    <!-- header actions -->
+    <div class="header-actions">
+        <!-- theme mode switch button -->
+        <span class="header-theme-btn header-element">
+            <i class="fas fa-adjust"></i>
+        </span>
+        <!-- back to home page text -->
+        <span class="home-link header-element">
+            <a href="/en/">Android Performance</a>
+        </span>
+    </div>
+    <!-- toggle banner -->
+    <div class="banner">
+        <div class="blog-title header-element">
+            <a href="/en/">Android Performance</a>
+        </div>
+        <div class="post-title header-element">
+            <a href="#" class="post-name">Android Perfetto Series 10: Binder Scheduling and Lock Contention</a>
+        </div>
+    </div>
+</header>
+
+        <!-- fixed footer -->
+        <footer class="footer-fixed">
+    <!-- donate button -->
+    <div class="donate-popup donate-popup--hidden">
+    <div class="donate-popup__title">Buy Me A Coffee</div>
+    <div class="donate-popup__content">
+        <div class="donate-popup__content-description">If you find this article helpful, consider buying me a coffee.</div>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Wechat"
+            alt="Wechat"
+            src="/en/assets/donate-wechat.png"
+        ></img>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Alipay"
+            alt="Alipay"
+            src="/en/assets/donate-alipay.png"
+        ></img>
+    </div>
+</div>
+
+    <div
+        title="Donate to the author"
+        class="footer-fixed-btn footer-fixed-btn--hidden donate-btn"
+    >
+        <i class="fas fa-donate"></i>
+    </div>
+
+    <!-- back to top button -->
+    <div class="footer-fixed-btn footer-fixed-btn--hidden back-top">
+        <div>&#xe639;</div>
+    </div>
+</footer>
+
+        <!-- wrapper -->
+        <div class="wrapper">
+            <div class="site-intro" style="    height:50vh;
+">
+    <!-- 主页  -->
+    <!-- 404页  -->
+    <div class="site-intro-placeholder"></div>
+    <picture>
+            <source type="image/webp" srcset="/en/intro/post-bg.webp">
+        <img class="site-intro-img"
+             src="/en/intro/post-bg.jpg"
+             alt=""
+loading="lazy"             decoding="async"
+             fetchpriority="auto"
+             sizes="100vw">
+    </picture>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+                Android Perfetto Series 10: Binder Scheduling and Lock Contention
+            <!-- 404 -->
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            <!-- 404 -->
+        </p>
+        <!-- 文章页 meta -->
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                    <div class="post-intro-tags" >
+        <span class="post-category" data-categories="Android">
+            <i class="fas fa-folder post-category-icon"></i>
+            <span class="post-category-text">
+                Android
+            </span>
+        </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Binder">Binder</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Locking">Locking</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Scheduling">Scheduling</a>
+</div>
+
+                <!-- 文章字数统计 -->
+                    <div class="post-intro-read">
+                        <span>Word count: <span class="post-count word-count">6.4k</span>Reading time: <span class="post-count reading-time">39 min</span></span>
+                    </div>
+                <div class="post-intro-meta">
+                    <!-- 撰写日期 -->
+                    <span class="iconfont-archer post-intro-calander">&#xe676;</span>
+                    <span class="post-intro-time">2025/11/16</span>
+                    <!-- 文章分享 -->
+                    <span class="share-wrapper">
+                        <span class="iconfont-archer share-icon">&#xe71d;</span>
+                        <span class="share-text">Share</span>
+                        <ul class="share-list">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+    </div>
+</div>
+
+            
+            <script>
+  // get user agent
+  function getBrowserVersions() {
+    var u = window.navigator.userAgent
+    return {
+      userAgent: u,
+      trident: u.indexOf('Trident') > -1, //IE内核
+      presto: u.indexOf('Presto') > -1, //opera内核
+      webKit: u.indexOf('AppleWebKit') > -1, //苹果、谷歌内核
+      gecko: u.indexOf('Gecko') > -1 && u.indexOf('KHTML') == -1, //火狐内核
+      mobile: !!u.match(/AppleWebKit.*Mobile.*/), //是否为移动终端
+      ios: !!u.match(/\(i[^;]+;( U;)? CPU.+Mac OS X/), //ios终端
+      android: u.indexOf('Android') > -1 || u.indexOf('Linux') > -1, //android终端或者uc浏览器
+      iPhone: u.indexOf('iPhone') > -1 || u.indexOf('Mac') > -1, //是否为iPhone或者安卓QQ浏览器
+      iPad: u.indexOf('iPad') > -1, //是否为iPad
+      webApp: u.indexOf('Safari') == -1, //是否为web应用程序，没有头部与底部
+      weixin: u.indexOf('MicroMessenger') == -1, //是否为微信浏览器
+      uc: u.indexOf('UCBrowser') > -1, //是否为android下的UC浏览器
+    }
+  }
+  var browser = {
+    versions: getBrowserVersions(),
+  }
+  console.log('userAgent: ' + browser.versions.userAgent)
+
+  // callback
+  function fontLoaded() {
+    console.log('font loaded')
+    if (document.getElementsByClassName('site-intro-meta')) {
+      document
+        .getElementsByClassName('intro-title')[0]
+        .classList.add('intro-fade-in')
+      document
+        .getElementsByClassName('intro-subtitle')[0]
+        .classList.add('intro-fade-in')
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+      if (postIntros) {
+        postIntros.classList.add('post-fade-in')
+      }
+    }
+  }
+
+  // UC不支持跨域，所以直接显示
+  function asyncCb() {
+    if (browser.versions.uc) {
+      console.log('UCBrowser')
+      fontLoaded()
+    } else {
+      WebFont.load({
+        custom: {
+          families: ['Oswald-Regular'],
+        },
+        loading: function () {
+          // 所有字体开始加载
+          // console.log('font loading');
+        },
+        active: function () {
+          // 所有字体已渲染
+          fontLoaded()
+        },
+        inactive: function () {
+          // 字体预加载失败，无效字体或浏览器不支持加载
+          console.log('inactive: timeout')
+          fontLoaded()
+        },
+        timeout: 5000, // Set the timeout to two seconds
+      })
+    }
+  }
+
+  function asyncErr() {
+    console.warn('script load from CDN failed, will load local script')
+  }
+
+  // load webfont-loader async, and add callback function
+  function async(u, cb, err) {
+    var d = document,
+      t = 'script',
+      o = d.createElement(t),
+      s = d.getElementsByTagName(t)[0]
+    o.src = u
+    if (cb) {
+      o.addEventListener(
+        'load',
+        function (e) {
+          cb(null, e)
+        },
+        false
+      )
+    }
+    if (err) {
+      o.addEventListener(
+        'error',
+        function (e) {
+          err(null, e)
+        },
+        false
+      )
+    }
+    s.parentNode.insertBefore(o, s)
+  }
+
+  var asyncLoadWithFallBack = function (arr, success, reject) {
+    var currReject = function () {
+      reject()
+      arr.shift()
+      if (arr.length) async(arr[0], success, currReject)
+    }
+
+    async(arr[0], success, currReject)
+  }
+
+  asyncLoadWithFallBack(
+    [
+      'https://cdn.bootcdn.net/ajax/libs/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.staticfile.org/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.jsdelivr.net/npm/webfontloader@1.6.28/webfontloader.min.js',
+      "/en/lib/webfontloader.min.js",
+    ],
+    asyncCb,
+    asyncErr
+  )
+</script>
+
+            <img class="loading" src="/en/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" alt="loading">
+            <div class="container container-unloaded">
+                <main class="main post-page">
+    <article class="article-entry">
+        <p>The tenth article in the Perfetto series focuses on <strong>Binder</strong>, the core Inter-Process Communication (IPC) mechanism of Android. Binder carries almost all interactions between system services and applications and is a frequent source of performance bottlenecks. This article, written from a system development and performance tuning perspective, combines data sources like <code>android.binder</code>, <code>sched</code>, <code>thread_state</code>, and <code>android.java_hprof</code> to provide a practical diagnostic workflow that helps both beginners and advanced developers identify issues related to latency, thread pool pressure, and lock contention.</p>
+<span id="more"></span>
+
+<h2 id="Table-of-Contents"><a href="#Table-of-Contents" class="headerlink" title="Table of Contents"></a>Table of Contents</h2><ul>
+<li><a href="#series">Perfetto Series Catalog</a></li>
+<li><a href="#basics">Binder Basics</a></li>
+<li><a href="#setup">Perfetto Setup and Data Sources</a><ul>
+<li><a href="#other-tools">Other Binder Analysis Tools</a></li>
+</ul>
+</li>
+<li><a href="#workflow">Binder Analysis Workflow</a><ul>
+<li><a href="#workflow-latency">Step 1: Identify Transaction Latency</a></li>
+<li><a href="#workflow-threadpool">Step 2: Evaluate Thread Pool and Oneway Queue</a></li>
+<li><a href="#workflow-lock">Step 3: Investigate Lock Contention</a></li>
+</ul>
+</li>
+<li><a href="#case">Case Studies</a><ul>
+<li><a href="#case-wm">Case 1: Window Management Delay</a></li>
+<li><a href="#case-threadpool">Case 2: Binder Thread Pool Saturation</a></li>
+</ul>
+</li>
+<li><a href="#platform-features">Platform Features and Best Practices</a></li>
+<li><a href="#summary">Summary</a></li>
+<li><a href="#refs">References</a></li>
+<li><a href="#attachments">Attachments</a></li>
+<li><a href="#about">About the Author &amp; Blog</a></li>
+</ul>
+<p><a id="series"></a></p>
+<h2 id="Perfetto-Series-Catalog"><a href="#Perfetto-Series-Catalog" class="headerlink" title="Perfetto Series Catalog"></a>Perfetto Series Catalog</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/03/27/Android-Perfetto-101/">Android Perfetto Series Catalog</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto Series 1: Introduction to Perfetto</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto Series 4: Opening Large Traces via Command Line</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Choreographer-based Rendering Flow</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto Series 6: Why 120Hz? Advantages and Challenges</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto Series 7: MainThread and RenderThread Deep Dive</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto Series 8: Understanding Vsync and Performance Analysis</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto Series 9: Interpreting CPU Information</a></li>
+<li>Android Perfetto Series 10: Binder Scheduling and Lock Contention (this article)</li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV1oi82efE4D/?vd_source=0c6d2191e785de0a36dc21a9da7e664e">Video (Bilibili) - Android Perfetto Basics and Case Studies</a></li>
+</ol>
+<p><a id="basics"></a></p>
+<h2 id="Binder-Basics"><a href="#Binder-Basics" class="headerlink" title="Binder Basics"></a>Binder Basics</h2><p>For readers encountering Binder for the first time, understanding its role and participants is crucial. You can roughly understand Binder as “cross-process function calls”: you write code in one process that looks like calling a local interface, while Binder handles the actual call and data transfer. Overall, it is Android’s primary Inter-Process Communication (IPC) mechanism, consisting of four core components:</p>
+<ol>
+<li><strong>Client</strong>: Application threads initiate calls through <code>IBinder.transact()</code>, writing <code>Parcel</code>-serialized data to the kernel.</li>
+<li><strong>Service (Server)</strong>: Usually runs in SystemServer or other processes, reading <code>Parcel</code> and executing business logic through <code>Binder.onTransact()</code>.</li>
+<li><strong>Binder Driver</strong>: The kernel module <code>/dev/binder</code> responsible for thread pool scheduling, buffer management, priority inheritance, etc., serving as the “messenger” connecting both parties.</li>
+<li><strong>Thread Pool</strong>: The server typically maintains a set of Binder threads. Note that <strong>the thread pool is not created full from the start</strong>, but is created on demand. The Java layer defaults to approximately 15 Binder worker threads (excluding the main thread), and the Native layer can also configure the maximum thread count via <code>ProcessState</code> (default value is usually also 15). When all Binder threads are busy, new requests will queue in the driver layer waiting for idle threads.</li>
+</ol>
+<p><strong>Why is Binder needed?</strong></p>
+<p>Android adopts a multi-process architecture to isolate applications, improve security, and stability. Each APK runs in an independent user space. When it needs to access system capabilities (camera, location, notifications, etc.), it must cross-process call the Framework or SystemServer.</p>
+<p>Limitations of traditional IPC solutions:</p>
+<table>
+<thead>
+<tr>
+<th>IPC Method</th>
+<th>Problem</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Socket</td>
+<td>High overhead, lacks identity verification</td>
+</tr>
+<tr>
+<td>Pipe</td>
+<td>Only supports parent-child processes, one-way communication</td>
+</tr>
+<tr>
+<td>Shared Memory</td>
+<td>Needs additional synchronization mechanisms, lacks access control</td>
+</tr>
+</tbody></table>
+<p>Binder solves these problems at the kernel layer, providing three key capabilities: first, <strong>identity and permission</strong> (based on UID&#x2F;PID verification to ensure the caller is legitimate); second, <strong>synchronous and asynchronous calls</strong> (in synchronous mode, the Client waits for the Server to return, which is the most common mode, while in asynchronous mode, the Client returns immediately after sending, suitable for scenarios like notifications and status reporting); third, <strong>priority inheritance</strong> (when a high-priority Client calls a low-priority Server, the Server temporarily elevates its priority to avoid priority inversion problems).</p>
+<p>Therefore, when we write statements like <code>locationManager.getCurrentLocation()</code> in an application, the underlying layer necessarily relies on Binder to safely and reliably pass the call to SystemServer.</p>
+<h3 id="Case-from-App-Developer’s-Perspective"><a href="#Case-from-App-Developer’s-Perspective" class="headerlink" title="Case from App Developer’s Perspective"></a>Case from App Developer’s Perspective</h3><p>Suppose we call <code>LocationManager#getCurrentLocation()</code> in an application. The actual implementation of this API is located in <code>LocationManagerService</code> in <code>system_server</code>. The call path can be summarized as: first, on the <strong>Proxy side</strong>, the App thread gets a proxy object (BinderProxy) for <code>ILocationManager</code> through <code>Context.getSystemService</code>; then it <strong>serializes</strong>, and when calling <code>getCurrentLocation()</code>, the proxy writes parameters into a <code>Parcel</code> and executes <code>transact()</code>; next is <strong>kernel transfer</strong>, where the Binder driver queues this transaction into the Binder thread queue of <code>system_server</code> and <strong>wakes</strong> an idle thread (for example, <code>Binder:1460_5</code>); then on the <strong>Stub side</strong>, the thread where <code>LocationManagerService</code> (Stub) is located wakes up, reads parameters, executes location logic (which may involve HAL layer interaction); finally, in the <strong>return</strong> phase, the Service completes execution, writes the result into a <code>Parcel</code>, the driver wakes the original App thread, and the App thread returns from <code>waitForResponse()</code> with the data.</p>
+<p>In Perfetto, this chain appears as: a <code>service = android.location.ILocationManager</code> transaction on the <code>android.binder</code> track; the App thread is in the <code>S</code> (Sleeping) state in <code>thread_state</code>, and <code>blocked_function</code> usually involves <code>binder_thread_read</code> or <code>epoll</code>; a Binder thread from SystemServer appears with a <code>Running</code> slice; and <strong>Flow arrows</strong> (Perfetto uses arrows to connect the Client’s <code>transact</code> and the Server’s <code>run</code>).</p>
+<!-- TODO: Insert screenshot - Binder call chain in Perfetto (Flow arrow connecting Client and Server) -->
+
+<p><a id="setup"></a></p>
+<h2 id="Perfetto-Setup-and-Data-Sources"><a href="#Perfetto-Setup-and-Data-Sources" class="headerlink" title="Perfetto Setup and Data Sources"></a>Perfetto Setup and Data Sources</h2><p>To diagnose Binder in Perfetto, you need to prepare the data sources and Trace configuration in advance.</p>
+<h3 id="Data-Sources-and-Track-Overview"><a href="#Data-Sources-and-Track-Overview" class="headerlink" title="Data Sources and Track Overview"></a>Data Sources and Track Overview</h3><p>Perfetto’s Binder-related signals mainly come from three data sources, each operating at different levels, providing information granularity and applicable scenarios that differ.</p>
+<p><strong><code>linux.ftrace</code> (kernel layer)</strong> is the most general and basic data source, compatible with all Android versions. It directly reads kernel ftrace events, including <code>binder_transaction</code> (transaction start), <code>binder_transaction_received</code> (server received transaction), <code>binder_lock</code> (kernel Binder lock, usually doesn’t need much attention unless you’re debugging the driver itself), etc. Combined with scheduling-related events (<code>sched_switch</code>, <code>sched_waking</code>), it can completely restore the chain of “Client initiates call → kernel wakes Server thread → Server processes → returns”. If your device is Android 12 or 13, basically relying on this data source is enough, and the Perfetto UI will automatically parse the ftrace binder events into an intuitive “Transactions” view.</p>
+<p><strong><code>android.binder</code> (user layer)</strong> is a relatively new data source, mainly improved in Android 14&#x2F;15 and later versions. It utilizes the kernel’s new interface or tracepoints to provide richer semantic information, such as directly distinguishing <code>reply</code> (response) and <code>transaction</code> (request), providing pre-computed metrics like <code>blocking_dur_ns</code> (client blocking duration), and distinguishing <code>lazy_async</code> (delayed dispatched asynchronous transactions), etc. If your device is Android 14 or above, it’s recommended to enable this data source at the same time to get more detailed analysis dimensions.</p>
+<p><strong><code>android.java_hprof</code> (lock contention)</strong> is used to capture <code>Monitor Contention</code> at the Java layer (that is, lock contention generated by the <code>synchronized</code> keyword). Although the name contains hprof, in this scenario it mainly records lock waiting events through the ART virtual machine’s instrumentation mechanism, rather than doing memory snapshots. Note that enabling this data source has some performance overhead (because every lock contention needs to be recorded), so it’s recommended to enable it only when the problem can be stably reproduced, within a short time window, to avoid the Trace file being too large or affecting the authenticity of the reproduction scenario.</p>
+<h3 id="Recommended-Trace-Config"><a href="#Recommended-Trace-Config" class="headerlink" title="Recommended Trace Config"></a>Recommended Trace Config</h3><p>The following configuration balances compatibility with new features and is recommended as a standard Binder analysis template. Save the configuration as <code>binder_config.pbtx</code> for use:</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br><span class="line">86</span><br><span class="line">87</span><br><span class="line">88</span><br><span class="line">89</span><br><span class="line">90</span><br></pre></td><td class="code"><pre><span class="line"># ============================================================</span><br><span class="line"># Perfetto configuration dedicated to Binder analysis</span><br><span class="line"># Applicable scope: Android <span class="number">12</span>+ (some data sources require Android <span class="number">14</span>+)</span><br><span class="line"># ============================================================</span><br><span class="line"></span><br><span class="line"># --- Buffer and duration settings ---</span><br><span class="line">buffers &#123;</span><br><span class="line">  size_kb: <span class="number">65536</span>          # <span class="number">64</span>MB buffer, suitable for medium complexity scenarios</span><br><span class="line">  fill_policy: RING_BUFFER</span><br><span class="line">&#125;</span><br><span class="line">duration_ms: <span class="number">15000</span>        # <span class="number">15</span> second capture duration, adjustable as needed</span><br><span class="line"></span><br><span class="line"># --- Data source <span class="number">1</span>: android.binder (Android <span class="number">14</span>+) ---</span><br><span class="line"># Provides user-layer Binder semantics, including reply/transaction distinction, blocking_dur_ns, etc.</span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;android.binder&quot;</span></span><br><span class="line">    android_binder_config &#123;</span><br><span class="line">      intercept_transactions: <span class="literal">true</span>   # Intercept transactions</span><br><span class="line">      intercept_late_reply: <span class="literal">true</span>     # Capture delayed replies</span><br><span class="line">      # Optional: Filter specific processes to reduce Trace size</span><br><span class="line">      # filter &#123; name: <span class="string">&quot;system_server&quot;</span> &#125;</span><br><span class="line">      # filter &#123; name: <span class="string">&quot;com.android.systemui&quot;</span> &#125;</span><br><span class="line">      # filter &#123; name: <span class="string">&quot;your_app_package_name&quot;</span> &#125;</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"># --- Data source <span class="number">2</span>: linux.ftrace (kernel layer) ---</span><br><span class="line"># Most general data source, compatible with all Android versions</span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      # Binder core events</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_transaction&quot;</span>           # Transaction start</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_transaction_received&quot;</span>  # Server received transaction</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_transaction_alloc_buf&quot;</span> # Buffer allocation (diagnose TransactionTooLarge)</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_set_priority&quot;</span>          # Priority inheritance</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_lock&quot;</span>                  # Kernel lock (usually can be omitted)</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_locked&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_unlock&quot;</span></span><br><span class="line"></span><br><span class="line">      # Scheduling events (connect Client/Server threads)</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_wakeup&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_blocked_reason&quot;</span>          # Blocking reason</span><br><span class="line"></span><br><span class="line">      # Optional: Application layer trace points (need atrace)</span><br><span class="line">      atrace_categories: <span class="string">&quot;binder_driver&quot;</span>   # Binder driver layer</span><br><span class="line">      atrace_categories: <span class="string">&quot;sched&quot;</span>           # Scheduling</span><br><span class="line">      atrace_categories: <span class="string">&quot;am&quot;</span>              # ActivityManager</span><br><span class="line">      atrace_categories: <span class="string">&quot;wm&quot;</span>              # WindowManager</span><br><span class="line">      # atrace_categories: <span class="string">&quot;view&quot;</span>          # Enable if analyzing UI</span><br><span class="line"></span><br><span class="line">      # Symbolize kernel call stack</span><br><span class="line">      symbolize_ksyms: <span class="literal">true</span></span><br><span class="line"></span><br><span class="line">      # Optimize scheduling event storage, reduce Trace size</span><br><span class="line">      compact_sched &#123;</span><br><span class="line">        enabled: <span class="literal">true</span></span><br><span class="line">      &#125;</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"># --- Data source <span class="number">3</span>: android.java_hprof (Java lock contention) ---</span><br><span class="line"># Capture synchronized lock waiting, has some performance overhead</span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;android.java_hprof&quot;</span></span><br><span class="line">    java_hprof_config &#123;</span><br><span class="line">      track_contended_locks: <span class="literal">true</span>        # Enable lock contention tracking</span><br><span class="line">      track_allocation_contexts: <span class="literal">false</span>   # Disable memory allocation tracking (reduce overhead)</span><br><span class="line">      track_java_heap: <span class="literal">false</span>             # Disable heap sampling</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"># --- Data source <span class="number">4</span>: linux.process_stats (process information) ---</span><br><span class="line"># Provide basic information like process name, PID</span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    process_stats_config &#123;</span><br><span class="line">      scan_all_processes_on_start: <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h4 id="Configuration-Item-Description"><a href="#Configuration-Item-Description" class="headerlink" title="Configuration Item Description"></a>Configuration Item Description</h4><table>
+<thead>
+<tr>
+<th>Data Source</th>
+<th>Purpose</th>
+<th>Android Version Requirement</th>
+<th>Overhead</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>android.binder</code></td>
+<td>User-layer Binder semantics (blocking_dur, reply, etc.)</td>
+<td>14+</td>
+<td>Low</td>
+</tr>
+<tr>
+<td><code>linux.ftrace</code> (binder&#x2F;*)</td>
+<td>Kernel-layer Binder events</td>
+<td>All versions</td>
+<td>Low</td>
+</tr>
+<tr>
+<td><code>linux.ftrace</code> (sched&#x2F;*)</td>
+<td>Scheduling events, connecting thread wakeups</td>
+<td>All versions</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td><code>android.java_hprof</code></td>
+<td>Java lock contention (Monitor Contention)</td>
+<td>10+</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td><code>linux.process_stats</code></td>
+<td>Process name and PID mapping</td>
+<td>All versions</td>
+<td>Very low</td>
+</tr>
+</tbody></table>
+<blockquote>
+<p><strong>Tip</strong>: If the device is Android 12&#x2F;13, the <code>android.binder</code> data source may have limited functionality, mainly relying on <code>linux.ftrace</code> is sufficient. Perfetto UI will automatically parse ftrace binder events into an intuitive Transactions view.</p>
+</blockquote>
+<h3 id="Quick-Start-3-Steps-to-Capture-and-View-Binder-Trace"><a href="#Quick-Start-3-Steps-to-Capture-and-View-Binder-Trace" class="headerlink" title="Quick Start: 3 Steps to Capture and View Binder Trace"></a>Quick Start: 3 Steps to Capture and View Binder Trace</h3><ol>
+<li><p><strong>Capture Trace</strong>:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># Push configuration</span></span><br><span class="line">adb push binder_config.pbtx /data/local/tmp/</span><br><span class="line"></span><br><span class="line"><span class="comment"># Start capture</span></span><br><span class="line">adb shell perfetto --txt -c /data/local/tmp/binder_config.pbtx \</span><br><span class="line">    -o /data/misc/perfetto-traces/trace.pftrace</span><br><span class="line"></span><br><span class="line"><span class="comment"># ... operate phone to reproduce lag ...</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># Pull file out</span></span><br><span class="line">adb pull /data/misc/perfetto-traces/trace.pftrace .</span><br></pre></td></tr></table></figure>
+</li>
+<li><p><strong>Open Trace</strong>: Visit <a target="_blank" rel="noopener" href="https://ui.perfetto.dev/">ui.perfetto.dev</a>, drag in the trace file.</p>
+</li>
+<li><p><strong>Add Key Tracks</strong>:</p>
+<ul>
+<li>Left side click <strong>Tracks</strong> → <strong>Add new track</strong></li>
+<li>Search “Binder”, add <strong>Android Binder &#x2F; Transactions</strong> and <strong>Android Binder &#x2F; Oneway Calls</strong></li>
+<li>Search “Lock”, add <strong>Thread &#x2F; Lock contention</strong> (if data available)</li>
+</ul>
+</li>
+</ol>
+<p><a id="other-tools"></a></p>
+<h3 id="Other-Binder-Analysis-Tools"><a href="#Other-Binder-Analysis-Tools" class="headerlink" title="Other Binder Analysis Tools"></a>Other Binder Analysis Tools</h3><p>Besides Perfetto, there are other tools that can assist with Binder analysis. Here are two practical ones: <code>am trace-ipc</code> (built into Android, no extra installation needed) and <code>binder-trace</code> (open source tool, more powerful but higher configuration threshold).</p>
+<h4 id="am-trace-ipc-Java-Layer-Binder-Call-Tracking"><a href="#am-trace-ipc-Java-Layer-Binder-Call-Tracking" class="headerlink" title="am trace-ipc: Java Layer Binder Call Tracking"></a>am trace-ipc: Java Layer Binder Call Tracking</h4><p><code>am trace-ipc</code> is a command-line tool built into the Android system for tracking Java-layer Binder call stacks. Its working principle is to instrument at <code>BinderProxy.transact()</code>, recording all calls passing through here, and counting the occurrence of each call pattern. The biggest advantage of this tool is <strong>zero configuration, ready to use</strong>, no root permission required, no extra software installation needed.</p>
+<p>Basic usage is very simple, just three steps: “start → operate → stop and export”:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 1. Start tracking (system starts recording all process Binder calls)</span></span><br><span class="line">adb shell am trace-ipc start</span><br><span class="line"></span><br><span class="line"><span class="comment"># 2. Execute the operation you want to analyze on the phone (like starting an app, triggering lag scenarios, etc.)</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># 3. Stop tracking and export results to file</span></span><br><span class="line">adb shell am trace-ipc stop --dump-file /data/local/tmp/ipc-trace.txt</span><br><span class="line"></span><br><span class="line"><span class="comment"># 4. Pull the result file to computer to view</span></span><br><span class="line">adb pull /data/local/tmp/ipc-trace.txt</span><br></pre></td></tr></table></figure>
+
+<p>The exported file is in plain text format, content looks like this:</p>
+<figure class="highlight stylus"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">Traces <span class="keyword">for</span> process: com<span class="selector-class">.example</span><span class="selector-class">.app</span></span><br><span class="line">Count: <span class="number">15</span></span><br><span class="line">java<span class="selector-class">.lang</span><span class="selector-class">.Throwable</span></span><br><span class="line">    at android<span class="selector-class">.os</span><span class="selector-class">.BinderProxy</span><span class="selector-class">.transact</span>(BinderProxy<span class="selector-class">.java</span>:xxx)</span><br><span class="line">    at android<span class="selector-class">.app</span>.IActivityManager<span class="variable">$Stub</span><span class="variable">$Proxy</span><span class="selector-class">.startActivity</span>(...)</span><br><span class="line">    at android<span class="selector-class">.app</span><span class="selector-class">.Instrumentation</span><span class="selector-class">.execStartActivity</span>(...)</span><br><span class="line">    ...</span><br></pre></td></tr></table></figure>
+
+<p>From the output, you can see that it groups by process, listing the complete Java stack for each Binder call and the occurrence count (Count). This is very direct for answering questions like “how many Binder calls did my application make during this operation, and what services did it call”.</p>
+<p><strong>Using with Perfetto</strong>: A very useful feature is that after enabling <code>am trace-ipc</code>, Binder call information is also synchronized to the trace events in Perfetto&#x2F;Systrace. This means you can use Perfetto to see the latency distribution on the timeline while confirming which Java method initiated the call through the trace-ipc output. Combining both gives you both macro time dimensions and micro call stack details.</p>
+<p>This tool is particularly suitable for the following scenarios: suspecting ANR or lag is caused by frequent IPC calls, use it to quickly verify; want to count the total number of Binder calls during a user operation (like startup, scrolling); need to get the complete Java call stack of Binder calls to locate code position.</p>
+<h4 id="binder-trace-Real-time-Binder-Message-Parsing"><a href="#binder-trace-Real-time-Binder-Message-Parsing" class="headerlink" title="binder-trace: Real-time Binder Message Parsing"></a>binder-trace: Real-time Binder Message Parsing</h4><p><a target="_blank" rel="noopener" href="https://github.com/foundryzero/binder-trace">binder-trace</a> is an open-source Binder analysis tool that can intercept and parse Android Binder messages in real-time. Its positioning is similar to “Wireshark for Binder” – just as Wireshark can capture and parse network packets, binder-trace can capture and parse the specific content of Binder transactions, including interface names, method names, and even passed parameter values.</p>
+<p>This tool uses Frida for dynamic injection (Frida is a popular dynamic instrumentation framework), so some conditions need to be met before use: the device needs to be rooted (or using an emulator), and frida-server must be deployed on the device first. Also, the local computer needs Python 3.9 or above. After configuring the environment, usage is as follows:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># Track Binder communication for a specific app (-d specifies device, -n specifies process name, -a specifies Android version)</span></span><br><span class="line">binder-trace -d emulator-5554 -n com.example.app -a 11</span><br></pre></td></tr></table></figure>
+
+<p>After running, an interactive interface opens, displaying all Binder interactions of the target process in real-time. You can filter by interface, method, transaction type, etc. through configuration files (avoiding information overload), and also use shortcuts to pause&#x2F;continue recording, clear screen, etc. The tool has AIDL structure definitions for Android 9 to 14 built-in, automatically parsing most system service call parameters.</p>
+<p>This tool is more suitable for security research and reverse engineering scenarios, like if you want to deeply analyze what specific data is passed between an app and system services, or want to understand the calling details of some unpublished API. However, for daily performance analysis, binder-trace has a high configuration threshold (needs root, needs frida deployment), and it focuses on “message content” rather than “latency distribution”, so usually Perfetto with <code>am trace-ipc</code> is enough. If you’re doing security auditing or need to reverse analyze an app’s IPC behavior, binder-trace will be a very powerful tool.</p>
+<p><a id="workflow"></a></p>
+<h2 id="Binder-Analysis-Workflow"><a href="#Binder-Analysis-Workflow" class="headerlink" title="Binder Analysis Workflow"></a>Binder Analysis Workflow</h2><p>After getting the Trace, don’t just fish in the ocean. It’s recommended to proceed in the order of “find target → look at latency → check threads → find locks”.</p>
+<p><a id="workflow-latency"></a></p>
+<h3 id="Step-1-Identify-Transaction-Latency"><a href="#Step-1-Identify-Transaction-Latency" class="headerlink" title="Step 1: Identify Transaction Latency"></a>Step 1: Identify Transaction Latency</h3><p>The first step in analysis is to find that Binder call you care about. In Perfetto, there are several common ways to locate it: if you already know which process initiated the call, you can directly find your App process’s area as <code>Client</code> in the <code>Transactions</code> track; if you know the interface name or method name, you can press the <code>/</code> key to open the search box, input the AIDL interface name (like <code>ILocationManager</code>) or method name to quickly locate; if you’re troubleshooting UI lag issues, the most direct way is to first look at the main thread’s <code>thread_state</code> track, find segments in <code>S</code> (Sleeping) state with long duration – if during this time the main thread is almost not executing code, it’s very likely waiting for Binder call return, this is the starting point of analysis.</p>
+<p>After selecting a Transaction Slice, the Details panel on the right shows detailed information about this transaction. Among them, three key latency metrics need special attention: <code>latency_ns</code> indicates total latency, which is the complete time from the client sending the request to receiving the response; <code>server_latency_ns</code> indicates server-side processing latency, which is the time the server-side thread actually executes business code; <code>blocking_dur_ns</code> indicates client blocking latency, which is the time the client thread waits in the kernel.</p>
+<!-- TODO: Insert screenshot - Transaction Slice's Details panel, marking latency_ns, server_latency_ns fields -->
+
+<p>Understanding the relationship between these metrics is very important because it directly determines which direction you should dig deeper next. If <code>latency_ns</code> is very long but <code>server_latency_ns</code> is very short, it means time wasn’t spent on server-side processing, but was consumed in Binder driver scheduling or server-side queuing (usually means the Service’s thread pool is busy, new requests need to wait for idle threads). In this case, you need to check the server-side thread pool status, which is what Step 2 will do. If <code>latency_ns</code> and <code>server_latency_ns</code> are similar and both very long, it means server-side processing itself is slow, at this point you need to jump to the server-side Binder thread and see what it was actually doing during this time – was it running business code, waiting for a lock, or waiting for IO.</p>
+<p><a id="workflow-threadpool"></a></p>
+<h3 id="Step-2-Evaluate-Thread-Pool-and-Oneway-Queue"><a href="#Step-2-Evaluate-Thread-Pool-and-Oneway-Queue" class="headerlink" title="Step 2: Evaluate Thread Pool and Oneway Queue"></a>Step 2: Evaluate Thread Pool and Oneway Queue</h3><p>If Step 1 analysis finds that latency is mainly not in server-side processing, but in “queuing”, then you need to further check the status of the Binder thread pool. Before deep analysis, first answer a frequently asked question: <strong>“approximately how many Binder threads does each process have? What’s the scale of system_server’s Binder thread pool? Under what circumstances will it be ‘exhausted’?”</strong></p>
+<h4 id="SystemServer’s-Binder-Thread-Pool-Scale"><a href="#SystemServer’s-Binder-Thread-Pool-Scale" class="headerlink" title="SystemServer’s Binder Thread Pool Scale"></a>SystemServer’s Binder Thread Pool Scale</h4><p>In upstream AOSP (Android 14&#x2F;15), the Binder thread pool design philosophy is: <strong>grow on demand, configurable, no single fixed number</strong>.</p>
+<ul>
+<li><strong>Thread pool grows on demand</strong>: Each server process maintains a thread pool in the Binder driver, where the actual number of threads increases or decreases according to load on demand, with the upper limit jointly determined by the <code>max_threads</code> field in the kernel and user-space configurations like <code>ProcessState#setThreadPoolMaxThreadCount()</code>.</li>
+<li><strong>Typical upper limit is 15-16 worker threads</strong>: In most AOSP versions, the app process’s Java Binder thread pool upper limit is about <strong>15-16 worker threads</strong>; core processes like <code>system_server</code> also have their Binder thread pool defaults in this magnitude, in the range of “a dozen threads”.<br>Some vendor ROMs or custom kernels will adjust the upper limit up or down based on their own load models (for example, adjusting to dozens of threads), so when you see specific numbers through <code>ps -T system_server</code>, <code>top -H</code>, or counting <code>Binder:</code> threads in Perfetto on different devices, there may be differences.</li>
+<li><strong>Take actual observation as standard, not memorizing a number</strong>: In Perfetto, a more recommended approach is to directly expand a process and see how many <code>Binder:xxx_y</code> thread tracks there are, and their activity level during the Trace capture, to evaluate the thread pool’s “scale” and “busyness”.</li>
+</ul>
+<h4 id="Binder-Thread-Count-Buffer-and-“Binder-Exhaustion”"><a href="#Binder-Thread-Count-Buffer-and-“Binder-Exhaustion”" class="headerlink" title="Binder Thread Count, Buffer, and “Binder Exhaustion”"></a>Binder Thread Count, Buffer, and “Binder Exhaustion”</h4><p>In performance analysis, when people mention “Binder count”, they often confuse three different types of resource limits:</p>
+<p><strong>Binder thread pool exhaustion</strong> means all Binder worker threads in a process are in <code>Running</code> &#x2F; <code>D</code> &#x2F; <code>S</code> and other busy states, with no idle threads that can be woken by the driver to process new transactions. Phenomena include Client threads staying in <code>S</code> state in the <code>thread_state</code> track for a long time (call stack stops at <code>ioctl(BINDER_WRITE_READ)</code> &#x2F; <code>epoll_wait</code>), and <code>queue_len</code> corresponding to the service in the <code>android.binder</code> track remains high (indicating requests are queuing). For key processes like <code>system_server</code>, the thread pool being full means system service response capability drops, easily amplifying into <strong>global lag or ANR</strong>.</p>
+<p><strong>Binder transaction buffer exhaustion</strong> involves a shared buffer of limited size (typical value about <strong>1MB magnitude</strong>) that each process has in the Binder driver, used to carry <code>Parcel</code> data being transmitted. Typical scenarios include one transaction transmitting an object that’s too large (like a large Bitmap, extra long string, large array, etc.), and a large number of concurrent transactions not yet consumed, causing too many unreleased <code>Parcel</code>s to pile up in the buffer. Possible results include kernel logs showing <code>binder_transaction_alloc_buf</code> failures, Java layer throwing <code>TransactionTooLargeException</code>, and subsequent transactions queuing for a long time or even failing in the driver layer (looks like “Binder is used up”). The solution to such problems is <strong>not</strong> to “open more threads”, but to control the data amount per transmission (split packets, paging, streaming protocols), and prioritize using <code>SharedMemory</code> &#x2F; files &#x2F; <code>ParcelFileDescriptor</code> and other mechanisms for large block data.</p>
+<p><strong>Binder reference table &#x2F; object count</strong>: The Binder driver maintains reference tables and node objects for each process, and these also have upper limits, but in most actual scenarios, they rarely hit this first. Common risk is holding a large number of Binder references for a long time without releasing, more manifesting as <strong>memory&#x2F;stability issues</strong>, not UI lag.</p>
+<p>When analyzing in Perfetto, you can carry a judgment framework:<br><strong>“Is the current slowness because the thread pool is full, or because transactions are too large&#x2F;buffer is used up?”</strong><br>The former mainly looks at <strong>Binder thread count and their <code>thread_state</code></strong>, as well as <code>queue_len</code>; the latter focuses on <strong>single transaction size, concurrent transaction count, and whether accompanied by <code>TransactionTooLargeException</code> &#x2F; <code>binder_transaction_alloc_buf</code> related logs</strong>.</p>
+<hr>
+<p>Now back to our analysis scenario:</p>
+<p>The busyness of the Binder thread pool directly determines the service’s concurrent processing capability. For synchronous transactions, if all Binder threads on the server side are in <code>Running</code> or <code>Uninterruptible Sleep (D)</code> states, new synchronous requests will queue in the kernel waiting, and client threads will be blocked on <code>ioctl(BINDER_WRITE_READ)</code> or <code>epoll_wait</code> for a long time. In Perfetto, this appears as: the main thread stays in <code>S</code> state for a long time, but looking at its Java code execution situation, it’s almost blank – time is spent waiting. For Oneway (asynchronous) transactions, the situation is slightly different: although the client returns immediately after sending and doesn’t block waiting, Oneway requests on the same <code>IBinder</code> object are often consumed serially on the server side (there’s a queue). If an App sends a large number of Oneway requests in a short time, this queue will be extended, not only will subsequent Oneway executions of this App be delayed, but responses from other callers on the same service may also be affected.</p>
+<p>When diagnosing thread pool issues in Perfetto, there are several metrics worth attention. First is <strong>Queue Length</strong>, in the <code>android.binder</code> track you can observe the <code>queue_len</code> metric, if it remains high, it means request production speed is far greater than consumption speed, and the thread pool is in a saturated state. Second, pay attention to <strong>buffer-related signs</strong> (like the <code>TransactionTooLargeException</code> or <code>binder_transaction_alloc_buf</code> failures in kernel logs mentioned earlier), which usually means single transaction is too large or too many concurrent transactions. The most intuitive way is to directly observe <strong>Binder thread states</strong>: find the <code>system_server</code> process and expand all threads, if you find that most threads starting with <code>Binder:</code> are in busy states (dense slices on the timeline with almost no gaps), it means the thread pool is already saturated.</p>
+<p><strong>About identifying Oneway calls in Perfetto</strong>: Synchronous calls (Two-way) and asynchronous calls (Oneway) have obvious differences in Perfetto, learning to distinguish them is very helpful for analysis. During synchronous calls, the client blocks waiting (<code>thread_state</code> shows <code>S</code>), and Perfetto draws bidirectional Flow arrows (transaction → reply); while Oneway calls the client returns immediately after sending, almost no blocking, Flow arrows only have one-way transaction, no reply comes back. Also, Oneway call Slice names might carry an <code>[oneway]</code> marker, and its <code>latency_ns</code> only represents sending time, not round-trip time.</p>
+<p>When analyzing Oneway-related issues, focus on two things: first, the server-side queue depth (if Oneway requests on the same <code>IBinder</code> object pile up, the actual execution timing of subsequent requests will be continuously delayed); second, whether there’s a batch sending pattern (a large number of Oneway calls in a short time will form “spikes”, appearing as densely arranged short Slices on server-side Binder threads in Perfetto).</p>
+<!-- TODO: Insert screenshot - Oneway call in Perfetto (one-way arrow, no reply) -->
+
+<p>It’s worth mentioning that SystemServer’s Binder threads not only need to handle requests from various Apps, but also handle system internal calls (like AMS calling WMS, WMS calling SurfaceFlinger, etc.). If a “misbehaving” App frantically sends Oneway requests in a short time, it might fill up a certain system service’s Oneway queue, further affecting other Apps’ asynchronous callback latency, causing a global lag feeling.</p>
+<p><a id="workflow-lock"></a></p>
+<h3 id="Step-3-Investigate-Lock-Contention"><a href="#Step-3-Investigate-Lock-Contention" class="headerlink" title="Step 3: Investigate Lock Contention"></a>Step 3: Investigate Lock Contention</h3><p>If you jump to the server-side Binder thread and find it stays in <code>S</code> (Sleeping) or <code>D</code> (Disk Sleep &#x2F; Uninterruptible Sleep) state for a long time while processing your request, it usually means it’s waiting for some resource – either waiting for a lock or waiting for IO. Lock contention is a very common source of performance bottlenecks in SystemServer, because SystemServer runs a large number of services that share a lot of global state, and this state is often protected by <code>synchronized</code> locks.</p>
+<p><strong>Java locks (Monitor Contention)</strong> is the most common situation. There are quite a few global locks in SystemServer, like WindowManagerService’s <code>mGlobalLock</code>, some internal locks of ActivityManagerService, etc. When multiple threads simultaneously need to access resources protected by these locks, contention occurs. In Perfetto, if you see a Binder thread state as <code>S</code>, and the <code>blocked_function</code> field contains symbols related to <code>futex</code> (like <code>futex_wait</code>), you can basically be sure it’s waiting for a Java lock. To further confirm which lock it’s waiting for and who’s holding it, you can check the <code>Lock contention</code> track. Perfetto will visualize the lock contention relationship: marking the Owner (thread holding the lock, like the <code>android.display</code> thread) and Waiter (thread waiting for the lock, like the <code>Binder:123_1</code> processing your request) with connection lines. Clicking the Contention Slice, you can also see the lock object’s class name (like <code>com.android.server.wm.WindowManagerGlobalLock</code>) in the Details panel, which is very helpful for understanding the root cause of the problem.</p>
+<!-- TODO: Insert screenshot - Lock contention track, showing Owner and Waiter connection lines -->
+
+<p><strong>Native locks (Mutex &#x2F; RwLock)</strong> situations are relatively rarer, but can be encountered in some scenarios. Manifestations are similar: thread state is <code>D</code> or <code>S</code>, but the call stack shows symbols from the Native layer like <code>__mutex_lock</code>, <code>pthread_mutex_lock</code>, <code>rwsem</code>, not Java’s <code>futex_wait</code>. Analyzing such problems usually needs to combine <code>sched_blocked_reason</code> events to see what the thread is specifically waiting for, belonging to relatively advanced content, so we won’t expand on it here.</p>
+<h4 id="Using-SQL-to-Statistics-SystemServer-Lock-Contention-Optional"><a href="#Using-SQL-to-Statistics-SystemServer-Lock-Contention-Optional" class="headerlink" title="Using SQL to Statistics SystemServer Lock Contention (Optional)"></a>Using SQL to Statistics SystemServer Lock Contention (Optional)</h4><p>If you’re already familiar with Perfetto SQL, here’s a query that can be <strong>run directly in Perfetto UI</strong> to count Java monitor lock contention (<code>Lock contention on a monitor lock</code>) in the <code>system_server</code> process.<br>Where <code>lock_depth</code> indicates the number of threads participating in contention for the same object lock when lock contention occurs.</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">select</span> <span class="built_in">count</span>(<span class="number">1</span>) <span class="keyword">as</span> lock_depth, s.slice_id,s.track_id,s.ts,s.dur,s.dur<span class="operator">/</span><span class="number">1e6</span> <span class="keyword">as</span> dur_ms,ctn.otid,s.name</span><br><span class="line"></span><br><span class="line"><span class="keyword">from</span> slice s, (<span class="keyword">select</span> slice_id,track_id,ts,dur,name,substr(name, <span class="number">46</span>, instr(name,<span class="string">&#x27;)&#x27;</span>)<span class="number">-46</span>) <span class="keyword">as</span> otid </span><br><span class="line"><span class="keyword">from</span> slice t</span><br><span class="line"><span class="keyword">WHERE</span> name <span class="keyword">like</span> <span class="string">&#x27;Lock contention on a monitor lock %&#x27;</span></span><br><span class="line"><span class="keyword">order</span> <span class="keyword">by</span> dur) ctn</span><br><span class="line"><span class="keyword">JOIN</span> thread_track <span class="keyword">ON</span> s.track_id<span class="operator">=</span>thread_track.id <span class="keyword">JOIN</span> thread <span class="keyword">USING</span>(utid) <span class="keyword">JOIN</span> process <span class="keyword">USING</span>(upid)</span><br><span class="line"><span class="keyword">WHERE</span></span><br><span class="line">    process.name <span class="operator">=</span> <span class="string">&#x27;system_server&#x27;</span></span><br><span class="line"><span class="keyword">and</span> s.name <span class="keyword">like</span> <span class="string">&#x27;Lock contention on a monitor lock %&#x27;</span></span><br><span class="line">    <span class="keyword">and</span> substr(s.name, <span class="number">46</span>, instr(s.name,<span class="string">&#x27;)&#x27;</span>)<span class="number">-46</span>) <span class="operator">=</span> ctn.otid</span><br><span class="line">    <span class="keyword">and</span> ctn.slice_id <span class="operator">&lt;&gt;</span> s.slice_id</span><br><span class="line">    <span class="keyword">and</span> ctn.ts <span class="operator">&gt;=</span> s.ts <span class="keyword">and</span> (ctn.ts<span class="operator">+</span>ctn.dur) <span class="operator">&lt;=</span> (s.ts<span class="operator">+</span>s.dur)</span><br><span class="line"><span class="keyword">group</span> <span class="keyword">by</span> s.slice_id</span><br><span class="line"><span class="keyword">order</span> <span class="keyword">by</span> s.dur <span class="keyword">desc</span>;</span><br></pre></td></tr></table></figure>
+
+<p><a id="case"></a><br><a id="case-wm"></a></p>
+<h2 id="Case-Study-Window-Management-Delay"><a href="#Case-Study-Window-Management-Delay" class="headerlink" title="Case Study: Window Management Delay"></a>Case Study: Window Management Delay</h2><p>Below is a real case to demonstrate the analysis process introduced earlier. The scenario is: <strong>obvious animation stutter occurs during app startup</strong>.</p>
+<p><strong>1. Discover Anomaly</strong></p>
+<p>First, open the Trace in Perfetto and find the App’s <code>UI Thread</code> track. Observation shows one frame’s <code>doFrame</code> duration reached 30ms (normally, a 60Hz screen frame should be within 16.6ms). Zooming in on the <code>thread_state</code> corresponding to this frame, we find the main thread was in <code>S</code> (Sleeping) state for 18ms, indicating that during this time, the main thread wasn’t executing code, but waiting for something.</p>
+<!-- TODO: Insert screenshot - UI Thread's doFrame duration anomaly, thread_state shows S state -->
+
+<p><strong>2. Track Binder Call</strong></p>
+<p>Click this 18ms <code>S</code> segment and check the Details panel on the right, you can see associated Slice information. From it, we discover the main thread was calling <code>IActivityTaskManager.startActivity</code> at the time – this is a cross-process Binder call, the caller is App, and the callee is system_server. Perfetto’s Flow arrow clearly points to the <code>Binder:1605_2</code> thread in the <code>system_server</code> process, indicating that this request is being processed by this Binder thread.</p>
+<!-- TODO: Insert screenshot - Flow arrow from App main thread pointing to system_server's Binder thread -->
+
+<p><strong>3. Server-side Analysis</strong></p>
+<p>Follow the Flow arrow and jump to <code>system_server</code>‘s <code>Binder:1605_2</code> thread. Observation shows that this thread is indeed running (Running state), but it took 15ms to finish. Further observing this Binder thread’s <code>Lock contention</code> track (some versions show it in small bars above the thread track), we find a red lock contention marker.</p>
+<p><strong>4. Pin Down the Culprit</strong></p>
+<p>Click this lock contention marker, and the Details panel shows key information: this thread is waiting for the <code>com.android.server.wm.WindowManagerGlobalLock</code> lock, the lock’s Owner is the <code>android.anim</code> thread (system animation thread), and the waiting Duration is 12ms.</p>
+<!-- TODO: Insert screenshot - Lock contention's Details panel, showing lock object and holder -->
+
+<p><strong>Conclusion</strong>: The <code>startActivity</code> Binder request initiated during app startup needs to acquire the <code>WindowManagerGlobalLock</code> lock to continue execution on the SystemServer side, but this lock was being held by the system animation thread at the time (for updating window state), causing the Binder thread to wait 12ms to get the lock and complete processing. This 12ms of lock waiting plus other overhead caused the App main thread to be blocked for 18ms, ultimately manifesting as one frame of lag.</p>
+<p><strong>Optimization Direction</strong>: This situation belongs to system-level lock contention, which is hard for the App side to directly fix. However, the App side can do some avoidance: avoid initiating complex Window operations during intensive system animation execution (like startup animations, transition animations), or find ways to reduce IPC call frequency during cold startup, lowering the probability of hitting lock contention.</p>
+<hr>
+<p><a id="case-threadpool"></a></p>
+<h2 id="Case-Study-Binder-Thread-Pool-Saturation"><a href="#Case-Study-Binder-Thread-Pool-Saturation" class="headerlink" title="Case Study: Binder Thread Pool Saturation"></a>Case Study: Binder Thread Pool Saturation</h2><p>Let’s look at another case. The scenario is: <strong>multiple apps start simultaneously, the overall system becomes laggy</strong>.</p>
+<p><strong>1. Discover Anomaly</strong></p>
+<p>Observing in Perfetto, we find that multiple Apps’ main threads are in <code>S</code> (Sleeping) state during the same time period, and from the call stack, they’re all waiting for their respective Binder calls to return. User feedback is “clicking anything has no response, takes a few seconds to react”, the whole system response is sluggish.</p>
+<p><strong>2. Check SystemServer’s Thread Pool Status</strong></p>
+<p>Since multiple Apps are all waiting for Binder return, the problem likely lies on the server side. Expand the <code>system_server</code> process and observe all threads starting with <code>Binder:</code>. The situation is bad: almost all Binder threads (from <code>Binder:1460_1</code> to <code>Binder:1460_15</code>) are in <code>Running</code> state, each thread’s timeline has dense slices with almost no gaps, completely no idle threads can process new requests. This is a typical thread pool saturation phenomenon.</p>
+<!-- TODO: Insert screenshot - system_server's Binder threads all in busy state -->
+
+<p><strong>3. Analyze Queuing</strong></p>
+<p>Further observing in the <code>android.binder</code> track, we find the <code>queue_len</code> (queue length) metric remains high (greater than 5, meaning requests are always queuing), and multiple Clients’ <code>blocking_dur_ns</code> (blocking duration) is much greater than <code>server_latency_ns</code> (server processing duration) – this indicates requests spend most time queuing waiting, not actually processing.</p>
+<p><strong>4. Locate Root Cause</strong></p>
+<p>Further checking what transactions each Binder thread is specifically processing, we find an interesting phenomenon: a background app initiated a large number of <code>IPackageManager</code> query requests in a short time. Each query itself doesn’t take long (about 5ms), but there are too many (hundreds), and these requests filled up the thread pool, causing other apps’ (including foreground app) requests to queue and wait.</p>
+<p><strong>Conclusion</strong>: A “misbehaving” app “crowded out” system_server’s thread pool resources through batch Binder calls, causing normal requests from other apps to be significantly delayed, manifesting as global lag.</p>
+<p><strong>Optimization Direction</strong>: From the app side, should avoid this batch loop calling pattern – if batch query is needed, should use batch interfaces provided by the system (like using <code>getPackagesForUid</code> instead of loop calling <code>getPackageInfo</code>), or scatter requests to different time points and execute asynchronously. From the system side, can consider adding rate limiting (throttling) for specific services, or optimize hot spot service processing efficiency, reducing single request duration.</p>
+<p><a id="platform-features"></a></p>
+<h2 id="Platform-Features-and-Best-Practices"><a href="#Platform-Features-and-Best-Practices" class="headerlink" title="Platform Features and Best Practices"></a>Platform Features and Best Practices</h2><p>As Android versions iterate, the Binder mechanism itself is constantly evolving, introducing some new features to improve performance and stability. Understanding these features helps understand the causes of certain phenomena in Perfetto, and can also help you write more “friendly” code.</p>
+<p><strong>Binder Freeze (Android 12+)</strong> is a feature very helpful for reducing ANR. When a process is judged as Cached (cached state) and is “frozen” by the system, its Binder interfaces are also frozen. At this time, if other processes attempt to synchronously call this frozen process’s Binder, the system will faster make this call directly fail (in logcat you’ll see <code>FROZEN</code> related error messages), instead of letting the caller hang there and ultimately走向 ANR. The benefit of this design is: rather than letting the caller hang there not knowing when it can return, it’s better to fail fast, giving the caller a chance to do error handling.</p>
+<p><strong>Lazy Async (Android 14&#x2F;15)</strong> optimizes the dispatch strategy for asynchronous transactions (Oneway). In previous versions, the system would immediately try to wake the target thread to process as soon as it received an Oneway request, which would cause a “wakeup storm” when a large number of Oneways flooded in a short time, bringing unnecessary power consumption overhead. Lazy Async’s approach is to “batch” a bit before dispatching according to system load, making Oneway processing rhythm smoother. In Perfetto, you’ll find that after enabling this feature, Oneway queue length fluctuations are smaller, and server-side thread wake-up frequency is more uniform.</p>
+<p><strong>Binder Heavy Hitter Watcher</strong> is a system-level monitoring mechanism that automatically detects those “problem processes” that overuse Binder. If a process initiates too many Binder calls in a short time, the system will print warning information in logcat. This is very helpful for discovering potential performance problems – if you see your app being named in the logs, you should check if some IPC call is too frequent.</p>
+<p><strong>Some suggestions for developers</strong>:</p>
+<p>About <strong>Oneway usage</strong>, need to be particularly cautious. Oneway calls indeed “look” faster (because they return immediately after sending, don’t wait for results), but they’re not suitable for all scenarios. Only when you “clearly don’t care about return results, and don’t need to know when the operation completes” should you use Oneway, like scenarios like log reporting, status notification where “sending is enough”. If you change a call that should be synchronous to Oneway just to “make the main thread return faster”, you might introduce hard-to-debug timing issues – because you can’t determine when the server actually finishes processing, and Oneway requests are processed serially and queued on the server side, a large number of Oneways might affect each other.</p>
+<p>About <strong>transmitting large data</strong>, must avoid passing large objects via Binder directly (especially Bitmaps). As mentioned earlier, Binder’s shared buffer per process is only about 1MB, passing a slightly larger image might burst the buffer, triggering <code>TransactionTooLargeException</code>. The correct approach is to use <code>SharedMemory</code> (usually based on ashmem or memfd at the bottom layer, can efficiently share large blocks of memory between processes), pass through files, or use <code>ParcelFileDescriptor</code> to pass file descriptors letting the other side read itself.</p>
+<p>About <strong>main thread Binder calls</strong>, the basic principle is: don’t call those Binder services on the main thread where you can’t estimate latency. Many system services’ response times are uncertain, they might depend on network, IO, or even other process states. Once the other side gets stuck, your main thread will follow and get stuck, a few seconds later it’s ANR. If you must call such services, should put them on background threads to do, then switch back to the main thread to update UI after getting results.</p>
+<p><a id="summary"></a></p>
+<h2 id="Summary"><a href="#Summary" class="headerlink" title="Summary"></a>Summary</h2><p>Perfetto is an important tool for analyzing Binder problems. Through this article, you should have a basic understanding of the following aspects: how to configure <code>ftrace</code> and <code>android.binder</code> data sources to capture Binder-related events; how to use Flow arrows in Perfetto UI to connect the Client’s request and Server’s processing, forming a complete call chain; and how to distinguish “queueing slow” (thread pool saturation), “processing slow” (server-side code time-consuming), and “waiting for lock” (lock contention) these several common performance bottlenecks by observing <code>latency_ns</code>, <code>server_latency_ns</code>, thread states, lock contention, etc.</p>
+<p>In actual development, if you encounter unexplainable UI lag or ANR, try capturing a Trace with Perfetto to look: is the main thread waiting for Binder call return? If so, what is the server-side doing? Is it queuing waiting for threads, executing business logic, or waiting for locks? Following this thought process step by step to dig down, you can often find the root cause of the problem. Of course, Binder analysis is just a part of Perfetto functionality, combining the CPU, scheduling, rendering, etc. knowledge introduced in previous articles, you can more comprehensively understand the system’s running state and locate various performance problems.</p>
+<p><a id="refs"></a></p>
+<h2 id="References"><a href="#References" class="headerlink" title="References"></a>References</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://paul.pub/android-binder-driver/">Understanding Android Binder Mechanism 1&#x2F;3: Driver Part</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/android-binder">Perfetto Documentation - Android Binder</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/cpu-scheduling">Perfetto Documentation - Ftrace</a></li>
+<li><a target="_blank" rel="noopener" href="https://cs.android.com/android/platform/superproject/+/main:frameworks/native/libs/binder/">Android Source - Binder</a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.android.com/reference/android/os/Parcel">Android Developers - Parcel and Bundle</a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/foundryzero/binder-trace">binder-trace - Wireshark for Binder</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.cnblogs.com/wanghongzhu/p/15069884.html">am trace-ipc Source Analysis</a></li>
+</ol>
+<p><a id="attachments"></a></p>
+<h2 id="Attachments"><a href="#Attachments" class="headerlink" title="Attachments"></a>Attachments</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://github.com/Gracker/SystraceForBlog/tree/master/Perfetto/Android_Perfetto_Binder">Download Perfetto Trace (SystemServer Binder Case)</a><br>(Trace data contains sensitive information, please keep it confidential after downloading.)</li>
+</ul>
+<p><a id="about"></a></p>
+<h2 id="About-the-Author-amp-Blog"><a href="#About-the-Author-amp-Blog" class="headerlink" title="About the Author &amp; Blog"></a>About the Author &amp; Blog</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">Blogger Introduction</a></li>
+<li><a href="https://androidperformance.com/2019/12/01/BlogMap/">Blog Content Navigation</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2023/12/30/the-performance/">Android Performance Optimization Knowledge Planet</a></li>
+</ol>
+<blockquote>
+<p><strong>“If you want to go fast, go alone. If you want to go far, go together.”</strong></p>
+</blockquote>
+<p><img src="/en/images/WechatIMG581.png" alt="Wechat QR"></p>
+
+    </article>
+    <!-- license -->
+        <div class="license-wrapper">
+            <p>Author：<a href="https://androidperformance.com/en">Gracker</a>
+            <p>Link：<a href="https://androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/">https://androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/</a>
+            <p>Publish date：<a href="https://androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/">November 16th 2025, 3:33:30 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/">January 11th 2026, 8:56:53 pm</a>
+            <p>License：This work is licensed under <a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a></p>
+        </div>
+    <!-- paginator -->
+    <ul class="post-paginator">
+        <li class="next">
+        </li>
+        <li class="previous">
+                <div class="prevSlogan">Previous Post</div>
+                <a href="/en/2025/11/12/Android-Perfetto-09-CPU/" title="Android Perfetto Series 9: CPU Information Interpretation">
+                    <div class="prevTitle">Android Perfetto Series 9: CPU Information Interpretation</div>
+                </a>
+        </li>
+    </ul>
+    <!-- comment -->
+        <div class="post-comment">
+            <!-- 来必力 City 版安装代码 -->
+
+            
+            
+            
+            <!-- utteranc评论 -->
+
+            <!-- partial('_partial/comment/changyan') -->
+            <!--PC版-->
+
+            
+            
+            
+        </div>
+    <!-- timeliness note -->
+    <!-- idea from: https://hexo.fluid-dev.com/posts/hexo-injector/#%E6%96%87%E7%AB%A0%E6%97%B6%E6%95%88%E6%80%A7%E6%8F%90%E7%A4%BA -->
+    <!-- Mathjax -->
+</main>
+
+                <!-- profile -->
+            </div>
+            <footer class="footer footer-unloaded">
+    <!-- social  -->
+        <div class="social">
+                            <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title="email" ></a>
+                <a href="https://github.com/gracker" class="iconfont-archer github" target="_blank" title="github"></a>
+                <span class="iconfont-archer wechat" title="wechat">
+                    <img class="profile-qr" src="/en/assets/Wechat.jpeg" />
+                </span>
+                <span class="iconfont-archer qq" title="qq">
+                    <img class="profile-qr" src="/en/553000664" />
+                </span>
+                <a href="https://weibo.com/gracker520" class="iconfont-archer weibo" target="_blank" title="weibo"></a>
+                <a href="https://www.zhihu.com/people/gracker" class="iconfont-archer zhihu" target="_blank" title="zhihu"></a>
+                <a href="https://twitter.com/Gracker_Gao" class="iconfont-archer twitter" target="_blank" title="twitter"></a>
+                <a href="https://juejin.im/user/557b0590e4b052e031453d76" class="iconfont-archer juejin" target="_blank" title="juejin"></a>
+                <a href="https://www.youtube.com/@grackers" class="iconfont-archer youtube" target="_blank" title="youtube"></a>
+                <a href="/en/atom.xml" class="iconfont-archer rss" target="_blank" title="rss"></a>
+
+        </div>
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- website approve for Chinese user -->
+        <div class="website-approve">
+                <span id="icp-approve" class="icp-approve">
+                    <a href="https://beian.miit.gov.cn/" target="_blank">蜀 ICP 备 20016190 号</a>
+                </span>
+        </div>
+</footer>
+
+        </div>
+        <!-- toc -->
+            <div class="toc-wrapper toc-wrapper-loding" style=    top:50vh;
+>
+                <div class="toc-catalog">
+                    <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+                </div>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Table-of-Contents"><span class="toc-number">1.</span> <span class="toc-text">Table of Contents</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-Series-Catalog"><span class="toc-number">2.</span> <span class="toc-text">Perfetto Series Catalog</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Binder-Basics"><span class="toc-number">3.</span> <span class="toc-text">Binder Basics</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Case-from-App-Developer%E2%80%99s-Perspective"><span class="toc-number">3.1.</span> <span class="toc-text">Case from App Developer’s Perspective</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-Setup-and-Data-Sources"><span class="toc-number">4.</span> <span class="toc-text">Perfetto Setup and Data Sources</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Data-Sources-and-Track-Overview"><span class="toc-number">4.1.</span> <span class="toc-text">Data Sources and Track Overview</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Recommended-Trace-Config"><span class="toc-number">4.2.</span> <span class="toc-text">Recommended Trace Config</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#Configuration-Item-Description"><span class="toc-number">4.2.1.</span> <span class="toc-text">Configuration Item Description</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Quick-Start-3-Steps-to-Capture-and-View-Binder-Trace"><span class="toc-number">4.3.</span> <span class="toc-text">Quick Start: 3 Steps to Capture and View Binder Trace</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Other-Binder-Analysis-Tools"><span class="toc-number">4.4.</span> <span class="toc-text">Other Binder Analysis Tools</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#am-trace-ipc-Java-Layer-Binder-Call-Tracking"><span class="toc-number">4.4.1.</span> <span class="toc-text">am trace-ipc: Java Layer Binder Call Tracking</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#binder-trace-Real-time-Binder-Message-Parsing"><span class="toc-number">4.4.2.</span> <span class="toc-text">binder-trace: Real-time Binder Message Parsing</span></a></li></ol></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Binder-Analysis-Workflow"><span class="toc-number">5.</span> <span class="toc-text">Binder Analysis Workflow</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Step-1-Identify-Transaction-Latency"><span class="toc-number">5.1.</span> <span class="toc-text">Step 1: Identify Transaction Latency</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Step-2-Evaluate-Thread-Pool-and-Oneway-Queue"><span class="toc-number">5.2.</span> <span class="toc-text">Step 2: Evaluate Thread Pool and Oneway Queue</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#SystemServer%E2%80%99s-Binder-Thread-Pool-Scale"><span class="toc-number">5.2.1.</span> <span class="toc-text">SystemServer’s Binder Thread Pool Scale</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#Binder-Thread-Count-Buffer-and-%E2%80%9CBinder-Exhaustion%E2%80%9D"><span class="toc-number">5.2.2.</span> <span class="toc-text">Binder Thread Count, Buffer, and “Binder Exhaustion”</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Step-3-Investigate-Lock-Contention"><span class="toc-number">5.3.</span> <span class="toc-text">Step 3: Investigate Lock Contention</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#Using-SQL-to-Statistics-SystemServer-Lock-Contention-Optional"><span class="toc-number">5.3.1.</span> <span class="toc-text">Using SQL to Statistics SystemServer Lock Contention (Optional)</span></a></li></ol></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Case-Study-Window-Management-Delay"><span class="toc-number">6.</span> <span class="toc-text">Case Study: Window Management Delay</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Case-Study-Binder-Thread-Pool-Saturation"><span class="toc-number">7.</span> <span class="toc-text">Case Study: Binder Thread Pool Saturation</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Platform-Features-and-Best-Practices"><span class="toc-number">8.</span> <span class="toc-text">Platform Features and Best Practices</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Summary"><span class="toc-number">9.</span> <span class="toc-text">Summary</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#References"><span class="toc-number">10.</span> <span class="toc-text">References</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Attachments"><span class="toc-number">11.</span> <span class="toc-text">Attachments</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#About-the-Author-amp-Blog"><span class="toc-number">12.</span> <span class="toc-text">About the Author &amp; Blog</span></a></li></ol>
+            </div>
+        <!-- sidebar -->
+        <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+        <div class="sidebar-panel-archives">
+    <!-- 在 ejs 中将 archive 按照时间排序 -->
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 128
+        </div>
+        <!-- search  -->
+    </div>
+    <div class="post-archive">
+            <div class="archive-year"> 2025 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/16</span>
+            <a class="archive-post-title" href="/en/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto Series 10: Binder Scheduling and Lock Contention</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/en/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto Series 9: CPU Information Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/en/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto Series 8: Understanding Vsync Mechanism and Performance Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/02</span>
+            <a class="archive-post-title" href="/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto Series 7: MainThread and RenderThread Deep Dive</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/26</span>
+            <a class="archive-post-title" href="/en/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto Series 6: Why 120Hz? Advantages and Challenges</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/26</span>
+            <a class="archive-post-title" href="/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Choreographer-based Rendering Flow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto Series 4: Opening Large Traces via Command Line</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-01-ANR-Design/">Android ANR Series 1: Understanding Android ANR Design Philosophy</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR-NEW/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share-NEW/">Android ANR Series 3: ANR Case Studies</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2024 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto Series 1: Introduction to Perfetto</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/en/2024/03/27/Android-Perfetto-101/">Android Perfetto Series Catalog</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/01</span>
+            <a class="archive-post-title" href="/en/2024/01/01/2023-review/">Reflections on 2023: Health, Career, and the Future</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2023 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/30</span>
+            <a class="archive-post-title" href="/en/2023/12/30/the-performance/">Introduction to The Android Performance Knowledge Planet</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/en/2023/08/21/the-performance-design-of-os/">Performance Considerations in Operating System Design</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/en/2023/05/14/bad-android-app-with-system-permissions-NEW/">Can Apps with System Privileges Really Do Whatever They Want?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/en/2023/05/14/bad-android-app-with-system-permissions/">Can an App Really Do Whatever It Wants With System Permissions?</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2022 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/en/2022/03/27/the-performance-tea-part-01/">The Performance Community Tea Talk - Episode 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-running/">Systrace Thread CPU State Analysis Tips - Running</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-sleep/">Systrace Thread CPU State Analysis Tips - Sleep and Uninterruptible Sleep</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2022/01/21/android-systrace-cpu-state-runnable/">Systrace Thread CPU State Analysis Tips - Runnable</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/en/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/en/2022/01/07/The-Performace-1-Performance-Tools/">Android Performance Optimization: Techniques, Methods, and Tools</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/03</span>
+            <a class="archive-post-title" href="/en/2022/01/03/2021-Review/">2021 Year in Review: Baby, Career, and Growth</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2021 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/27</span>
+            <a class="archive-post-title" href="/en/2021/10/27/if-i-write-a-book-about-performance/">What Should Be in a Book About Android Smoothness?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/26</span>
+            <a class="archive-post-title" href="/en/2021/10/26/build-android-12/">Android System Development Series (1): Downloading, Compiling, and Flashing Android 12</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace Responsiveness in Action 1 - Understanding Responsiveness Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace Responsiveness in Action 2 - Responsiveness Analysis - Using App Startup as an Example</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace Responsiveness in Action 3 - Extended Knowledge on Responsiveness</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace Smoothness in Action 3 - FAQs During Jank Analysis</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2020 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span>
+            <a class="archive-post-title" href="/en/2020/08/20/weibo-imageload-opt-on-huawei/">Why is the Weibo Experience Better on Huawei? A Technical Analysis and Reflection</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/en/2020/05/26/samsung_crash/">An Incident Caused by a 'Leap' Month - Analysis of Samsung System Reboots</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/en/2020/05/07/Android-App-Chain-Wakeup/">Analysis of Android App Chain Wakeups</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/14</span>
+            <a class="archive-post-title" href="/en/2020/02/14/Android-Systrace-SurfaceFlinger/">Android Systrace Basics - SurfaceFlinger Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/03</span>
+            <a class="archive-post-title" href="/en/2020/02/03/android-development-learning-path-2020-edition/">Android Developer Learning Path (2020 Edition)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span>
+            <a class="archive-post-title" href="/en/2020/01/28/2020-read/">My 2020 Reading List</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2019 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/21</span>
+            <a class="archive-post-title" href="/en/2019/12/21/Android-Systrace-CPU/">Android Systrace Basics - CPU Info Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/15</span>
+            <a class="archive-post-title" href="/en/2019/12/15/Android-Systrace-Triple-Buffer/">Android Systrace Basics - Triple Buffer Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/06</span>
+            <a class="archive-post-title" href="/en/2019/12/06/Android-Systrace-Binder/">Android Systrace Basics - Binder and Lock Contention Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/en/2019/12/01/BlogMap/">[Sticky] Blog Article Directory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/en/2019/12/01/Android-Systrace-Vsync/">Android Systrace Basics - Vsync Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/06</span>
+            <a class="archive-post-title" href="/en/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Android Systrace Basics - MainThread and RenderThread Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/04</span>
+            <a class="archive-post-title" href="/en/2019/11/04/Android-Systrace-Input/">Android Systrace Basics - Input Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/24</span>
+            <a class="archive-post-title" href="/en/2019/10/24/Android-Background-Animation/">Analysis of 'Zombie Animations' in the Android Background</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/22</span>
+            <a class="archive-post-title" href="/en/2019/10/22/Android-Choreographer/">Detailed Explanation of Android Rendering Mechanism Based on Choreographer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/en/2019/09/18/Android-Jank-Due-To-Low-Memory-NEW/">Android Jank and Frame Drops Due to Low Memory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/en/2019/09/18/Android-Jank-Due-To-Low-Memory/">Overview of Jank and Frame Drops in Android - Low Memory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/17</span>
+            <a class="archive-post-title" href="/en/2019/09/17/Android-Kill-Background-App-Debug/">Case Study: Debugging the Android Launcher Kill Problem</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Debug/">Overview of Jank and Frame Drops in Android - Methodology</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/en/2019/09/01/Android-Activity-Lunch-Mode-NEW/">A Detailed Guide to Activity Launch Modes in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/en/2019/09/01/Android-Activity-Lunch-Mode/">A Detailed Guide to Activity Launch Modes in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/en/2019/07/27/Android-Hardware-Layer-NEW/">Detailed Explanation of Hardware Layer in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/en/2019/07/27/Android-Hardware-Layer/">A Deep Dive into Hardware Layers in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/23</span>
+            <a class="archive-post-title" href="/en/2019/07/23/Android-Systrace-Pre/">Android Systrace Basics - Prerequisites for Analyzing Systrace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/29</span>
+            <a class="archive-post-title" href="/en/2019/06/29/Android-Systrace-SystemServer/">Android Systrace Basics - SystemServer Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/en/2019/05/28/Android-Systrace-About/">Android Systrace Basics - Introduction to Systrace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/27</span>
+            <a class="archive-post-title" href="/en/2019/05/27/why-60-fps/">Android Systrace Basics - Why 60 FPS?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/en/2019/05/26/Android_Systrace_0/">Android Systrace -- Series Article Index</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/15</span>
+            <a class="archive-post-title" href="/en/2019/05/15/90hz-on-android/">A New Era of Smoothness: Thoughts on 90Hz on Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/en/2019/04/07/Sharp-Tools/">Sharp Tools - Efficient Tool Recommendations</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/en/2019/04/07/liqi/">Liqi - High-Efficiency Tools Recommendation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2019/01/21/android-performance-case-jank-accessbility-NEW/">Case Study: System-Wide Lag Caused by Android Accessibility Services</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2019/01/21/android-performance-case-jank-accessbility/">Case Analysis of System-wide Stutter Caused by Android Accessibility Service</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/12</span>
+            <a class="archive-post-title" href="/en/2019/01/12/recommend-of-2018/">2018 Best Items Recommendations - A Reward for Your Hard Work</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2018 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span>
+            <a class="archive-post-title" href="/en/2018/11/01/android-system-develop-0/">Setting Up the Android System Development Environment</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/25</span>
+            <a class="archive-post-title" href="/en/2018/10/25/How-do-engineers-count-well/">Lu Qi: Besides Good Code, What Makes an Engineer Excellent?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/01</span>
+            <a class="archive-post-title" href="/en/2018/10/01/how-to-stop-sucking-and-be-awesome-instead-8/">The Programmer's Apprenticeship - 08: The Beauty of Reading</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/30</span>
+            <a class="archive-post-title" href="/en/2018/09/30/how-to-stop-sucking-and-be-awesome-instead-7/">The Programmer's Apprenticeship - 07: Games and Programming</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/29</span>
+            <a class="archive-post-title" href="/en/2018/09/29/how-to-stop-sucking-and-be-awesome-instead-6/">The Programmer's Apprenticeship - 06: All About the Internet</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/28</span>
+            <a class="archive-post-title" href="/en/2018/09/28/how-to-stop-sucking-and-be-awesome-instead-5/">The Programmer's Apprenticeship - 05: Know Your Users</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/27</span>
+            <a class="archive-post-title" href="/en/2018/09/27/how-to-stop-sucking-and-be-awesome-instead-4/">The Programmer's Apprenticeship - 04: Reflections on Testing</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/26</span>
+            <a class="archive-post-title" href="/en/2018/09/26/how-to-stop-sucking-and-be-awesome-instead-3/">The Programmer's Apprenticeship - 03: Web Design Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/20</span>
+            <a class="archive-post-title" href="/en/2018/09/20/how-to-stop-sucking-and-be-awesome-instead-2/">The Programmer's Apprenticeship - 02: The Way of Programming</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2018/09/19/how-to-stop-sucking-and-be-awesome-instead-1/">The Programmer's Apprenticeship - 01: The Art of Fighting Back</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2018/09/13/android-memory/">Does the Android System Not Release Memory?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/13</span>
+            <a class="archive-post-title" href="/en/2018/08/13/Some-Thoughts-on-the-Fluency-of-Android/">Some Thoughts on Android System Fluency</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/20</span>
+            <a class="archive-post-title" href="/en/2018/05/20/zhihu-startingwindow/">Zhihu: Save Your StartingWindow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/en/2018/05/07/Android-performance-optimization-skills-and-tools/">[Sticky] Android Performance Optimization: Must-Know Skills and Tools</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/en/2018/01/06/2017-most-recommended/">2017 Best Recommendations - A Reward for Hard-Working Self</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/en/2018/01/06/Most-Recommended-of-2017/">2017 Annual Best Recommendations - Reward Yourself for Hard Work</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2017 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/23</span>
+            <a class="archive-post-title" href="/en/2017/04/23/About-work/">Reflections on Work and Growth (2017)</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2016 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/en/2016/04/05/android-bottom-bar-2/">Android Bottom Navigation Spec Part 2: Style, Behavior, and Dimensions</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/en/2016/04/05/android-bottom-bar-1/">Android Bottom Navigation Spec Part 1: Usage</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2015 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/31</span>
+            <a class="archive-post-title" href="/en/2015/12/31/How-to-calculation-android-app-lunch-time/">How to Calculate App Startup Time in Android?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/29</span>
+            <a class="archive-post-title" href="/en/2015/12/29/Android-App-Launch-Optimization-DelayLoad-Part-2/">Android App Launch Optimization: Implementation and Principles of DelayLoad (Part 2)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2015/11/18/Android-app-lunch-optimize-delay-load/">Android App Startup Optimization - DelayLoad Implementation and Principles (Part 1)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/12</span>
+            <a class="archive-post-title" href="/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/">RenderThread Workflow in Android hwui</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/en/2015/08/05/HashMap/">Java 7 HashMap Source Code Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-onTrimMemory/">Android Code Memory Optimization Suggestions - OnTrimMemory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-AndroidResource/">Android Code Memory Optimization Suggestions - Android Resources</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/29</span>
+            <a class="archive-post-title" href="/en/2015/05/29/Nexus6-with-Android-M/">Enabling Multi-Window Mode on Nexus 6 with Android M</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/06</span>
+            <a class="archive-post-title" href="/en/2015/05/06/Java-Singleton/">A Detailed Guide to Java Singleton Pattern</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-1/">Android Performance Patterns: Render Performance</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-2/">Android Performance Patterns: Understanding Overdraw</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-4/">Android Performance Patterns: Profile GPU Rendering</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-3/">Android Performance Patterns: Understanding VSYNC</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns/">Overview of Android Performance Patterns</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/">Android Memory Optimization (3) - Viewing Original Bitmaps in MAT</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/31</span>
+            <a class="archive-post-title" href="/en/2015/03/31/android-performance-case-study-follow-up/">Android Performance Case Study Follow-up</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-3/">Android Tips Round-Up, Part 3</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-4/">Android Tips Round-Up, Part 4</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/04</span>
+            <a class="archive-post-title" href="/en/2015/02/04/build-rom-for-nexus5/">Compiling Android Lollipop Firmware for Nexus 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/30</span>
+            <a class="archive-post-title" href="/en/2015/01/30/android-performance-tools-systrace-1/">Android Performance Optimization - Introduction to Systrace (Part 1)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/16</span>
+            <a class="archive-post-title" href="/en/2015/01/16/view-android-source-code-with-androidstudio/">Viewing Android Lollipop Source Code with Android Studio</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/13</span>
+            <a class="archive-post-title" href="/en/2015/01/13/android-performance-optimization-overdraw-2/">Android Performance Optimization: Overdraw - Practical Application</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2014 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/en/2014/10/20/android-performance-optimization-overdraw-1-NEW/">Android Performance Optimization: Overdraw - Theory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/en/2014/10/20/android-performance-optimization-overdraw-1/">Android Performance Optimization: Overdraw - Theory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/03</span>
+            <a class="archive-post-title" href="/en/2014/06/03/android-edittext-do-not-auto-get-focus/">Android Tips: How to Prevent EditText from Automatically Getting Focus</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/31</span>
+            <a class="archive-post-title" href="/en/2014/05/31/android-tips-round-up-2/">Android Tips Round-Up, Part 2</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/en/2014/05/28/android-tips-round-up-1/">Android Tips Round-Up, Part 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/02</span>
+            <a class="archive-post-title" href="/en/2014/05/02/android_log_to_file/">Android Tools - Log2File</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/25</span>
+            <a class="archive-post-title" href="/en/2014/03/25/ubuntu-adb-can-not-find-devices/">Ubuntu: Adb Command Cannot Find Device</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/17</span>
+            <a class="archive-post-title" href="/en/2014/03/17/android-build-your-own-android-notification-service-app/">Android Service: Building Your Own Notification Center (1) - Introduction to Accessibility Service</a>
+        </li>
+            </ul>
+    </div>
+</div>
+
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="Yearly Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Yearly Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Year in Review">
+                <span class="iconfont-archer">&#xe606;</span>
+                Year in Review
+            </span>
+            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Knowledge Planet
+            </span>
+            <span class="sidebar-tag-name" data-tags="Essays">
+                <span class="iconfont-archer">&#xe606;</span>
+                Essays
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Thread Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Thread Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Battery Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Battery Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR Analysis">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR Analysis
+            </span>
+            <span class="sidebar-tag-name" data-tags="Page Response">
+                <span class="iconfont-archer">&#xe606;</span>
+                Page Response
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="Locking">
+                <span class="iconfont-archer">&#xe606;</span>
+                Locking
+            </span>
+            <span class="sidebar-tag-name" data-tags="Scheduling">
+                <span class="iconfont-archer">&#xe606;</span>
+                Scheduling
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Kotlin">
+                <span class="iconfont-archer">&#xe606;</span>
+                Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
+            <span class="sidebar-tag-name" data-tags="Programmer">
+                <span class="iconfont-archer">&#xe606;</span>
+                Programmer
+            </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="Annual Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Annual Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="Sharp Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Sharp Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Specs">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Specs
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="Accessibility">
+                <span class="iconfont-archer">&#xe606;</span>
+                Accessibility
+            </span>
+            <span class="sidebar-tag-name" data-tags="Stutter">
+                <span class="iconfont-archer">&#xe606;</span>
+                Stutter
+            </span>
+            <span class="sidebar-tag-name" data-tags="Overdraw">
+                <span class="iconfont-archer">&#xe606;</span>
+                Overdraw
+            </span>
+            <span class="sidebar-tag-name" data-tags="Reading Notes">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading Notes
+            </span>
+            <span class="sidebar-tag-name" data-tags="The Programmer's Apprenticeship">
+                <span class="iconfont-archer">&#xe606;</span>
+                The Programmer's Apprenticeship
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Principles">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Principles
+            </span>
+            <span class="sidebar-tag-name" data-tags="Testing">
+                <span class="iconfont-archer">&#xe606;</span>
+                Testing
+            </span>
+            <span class="sidebar-tag-name" data-tags="Internet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Internet
+            </span>
+            <span class="sidebar-tag-name" data-tags="Game Programming">
+                <span class="iconfont-archer">&#xe606;</span>
+                Game Programming
+            </span>
+            <span class="sidebar-tag-name" data-tags="Reading">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading
+            </span>
+            <span class="sidebar-tag-name" data-tags="User Experience">
+                <span class="iconfont-archer">&#xe606;</span>
+                User Experience
+            </span>
+            <span class="sidebar-tag-name" data-tags="Liqi">
+                <span class="iconfont-archer">&#xe606;</span>
+                Liqi
+            </span>
+            <span class="sidebar-tag-name" data-tags="Community">
+                <span class="iconfont-archer">&#xe606;</span>
+                Community
+            </span>
+            <span class="sidebar-tag-name" data-tags="Smooth">
+                <span class="iconfont-archer">&#xe606;</span>
+                Smooth
+            </span>
+            <span class="sidebar-tag-name" data-tags="Experience Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Experience Optimization
+            </span>
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+        缺失模块，请参考主题文档进行安装配置：https://github.com/fi3ework/hexo-theme-archer#%E5%AE%89%E8%A3%85%E4%B8%BB%E9%A2%98
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="Casual Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Casual Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Essays">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Essays
+        </span>
+        <span class="sidebar-category-name" data-categories="Reading Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Reading Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Android">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
+        </span>
+        <span class="sidebar-category-name" data-categories="Android Performance Optimization">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android Performance Optimization
+        </span>
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+
+    </div>
+</div>
+
+        <!-- site-meta -->
+        <script>
+    var siteMetaRoot = "/en/"
+    if (siteMetaRoot === "undefined") {
+        siteMetaRoot = '/'
+    }
+    var siteMeta = {
+        url: "https://androidperformance.com/en",
+        root: siteMetaRoot,
+        author: "Gracker"
+    }
+</script>
+
+        <!-- import experimental options here -->
+        <!-- Custom Font -->
+
+        <!-- jquery (must load before main.js) -->
+        <script defer src="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+        <!-- main func (depends on jQuery) -->
+        <script src="/en/scripts/main.js" defer></script>
+        <!-- fancybox -->
+        <script>
+            (function(){
+              var urls = [
+                'https://cdn.bootcdn.net/ajax/libs/fancyapps-ui/5.0.36/fancybox/fancybox.umd.js',
+                'https://cdn.jsdelivr.net/npm/@fancyapps/ui@5.0.36/dist/fancybox/fancybox.umd.js'
+              ];
+              function loadNext(){
+                var u = urls.shift();
+                if(!u) return;
+                var s = document.createElement('script');
+                s.src = u; s.defer = true;
+                s.onload = function(){ if (window.Fancybox) { window.Fancybox.bind('[data-fancybox]'); } };
+                s.onerror = loadNext;
+                document.head.appendChild(s);
+              }
+              loadNext();
+            })();
+        </script>
+        <!-- algolia -->
+        <!-- busuanzi (delay load + silent fail) -->
+        <!-- async load share.js on first click -->
+            <script>
+                (function(){
+                  var loaded = false
+                  function loadShare(){
+                    if (loaded) return
+                    loaded = true
+                    var s = document.createElement('script')
+                    s.src = '/en/scripts/share.js'
+                    s.async = true
+                    document.head.appendChild(s)
+                  }
+                  document.addEventListener('click', function(e){
+                    var t = e.target
+                    if (!t) return
+                    if (t.closest && t.closest('.share-wrapper')) { loadShare() }
+                    else if (t.classList && t.classList.contains('share-wrapper')) { loadShare() }
+                  }, true)
+                })();
+            </script>
+        <!-- mermaid -->
+    </body>
+</html>

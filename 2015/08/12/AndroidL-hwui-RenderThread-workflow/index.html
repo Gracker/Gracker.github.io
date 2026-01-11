@@ -1,0 +1,1713 @@
+<!DOCTYPE html>
+<html lang="zh,en">
+    <!-- title -->
+            <!-- keywords -->
+
+                  <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <meta name="author" content="Gracker">
+                    <meta name="renderer" content="webkit">
+                    <meta name="copyright" content="Gracker">
+                      <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,启动优化,Startup,Perfetto,Systrace,RenderThread,Java">
+                          <meta name="description" content="Focus On Android Performance">
+                          <meta name="description" content="前言本篇文章是自己的一个学习笔记，记录了 Android 5.0 中 hwui 中的 RenderThread 的简单工作流程。由于是学习笔记，所以其中一些细节不会太详细，我只是将大概的流程走一遍，将其工作流标注出来，下次遇到问题的时候就可以知道去哪里查。 下图是我用 Systrace 抓取的一个应用启动的时候 RenderThread 的第一次 Draw 的 Trace 图，从这里面的顺序来看">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Android hwui 中 RenderThread 工作流程">
+<meta property="og:url" content="https://androidperformance.com/2015/08/12/AndroidL-hwui-RenderThread-workflow/index.html">
+<meta property="og:site_name" content="Android Performance">
+<meta property="og:description" content="前言本篇文章是自己的一个学习笔记，记录了 Android 5.0 中 hwui 中的 RenderThread 的简单工作流程。由于是学习笔记，所以其中一些细节不会太详细，我只是将大概的流程走一遍，将其工作流标注出来，下次遇到问题的时候就可以知道去哪里查。 下图是我用 Systrace 抓取的一个应用启动的时候 RenderThread 的第一次 Draw 的 Trace 图，从这里面的顺序来看">
+<meta property="og:locale">
+<meta property="og:image" content="https://androidperformance.com/images/hwui/renderthread/1.png">
+<meta property="og:image" content="https://androidperformance.com/images/hwui/renderthread/2.png">
+<meta property="og:image" content="https://androidperformance.com/images/hwui/renderthread/3.png">
+<meta property="og:image" content="https://androidperformance.com/images/hwui/renderthread/4.png">
+<meta property="og:image" content="https://androidperformance.com/images/hwui/renderthread/5.png">
+<meta property="og:image" content="https://androidperformance.com/images/hwui/renderthread/6.png">
+<meta property="og:image" content="https://androidperformance.com/images/hwui/renderthread/7.png">
+<meta property="og:image" content="https://androidperformance.com/images/WechatIMG581.png">
+<meta property="article:published_time" content="2015-08-12T14:38:01.000Z">
+<meta property="article:modified_time" content="2026-01-11T05:36:33.447Z">
+<meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Startup">
+<meta property="article:tag" content="Android">
+<meta property="article:tag" content="Systrace">
+<meta property="article:tag" content="Java">
+<meta property="article:tag" content="RenderThread">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://androidperformance.com/images/hwui/renderthread/1.png">
+                            <meta http-equiv="Cache-control" content="no-cache">
+                            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+                            <link rel="icon" href="/assets/favicon.ico">
+                                <title>
+                                  Android hwui 中 RenderThread 工作流程 · Android Performance
+                                </title>
+                                <!-- /*! loadCSS. [c]2017 Filament Group, Inc. MIT License */
+/* This file is meant as a standalone workflow for
+- testing support for link[rel=preload]
+- enabling async CSS loading in browsers that do not support rel=preload
+- applying rel preload css once loaded, whether supported or not.
+*/ -->
+<script>
+    (function (w) {
+        'use strict'
+        // rel=preload support test
+        if (!w.loadCSS) {
+            w.loadCSS = function () {}
+        }
+        // define on the loadCSS obj
+        var rp = (loadCSS.relpreload = {})
+        // rel=preload feature support test
+        // runs once and returns a function for compat purposes
+        rp.support = (function () {
+            var ret
+            try {
+                ret = w.document.createElement('link').relList.supports('preload')
+            } catch (e) {
+                ret = false
+            }
+            return function () {
+                return ret
+            }
+        })()
+
+        // if preload isn't supported, get an asynchronous load by using a non-matching media attribute
+        // then change that media back to its intended value on load
+        rp.bindMediaToggle = function (link) {
+            // remember existing media attr for ultimate state, or default to 'all'
+            var finalMedia = link.media || 'all'
+
+            function enableStylesheet() {
+                link.media = finalMedia
+            }
+
+            // bind load handlers to enable media
+            if (link.addEventListener) {
+                link.addEventListener('load', enableStylesheet)
+            } else if (link.attachEvent) {
+                link.attachEvent('onload', enableStylesheet)
+            }
+
+            // Set rel and non-applicable media type to start an async request
+            // note: timeout allows this to happen async to let rendering continue in IE
+            setTimeout(function () {
+                link.rel = 'stylesheet'
+                link.media = 'only x'
+            })
+            // also enable media after 3 seconds,
+            // which will catch very old browsers (android 2.x, old firefox) that don't support onload on link
+            setTimeout(enableStylesheet, 3000)
+        }
+
+        // loop through link elements in DOM
+        rp.poly = function () {
+            // double check this to prevent external calls from running
+            if (rp.support()) {
+                return
+            }
+            var links = w.document.getElementsByTagName('link')
+            for (var i = 0; i < links.length; i++) {
+                var link = links[i]
+                // qualify links to those with rel=preload and as=style attrs
+                if (
+                    link.rel === 'preload' &&
+                    link.getAttribute('as') === 'style' &&
+                    !link.getAttribute('data-loadcss')
+                ) {
+                    // prevent rerunning on link
+                    link.setAttribute('data-loadcss', true)
+                    // bind listeners to toggle media back
+                    rp.bindMediaToggle(link)
+                }
+            }
+        }
+
+        // if unsupported, run the polyfill
+        if (!rp.support()) {
+            // run once at least
+            rp.poly()
+
+            // rerun poly on an interval until onload
+            var run = w.setInterval(rp.poly, 500)
+            if (w.addEventListener) {
+                w.addEventListener('load', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            } else if (w.attachEvent) {
+                w.attachEvent('onload', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            }
+        }
+
+        // commonjs
+        if (typeof exports !== 'undefined') {
+            exports.loadCSS = loadCSS
+        } else {
+            w.loadCSS = loadCSS
+        }
+    })(typeof global !== 'undefined' ? global : this)
+</script>
+
+                                  <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/font/Oswald-Regular.woff2") format('woff2'),
+             url("/font/Oswald-Regular.ttf") format('truetype');
+        font-display: swap;
+    }
+
+    body {
+        margin: 0;
+    }
+
+    /* Removed initial hide to show content immediately */
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(
+            -45deg,
+            #444 0,
+            #444 80px,
+            #333 80px,
+            #333 160px
+        );
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+</style>
+
+                                    <link id="stylesheet-base" rel="preload" href="/css/style.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <link id="stylesheet-mobile" rel="preload" href="/css/mobile.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet';this.media='screen and
+                                    (max-width: 960px)'">
+                                    <link id="stylesheet-theme-dark" rel="preload" href="/css/dark.css
+                                    " as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <!-- Font Awesome CSS (with CDN fallback) -->
+                                    <link id="stylesheet-fontawesome" rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+                                      as="style" onload="this.onload=null;this.rel='stylesheet'"
+                                      onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css';this.rel='stylesheet'">
+                                    <link rel="preconnect" href="https://cdn.bootcdn.net" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.bootcdn.net">
+                                    <link rel="preconnect" href="https://cdn.staticfile.org" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.staticfile.org">
+                                    <link rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js" as="script">
+                                    <link rel="preload" href="/scripts/main.js" as="script">
+                                    <!-- use compressed font format to reduce transfer size -->
+                                    <link rel="preload" href="/font/Source%5C%20Sans%5C%20Pro.woff2"
+                                      as="font" type="font/woff2" crossorigin>
+                                    <link rel="preload" href="/font/Source%5C%20Sans%5C%20Pro.woff" as="font"
+                                      type="font/woff" crossorigin>
+                                    <link rel="preload" href="https://at.alicdn.com/t/font_327081_1dta1rlogw17zaor.woff"
+                                      as="font" crossorigin>
+                                    <!-- algolia -->
+                                        <!-- 百度统计（延迟加载，失败静默）  -->
+                                            <!-- CNZZ（延迟加载，失败静默）  -->
+                                                <!-- Google tag (gtag.js) 延迟加载，失败静默 -->
+                                                  <script>
+                                                    (function () {
+                                                      function loadGtag() {
+                                                        try {
+                                                          window.dataLayer = window.dataLayer || []
+                                                          function gtag() { dataLayer.push(arguments) }
+                                                          window.gtag = gtag
+                                                          gtag('js', new Date())
+                                                          var s = document.createElement('script')
+                                                          s.async = true
+                                                          s.src = 'https://www.googletagmanager.com/gtag/js?id=UA-50993302-2'
+                                                          s.onerror = function () { }
+                                                          s.onload = function () { gtag('config', 'UA-50993302-2') }
+                                                          document.head.appendChild(s)
+                                                        } catch (e) { }
+                                                      }
+                                                      if (window.requestIdleCallback) {
+                                                        requestIdleCallback(loadGtag, { timeout: 5000 })
+                                                      } else {
+                                                        window.addEventListener('load', function () { setTimeout(loadGtag, 3000) })
+                                                      }
+                                                    })();
+                                                  </script>
+                                                    <!-- Hreflang Tags -->
+                                                    
+                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2015/08/12/AndroidL-hwui-RenderThread-workflow/" />
+                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/" />
+                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/" />
+                  <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/atom.xml" title="Android Performance" type="application/atom+xml">
+</head>
+        <body class="post-body">
+        <!-- header -->
+        <header class="header header-mobile">
+    <!-- top read progress line -->
+    <div class="header-element">
+        <div class="read-progress"></div>
+    </div>
+    <!-- sidebar menu button -->
+    <div class="header-element">
+        <div class="header-sidebar-menu">
+            <div style="padding-left: 1px;">&#xe775;</div>
+        </div>
+    </div>
+    <!-- header actions -->
+    <div class="header-actions">
+        <!-- theme mode switch button -->
+        <span class="header-theme-btn header-element">
+            <i class="fas fa-adjust"></i>
+        </span>
+        <!-- back to home page text -->
+        <span class="home-link header-element">
+            <a href="/">Android Performance</a>
+        </span>
+    </div>
+    <!-- toggle banner -->
+    <div class="banner">
+        <div class="blog-title header-element">
+            <a href="/">Android Performance</a>
+        </div>
+        <div class="post-title header-element">
+            <a href="#" class="post-name">Android hwui 中 RenderThread 工作流程</a>
+        </div>
+    </div>
+</header>
+
+        <!-- fixed footer -->
+        <footer class="footer-fixed">
+    <!-- donate button -->
+    <div class="donate-popup donate-popup--hidden">
+    <div class="donate-popup__title">Buy Me A Coffee</div>
+    <div class="donate-popup__content">
+        <div class="donate-popup__content-description">如果觉得文章还不错，打赏一杯咖啡吧.</div>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Wechat"
+            alt="Wechat"
+            src="/assets/donate-wechat.png"
+        ></img>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Alipay"
+            alt="Alipay"
+            src="/assets/donate-alipay.png"
+        ></img>
+    </div>
+</div>
+
+    <div
+        title="Donate to the author"
+        class="footer-fixed-btn footer-fixed-btn--hidden donate-btn"
+    >
+        <i class="fas fa-donate"></i>
+    </div>
+
+    <!-- back to top button -->
+    <div class="footer-fixed-btn footer-fixed-btn--hidden back-top">
+        <div>&#xe639;</div>
+    </div>
+</footer>
+
+        <!-- wrapper -->
+        <div class="wrapper">
+            <div class="site-intro" style="    height:50vh;
+">
+    <!-- 主页  -->
+    <!-- 404页  -->
+    <div class="site-intro-placeholder"></div>
+    <picture>
+            <source type="image/webp" srcset="/intro/post-bg.webp">
+        <img class="site-intro-img"
+             src="/intro/post-bg.jpg"
+             alt=""
+loading="lazy"             decoding="async"
+             fetchpriority="auto"
+             sizes="100vw">
+    </picture>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+                Android hwui 中 RenderThread 工作流程
+            <!-- 404 -->
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            <!-- 404 -->
+        </p>
+        <!-- 文章页 meta -->
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                    <div class="post-intro-tags" >
+        <span class="post-category" data-categories="Android">
+            <i class="fas fa-folder post-category-icon"></i>
+            <span class="post-category-text">
+                Android
+            </span>
+        </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Startup">Startup</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Systrace">Systrace</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Java">Java</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="RenderThread">RenderThread</a>
+</div>
+
+                <!-- 文章字数统计 -->
+                    <div class="post-intro-read">
+                        <span>Word count: <span class="post-count word-count">4.3k</span>Reading time: <span class="post-count reading-time">20 min</span></span>
+                    </div>
+                <div class="post-intro-meta">
+                    <!-- 撰写日期 -->
+                    <span class="iconfont-archer post-intro-calander">&#xe676;</span>
+                    <span class="post-intro-time">2015/08/12</span>
+                    <!-- 文章分享 -->
+                    <span class="share-wrapper">
+                        <span class="iconfont-archer share-icon">&#xe71d;</span>
+                        <span class="share-text">Share</span>
+                        <ul class="share-list">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+    </div>
+</div>
+
+            
+            <script>
+  // get user agent
+  function getBrowserVersions() {
+    var u = window.navigator.userAgent
+    return {
+      userAgent: u,
+      trident: u.indexOf('Trident') > -1, //IE内核
+      presto: u.indexOf('Presto') > -1, //opera内核
+      webKit: u.indexOf('AppleWebKit') > -1, //苹果、谷歌内核
+      gecko: u.indexOf('Gecko') > -1 && u.indexOf('KHTML') == -1, //火狐内核
+      mobile: !!u.match(/AppleWebKit.*Mobile.*/), //是否为移动终端
+      ios: !!u.match(/\(i[^;]+;( U;)? CPU.+Mac OS X/), //ios终端
+      android: u.indexOf('Android') > -1 || u.indexOf('Linux') > -1, //android终端或者uc浏览器
+      iPhone: u.indexOf('iPhone') > -1 || u.indexOf('Mac') > -1, //是否为iPhone或者安卓QQ浏览器
+      iPad: u.indexOf('iPad') > -1, //是否为iPad
+      webApp: u.indexOf('Safari') == -1, //是否为web应用程序，没有头部与底部
+      weixin: u.indexOf('MicroMessenger') == -1, //是否为微信浏览器
+      uc: u.indexOf('UCBrowser') > -1, //是否为android下的UC浏览器
+    }
+  }
+  var browser = {
+    versions: getBrowserVersions(),
+  }
+  console.log('userAgent: ' + browser.versions.userAgent)
+
+  // callback
+  function fontLoaded() {
+    console.log('font loaded')
+    if (document.getElementsByClassName('site-intro-meta')) {
+      document
+        .getElementsByClassName('intro-title')[0]
+        .classList.add('intro-fade-in')
+      document
+        .getElementsByClassName('intro-subtitle')[0]
+        .classList.add('intro-fade-in')
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+      if (postIntros) {
+        postIntros.classList.add('post-fade-in')
+      }
+    }
+  }
+
+  // UC不支持跨域，所以直接显示
+  function asyncCb() {
+    if (browser.versions.uc) {
+      console.log('UCBrowser')
+      fontLoaded()
+    } else {
+      WebFont.load({
+        custom: {
+          families: ['Oswald-Regular'],
+        },
+        loading: function () {
+          // 所有字体开始加载
+          // console.log('font loading');
+        },
+        active: function () {
+          // 所有字体已渲染
+          fontLoaded()
+        },
+        inactive: function () {
+          // 字体预加载失败，无效字体或浏览器不支持加载
+          console.log('inactive: timeout')
+          fontLoaded()
+        },
+        timeout: 5000, // Set the timeout to two seconds
+      })
+    }
+  }
+
+  function asyncErr() {
+    console.warn('script load from CDN failed, will load local script')
+  }
+
+  // load webfont-loader async, and add callback function
+  function async(u, cb, err) {
+    var d = document,
+      t = 'script',
+      o = d.createElement(t),
+      s = d.getElementsByTagName(t)[0]
+    o.src = u
+    if (cb) {
+      o.addEventListener(
+        'load',
+        function (e) {
+          cb(null, e)
+        },
+        false
+      )
+    }
+    if (err) {
+      o.addEventListener(
+        'error',
+        function (e) {
+          err(null, e)
+        },
+        false
+      )
+    }
+    s.parentNode.insertBefore(o, s)
+  }
+
+  var asyncLoadWithFallBack = function (arr, success, reject) {
+    var currReject = function () {
+      reject()
+      arr.shift()
+      if (arr.length) async(arr[0], success, currReject)
+    }
+
+    async(arr[0], success, currReject)
+  }
+
+  asyncLoadWithFallBack(
+    [
+      'https://cdn.bootcdn.net/ajax/libs/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.staticfile.org/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.jsdelivr.net/npm/webfontloader@1.6.28/webfontloader.min.js',
+      "/lib/webfontloader.min.js",
+    ],
+    asyncCb,
+    asyncErr
+  )
+</script>
+
+            <img class="loading" src="/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" alt="loading">
+            <div class="container container-unloaded">
+                <main class="main post-page">
+    <article class="article-entry">
+        <h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本篇文章是自己的一个学习笔记，记录了 Android 5.0 中 hwui 中的 RenderThread 的简单工作流程。由于是学习笔记，所以其中一些细节不会太详细，我只是将大概的流程走一遍，将其工作流标注出来，下次遇到问题的时候就可以知道去哪里查。</p>
+<p>下图是我用 Systrace 抓取的一个应用启动的时候 RenderThread 的第一次 Draw 的 Trace 图，从这里面的顺序来看 RenderThread 的流程。熟悉应用启动流程的话应该知道，只有当第一次 DrawFrame 完成之后，整个应用的界面才会显示在手机上，在这之前，用户看到的是应用的 StartingWindow 的界面。</p>
+<span id="more"></span>
+
+<p><img src="/images/hwui/renderthread/1.png" alt="RenderThread Draw first frame"></p>
+<h2 id="从Java层说起"><a href="#从Java层说起" class="headerlink" title="从Java层说起"></a>从Java层说起</h2><p>应用程序的每一帧是从接收到 VSYNC 信号开始进行计算和绘制的,这要从 Choreographer 这个类说起了，不过由于篇幅原因，我们直接看一帧的绘制调用关系链即可：</p>
+<p><img src="/images/hwui/renderthread/2.png" alt="绘制关系链"></p>
+<p>Choreographer 的 drawFrame 会调用到 ViewRootImpl 的 performTraversals 方法，而 performTraversals 方法最终会调用到performDraw() 方法， performDraw 又会调用到 draw(boolean fullRedrawNeeded) 方法，这个 draw 方法是 ViewRootImpl 的私有方法，和我们熟知的那个draw并不是同一个方法</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (mAttachInfo.mHardwareRenderer != <span class="literal">null</span> &amp;&amp; mAttachInfo.mHardwareRenderer.isEnabled()) &#123;</span><br><span class="line">                mIsAnimating = <span class="literal">false</span>;</span><br><span class="line">                <span class="type">boolean</span> <span class="variable">invalidateRoot</span> <span class="operator">=</span> <span class="literal">false</span>;</span><br><span class="line">                <span class="keyword">if</span> (mHardwareYOffset != yOffset || mHardwareXOffset != xOffset) &#123;</span><br><span class="line">                    mHardwareYOffset = yOffset;</span><br><span class="line">                    mHardwareXOffset = xOffset;</span><br><span class="line">                    mAttachInfo.mHardwareRenderer.invalidateRoot();</span><br><span class="line">                &#125;</span><br><span class="line">                mResizeAlpha = resizeAlpha;</span><br><span class="line"></span><br><span class="line">                dirty.setEmpty();</span><br><span class="line"></span><br><span class="line">                mBlockResizeBuffer = <span class="literal">false</span>;</span><br><span class="line">                mAttachInfo.mHardwareRenderer.draw(mView, mAttachInfo, <span class="built_in">this</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>如果是走硬件绘制路线的话，则会走这一条先，之后就会调用 mHardwareRenderer 的 draw 方法,这里的 mHardwareRenderer 指的是 ThreadedRenderer ，其 Draw 函数如下：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@Override</span></span><br><span class="line"><span class="keyword">void</span> <span class="title function_">draw</span><span class="params">(View view, AttachInfo attachInfo, HardwareDrawCallbacks callbacks)</span> &#123;</span><br><span class="line">    attachInfo.mIgnoreDirtyState = <span class="literal">true</span>;</span><br><span class="line">    <span class="type">long</span> <span class="variable">frameTimeNanos</span> <span class="operator">=</span> mChoreographer.getFrameTimeNanos();</span><br><span class="line">    attachInfo.mDrawingTime = frameTimeNanos / TimeUtils.NANOS_PER_MS;</span><br><span class="line"></span><br><span class="line">    <span class="type">long</span> <span class="variable">recordDuration</span> <span class="operator">=</span> <span class="number">0</span>;</span><br><span class="line">    <span class="keyword">if</span> (mProfilingEnabled) &#123;</span><br><span class="line">        recordDuration = System.nanoTime();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    updateRootDisplayList(view, callbacks);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (mProfilingEnabled) &#123;</span><br><span class="line">        recordDuration = System.nanoTime() - recordDuration;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    attachInfo.mIgnoreDirtyState = <span class="literal">false</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// register animating rendernodes which started animating prior to renderer</span></span><br><span class="line">    <span class="comment">// creation, which is typical for animators started prior to first draw</span></span><br><span class="line">    <span class="keyword">if</span> (attachInfo.mPendingAnimatingRenderNodes != <span class="literal">null</span>) &#123;</span><br><span class="line">        <span class="keyword">final</span> <span class="type">int</span> <span class="variable">count</span> <span class="operator">=</span> attachInfo.mPendingAnimatingRenderNodes.size();</span><br><span class="line">        <span class="keyword">for</span> (<span class="type">int</span> <span class="variable">i</span> <span class="operator">=</span> <span class="number">0</span>; i &lt; count; i++) &#123;</span><br><span class="line">            registerAnimatingRenderNode(</span><br><span class="line">                    attachInfo.mPendingAnimatingRenderNodes.get(i));</span><br><span class="line">        &#125;</span><br><span class="line">        attachInfo.mPendingAnimatingRenderNodes.clear();</span><br><span class="line">        <span class="comment">// We don&#x27;t need this anymore as subsequent calls to</span></span><br><span class="line">        <span class="comment">// ViewRootImpl#attachRenderNodeAnimator will go directly to us.</span></span><br><span class="line">        attachInfo.mPendingAnimatingRenderNodes = <span class="literal">null</span>;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="type">int</span> <span class="variable">syncResult</span> <span class="operator">=</span> nSyncAndDrawFrame(mNativeProxy, frameTimeNanos,</span><br><span class="line">            recordDuration, view.getResources().getDisplayMetrics().density);</span><br><span class="line">    <span class="keyword">if</span> ((syncResult &amp; SYNC_INVALIDATE_REQUIRED) != <span class="number">0</span>) &#123;</span><br><span class="line">        attachInfo.mViewRootImpl.invalidate();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>这个函数里面的 updateRootDisplayList(view, callbacks) ;即 getDisplayList 操作。接下来就是比较重要的一个操作：</p>
+<figure class="highlight lisp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">int syncResult = nSyncAndDrawFrame(<span class="name">mNativeProxy</span>, frameTimeNanos,</span><br><span class="line">        recordDuration, view.getResources().getDisplayMetrics().density)<span class="comment">;</span></span><br></pre></td></tr></table></figure>
+
+<p>可以看出这是一个阻塞操作，等Native层完成后，拿到返回值后才会进行下一步的操作。</p>
+<h2 id="Native层"><a href="#Native层" class="headerlink" title="Native层"></a>Native层</h2><p>其Native代码在android_view_ThreadedRenderer.cpp中，对应的实现代码如下：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">static</span> <span class="type">int</span> <span class="title">android_view_ThreadedRenderer_syncAndDrawFrame</span><span class="params">(JNIEnv* env, jobject clazz,</span></span></span><br><span class="line"><span class="params"><span class="function">        jlong proxyPtr, jlong frameTimeNanos, jlong recordDuration, jfloat density)</span> </span>&#123;</span><br><span class="line">    RenderProxy* proxy = <span class="built_in">reinterpret_cast</span>&lt;RenderProxy*&gt;(proxyPtr);</span><br><span class="line">    <span class="keyword">return</span> proxy-&gt;<span class="built_in">syncAndDrawFrame</span>(frameTimeNanos, recordDuration, density);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>RenderProxy的路径位于frameworks&#x2F;base&#x2F;libs&#x2F;hwui&#x2F;renderthread&#x2F;RenderProxy.cpp</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">int</span> <span class="title">RenderProxy::syncAndDrawFrame</span><span class="params">(<span class="type">nsecs_t</span> frameTimeNanos, <span class="type">nsecs_t</span> recordDurationNanos,</span></span></span><br><span class="line"><span class="params"><span class="function">        <span class="type">float</span> density)</span> </span>&#123;</span><br><span class="line">    mDrawFrameTask.<span class="built_in">setDensity</span>(density);</span><br><span class="line">    <span class="keyword">return</span> mDrawFrameTask.<span class="built_in">drawFrame</span>(frameTimeNanos, recordDurationNanos);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>其中 mDrawFrameTask 是一个 DrawFrameTask 对象，其路径位于frameworks&#x2F;base&#x2F;libs&#x2F;hwui&#x2F;renderthread&#x2F;DrawFrameTask.cpp，其中drawFrame代码：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">int</span> DrawFrameTask::draw<span class="constructor">Frame(<span class="params">nsecs_t</span> <span class="params">frameTimeNanos</span>, <span class="params">nsecs_t</span> <span class="params">recordDurationNanos</span>)</span> &#123;</span><br><span class="line">    mSyncResult = kSync_OK;</span><br><span class="line">    mFrameTimeNanos = frameTimeNanos;</span><br><span class="line">    mRecordDurationNanos = recordDurationNanos;</span><br><span class="line">    post<span class="constructor">AndWait()</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// Reset the single-frame data</span></span><br><span class="line">    mFrameTimeNanos = <span class="number">0</span>;</span><br><span class="line">    mRecordDurationNanos = <span class="number">0</span>;</span><br><span class="line"></span><br><span class="line">    return mSyncResult;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>其中 postAndWait() 的实现如下：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">DrawFrameTask::postAndWait</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    AutoMutex _lock(mLock);</span><br><span class="line">    mRenderThread-&gt;<span class="built_in">queue</span>(<span class="keyword">this</span>);</span><br><span class="line">    mSignal.<span class="built_in">wait</span>(mLock);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>就是将一个 DrawFrameTask 放入到了 mRenderThread 中,其中 queue 方法实现如下：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">RenderThread::queue</span><span class="params">(RenderTask* task)</span> </span>&#123;</span><br><span class="line">    AutoMutex _lock(mLock);</span><br><span class="line">    mQueue.<span class="built_in">queue</span>(task);</span><br><span class="line">    <span class="keyword">if</span> (mNextWakeup &amp;&amp; task-&gt;mRunAt &lt; mNextWakeup) &#123;</span><br><span class="line">        mNextWakeup = <span class="number">0</span>;</span><br><span class="line">        mLooper-&gt;<span class="built_in">wake</span>();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>其中 mQueue 是一个 TaskQueue 对象，其</p>
+<figure class="highlight gradle"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> TaskQueue::queue(RenderTask* <span class="keyword">task</span>) &#123;</span><br><span class="line">    <span class="comment">// Since the RenderTask itself forms the linked list it is not allowed</span></span><br><span class="line">    <span class="comment">// to have the same task queued twice</span></span><br><span class="line">    LOG_ALWAYS_FATAL_IF(<span class="keyword">task</span>-&gt;mNext || mTail == <span class="keyword">task</span>, <span class="string">&quot;Task is already in the queue!&quot;</span>);</span><br><span class="line">    <span class="keyword">if</span> (mTail) &#123;</span><br><span class="line">        <span class="comment">// Fast path if we can just append</span></span><br><span class="line">        <span class="keyword">if</span> (mTail-&gt;mRunAt &lt;= <span class="keyword">task</span>-&gt;mRunAt) &#123;</span><br><span class="line">            mTail-&gt;mNext = <span class="keyword">task</span>;</span><br><span class="line">            mTail = <span class="keyword">task</span>;</span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            <span class="comment">// Need to find the proper insertion point</span></span><br><span class="line">            RenderTask* <span class="keyword">previous</span> = <span class="number">0</span>;</span><br><span class="line">            RenderTask* <span class="keyword">next</span> = mHead;</span><br><span class="line">            <span class="keyword">while</span> (<span class="keyword">next</span> &amp;&amp; <span class="keyword">next</span>-&gt;mRunAt &lt;= <span class="keyword">task</span>-&gt;mRunAt) &#123;</span><br><span class="line">                <span class="keyword">previous</span> = <span class="keyword">next</span>;</span><br><span class="line">                <span class="keyword">next</span> = <span class="keyword">next</span>-&gt;mNext;</span><br><span class="line">            &#125;</span><br><span class="line">            <span class="keyword">if</span> (!<span class="keyword">previous</span>) &#123;</span><br><span class="line">                <span class="keyword">task</span>-&gt;mNext = mHead;</span><br><span class="line">                mHead = <span class="keyword">task</span>;</span><br><span class="line">            &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">                <span class="keyword">previous</span>-&gt;mNext = <span class="keyword">task</span>;</span><br><span class="line">                <span class="keyword">if</span> (<span class="keyword">next</span>) &#123;</span><br><span class="line">                    <span class="keyword">task</span>-&gt;mNext = <span class="keyword">next</span>;</span><br><span class="line">                &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">                    mTail = <span class="keyword">task</span>;</span><br><span class="line">                &#125;</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        mTail = mHead = <span class="keyword">task</span>;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>接着看 RenderThread 之前的 queue 方法，</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">Looper::wake</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="type">ssize_t</span> nWrite;</span><br><span class="line">    <span class="keyword">do</span> &#123;</span><br><span class="line">        nWrite = <span class="built_in">write</span>(mWakeWritePipeFd, <span class="string">&quot;W&quot;</span>, <span class="number">1</span>);</span><br><span class="line">    &#125; <span class="keyword">while</span> (nWrite == <span class="number">-1</span> &amp;&amp; errno == EINTR);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (nWrite != <span class="number">1</span>) &#123;</span><br><span class="line">        <span class="keyword">if</span> (errno != EAGAIN) &#123;</span><br><span class="line">            <span class="built_in">ALOGW</span>(<span class="string">&quot;Could not write wake signal, errno=%d&quot;</span>, errno);</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>wake 函数则更为简单，仅仅向管道的写端写入一个字符“W”，这样管道的读端就会因为有数据可读而从等待状态中醒来。</p>
+<h2 id="HWUI-RenderThread"><a href="#HWUI-RenderThread" class="headerlink" title="HWUI-RenderThread"></a>HWUI-RenderThread</h2><p>接下来会到哪里去，我们首先要熟悉一下RenderThread，RenderThread是继承自Thread的，这个Thread是utils&#x2F;Thread.h,RenderThread的初始化函数</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">RenderThread::<span class="constructor">RenderThread()</span> : <span class="constructor">Thread(<span class="params">true</span>)</span>, Singleton&lt;RenderThread&gt;<span class="literal">()</span></span><br><span class="line">        , m<span class="constructor">NextWakeup(LLONG_MAX)</span></span><br><span class="line">        , m<span class="constructor">DisplayEventReceiver(0)</span></span><br><span class="line">        , m<span class="constructor">VsyncRequested(<span class="params">false</span>)</span></span><br><span class="line">        , m<span class="constructor">FrameCallbackTaskPending(<span class="params">false</span>)</span></span><br><span class="line">        , m<span class="constructor">FrameCallbackTask(0)</span></span><br><span class="line">        , m<span class="constructor">RenderState(NULL)</span></span><br><span class="line">        , m<span class="constructor">EglManager(NULL)</span> &#123;</span><br><span class="line">    mFrameCallbackTask = <span class="keyword">new</span> <span class="constructor">DispatchFrameCallbacks(<span class="params">this</span>)</span>;</span><br><span class="line">    mLooper = <span class="keyword">new</span> <span class="constructor">Looper(<span class="params">false</span>)</span>;</span><br><span class="line">    run(<span class="string">&quot;RenderThread&quot;</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>其 run 方法在 Thread 中有说明：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// Start the thread in threadLoop() which needs to be implemented.</span></span><br><span class="line"><span class="function"><span class="keyword">virtual</span> <span class="type">status_t</span>    <span class="title">run</span><span class="params">(    <span class="type">const</span> <span class="type">char</span>* name = <span class="number">0</span>,</span></span></span><br><span class="line"><span class="params"><span class="function">                            <span class="type">int32_t</span> priority = PRIORITY_DEFAULT,</span></span></span><br><span class="line"><span class="params"><span class="function">                            <span class="type">size_t</span> stack = <span class="number">0</span>)</span></span>;</span><br></pre></td></tr></table></figure>
+<p>即启动 threadLoop 函数，我们来看 RenderThread 的 threadLoop 函数，这个函数比较重要：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">bool</span> <span class="title">RenderThread::threadLoop</span><span class="params">()</span> </span>&#123;</span><br><span class="line"><span class="meta">#<span class="keyword">if</span> defined(HAVE_PTHREADS)</span></span><br><span class="line">    <span class="built_in">setpriority</span>(PRIO_PROCESS, <span class="number">0</span>, PRIORITY_DISPLAY);</span><br><span class="line"><span class="meta">#<span class="keyword">endif</span></span></span><br><span class="line">    <span class="built_in">initThreadLocals</span>();</span><br><span class="line"></span><br><span class="line">    <span class="type">int</span> timeoutMillis = <span class="number">-1</span>;</span><br><span class="line">    <span class="keyword">for</span> (;;) &#123;</span><br><span class="line">        <span class="type">int</span> result = mLooper-&gt;<span class="built_in">pollOnce</span>(timeoutMillis);</span><br><span class="line">        <span class="built_in">LOG_ALWAYS_FATAL_IF</span>(result == Looper::POLL_ERROR,</span><br><span class="line">                <span class="string">&quot;RenderThread Looper POLL_ERROR!&quot;</span>);</span><br><span class="line"></span><br><span class="line">        <span class="type">nsecs_t</span> nextWakeup;</span><br><span class="line">        <span class="comment">// Process our queue, if we have anything</span></span><br><span class="line">        <span class="keyword">while</span> (RenderTask* task = <span class="built_in">nextTask</span>(&amp;nextWakeup)) &#123;</span><br><span class="line">            task-&gt;<span class="built_in">run</span>();</span><br><span class="line">            <span class="comment">// task may have deleted itself, do not reference it again</span></span><br><span class="line">        &#125;</span><br><span class="line">        <span class="keyword">if</span> (nextWakeup == LLONG_MAX) &#123;</span><br><span class="line">            timeoutMillis = <span class="number">-1</span>;</span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            <span class="type">nsecs_t</span> timeoutNanos = nextWakeup - <span class="built_in">systemTime</span>(SYSTEM_TIME_MONOTONIC);</span><br><span class="line">            timeoutMillis = <span class="built_in">nanoseconds_to_milliseconds</span>(timeoutNanos);</span><br><span class="line">            <span class="keyword">if</span> (timeoutMillis &lt; <span class="number">0</span>) &#123;</span><br><span class="line">                timeoutMillis = <span class="number">0</span>;</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line">        <span class="keyword">if</span> (mPendingRegistrationFrameCallbacks.<span class="built_in">size</span>() &amp;&amp; !mFrameCallbackTaskPending) &#123;</span><br><span class="line">            <span class="built_in">drainDisplayEventQueue</span>(<span class="literal">true</span>);</span><br><span class="line">            mFrameCallbacks.<span class="built_in">insert</span>(</span><br><span class="line">                    mPendingRegistrationFrameCallbacks.<span class="built_in">begin</span>(), mPendingRegistrationFrameCallbacks.<span class="built_in">end</span>());</span><br><span class="line">            mPendingRegistrationFrameCallbacks.<span class="built_in">clear</span>();</span><br><span class="line">            <span class="built_in">requestVsync</span>();</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> <span class="literal">false</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>可以看到，一个 for 循环是一个无限循环，而其中 pollOnce 是一个阻塞函数，直到我们上面调用了 mLooper-&gt;wake() 之后，会继续往下走，走到 while 循环中：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">while</span> (RenderTask* task = <span class="built_in">nextTask</span>(&amp;nextWakeup)) &#123;</span><br><span class="line">            task-&gt;<span class="built_in">run</span>();</span><br><span class="line">            <span class="comment">// task may have deleted itself, do not reference it again</span></span><br><span class="line">        &#125;</span><br></pre></td></tr></table></figure>
+
+<p>会将 RenderTask 取出来执行其 run 方法，经过前面的流程我们知道这个 RenderTask 是一个 DrawFrameTask ，其run方法如下：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">DrawFrameTask::run</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="built_in">ATRACE_NAME</span>(<span class="string">&quot;DrawFrame&quot;</span>);</span><br><span class="line"></span><br><span class="line">    mContext-&gt;<span class="built_in">profiler</span>().<span class="built_in">setDensity</span>(mDensity);</span><br><span class="line">    mContext-&gt;<span class="built_in">profiler</span>().<span class="built_in">startFrame</span>(mRecordDurationNanos);</span><br><span class="line"></span><br><span class="line">    <span class="type">bool</span> canUnblockUiThread;</span><br><span class="line">    <span class="type">bool</span> canDrawThisFrame;</span><br><span class="line">    &#123;</span><br><span class="line">        <span class="function">TreeInfo <span class="title">info</span><span class="params">(TreeInfo::MODE_FULL, mRenderThread-&gt;renderState())</span></span>;</span><br><span class="line">        canUnblockUiThread = <span class="built_in">syncFrameState</span>(info);</span><br><span class="line">        canDrawThisFrame = info.out.canDrawThisFrame;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// Grab a copy of everything we need</span></span><br><span class="line">    CanvasContext* context = mContext;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// From this point on anything in &quot;this&quot; is *UNSAFE TO ACCESS*</span></span><br><span class="line">    <span class="keyword">if</span> (canUnblockUiThread) &#123;</span><br><span class="line">        <span class="built_in">unblockUiThread</span>();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (<span class="built_in">CC_LIKELY</span>(canDrawThisFrame)) &#123;</span><br><span class="line">        context-&gt;<span class="built_in">draw</span>();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (!canUnblockUiThread) &#123;</span><br><span class="line">        <span class="built_in">unblockUiThread</span>();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h2 id="RenderThread-DrawFrame"><a href="#RenderThread-DrawFrame" class="headerlink" title="RenderThread.DrawFrame"></a>RenderThread.DrawFrame</h2><p>上面说到了 DrawFrameTask 的 run 方法，这里 run 方法中的执行的方法即我们在最前面那张图中所示的部分（即文章最前面那张图），下面的流程就是那张图中的函数调用，我们结合代码和图，一部分一部分来走整个 DrawFrame 的流程：</p>
+<h3 id="1-syncFrameState"><a href="#1-syncFrameState" class="headerlink" title="1. syncFrameState"></a>1. syncFrameState</h3><p>第一个比较重要的函数是 syncFrameState ，从函数名就可以知道， syncFrameState 的作用就是同步 frame 信息，将 Java 层维护的 frame 信息同步到 RenderThread中。</p>
+<blockquote>
+<p>Main Thread 和Render Thread 都各自维护了一份应用程序窗口视图信息。各自维护了一份应用程序窗口视图信息的目的，就是为了可以互不干扰，进而实现最大程度的并行。其中，Render Thread维护的应用程序窗口视图信息是来自于 Main Thread 的。因此，当Main Thread 维护的应用程序窗口信息发生了变化时，就需要同步到 Render Thread 去。</p>
+</blockquote>
+<p>所以查看代码就可以知道有两个 RenderNode，一个在 hwui 中，一个在 View 中。简单来说，同步信息就是将 Java 层的 RenderNode 中的信息同步到 hwui 中的 RenderNode 中。 注意syncFrameState的返回值赋给了 canUnblockUiThread ，从名字可以看出这个 canUnblockUiThread 的作用是判断是否唤醒 Main Thread ，也就是说如果返回为 true 的话，会提前唤醒主线程来执行其他的事情，而不用等到 draw 完成后再去唤醒 Main Thread。 这也是 Android 5.0 和 Android 4.x 最大的区别了。</p>
+<p><img src="/images/hwui/renderthread/3.png" alt="syncFrameState"></p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">bool</span> DrawFrameTask::sync<span class="constructor">FrameState(TreeInfo&amp; <span class="params">info</span>)</span> &#123;</span><br><span class="line">    mRenderThread-&gt;time<span class="constructor">Lord()</span>.vsync<span class="constructor">Received(<span class="params">mFrameTimeNanos</span>)</span>;</span><br><span class="line">    mContext-&gt;make<span class="constructor">Current()</span>;</span><br><span class="line">    Caches::get<span class="constructor">Instance()</span>.textureCache.reset<span class="constructor">MarkInUse()</span>;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">for</span> (size_t i = <span class="number">0</span>; i &lt; mLayers.size<span class="literal">()</span>; i++) &#123;</span><br><span class="line">        mContext-&gt;process<span class="constructor">LayerUpdate(<span class="params">mLayers</span>[<span class="params">i</span>].<span class="params">get</span>()</span>);</span><br><span class="line">    &#125;</span><br><span class="line">    mLayers.clear<span class="literal">()</span>;</span><br><span class="line">    mContext-&gt;prepare<span class="constructor">Tree(<span class="params">info</span>)</span>;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (info.out.hasAnimations) &#123;</span><br><span class="line">        <span class="keyword">if</span> (info.out.requiresUiRedraw) &#123;</span><br><span class="line">            mSyncResult <span class="pattern-match">|= k<span class="constructor">Sync_UIRedrawRequired</span>;</span></span><br><span class="line"><span class="pattern-match">        &#125;</span></span><br><span class="line"><span class="pattern-match">    &#125;</span></span><br><span class="line"><span class="pattern-match">    <span class="operator">/</span><span class="operator">/</span> <span class="constructor">If</span> prepare<span class="constructor">Textures</span> is <span class="literal">false</span>, we ran out <span class="keyword">of</span> texture cache space</span></span><br><span class="line"><span class="pattern-match">    return info.prepare<span class="constructor">Textures</span>;</span></span><br><span class="line"><span class="pattern-match">&#125;</span></span><br></pre></td></tr></table></figure>
+
+<p>首先是makeCurrent，这里的mContext是一个CanvasContext对象，其makeCurrent实现如下：</p>
+<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> <span class="title class_">CanvasContext</span>::<span class="title function_">makeCurrent</span>(<span class="params"></span>) &#123;</span><br><span class="line">    <span class="comment">// In the meantime this matches the behavior of GLRenderer, so it is not a regression</span></span><br><span class="line">    mHaveNewSurface |= mEglManager.<span class="title function_">makeCurrent</span>(mEglSurface);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>mEglManager是一个EglManager对象，其实现为：</p>
+<figure class="highlight maxima"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br></pre></td><td class="code"><pre><span class="line">bool EglManager::makeCurrent(EGLSurface <span class="built_in">surface</span>) &#123;</span><br><span class="line">    <span class="keyword">if</span> (isCurrent(<span class="built_in">surface</span>)) <span class="built_in">return</span> <span class="literal">false</span>;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (<span class="built_in">surface</span> == EGL_NO_SURFACE) &#123;</span><br><span class="line">        // If we are setting EGL_NO_SURFACE we don&#x27;t care about any of the <span class="built_in">potential</span></span><br><span class="line">        // <span class="built_in">return</span> <span class="built_in">errors</span>, which would only happen <span class="keyword">if</span> mEglDisplay had already been</span><br><span class="line">        // destroyed <span class="keyword">in</span> which case the current <span class="built_in">context</span> <span class="built_in">is</span> already NO_CONTEXT</span><br><span class="line">        TIME_LOG(<span class="string">&quot;eglMakeCurrent&quot;</span>, eglMakeCurrent(mEglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT));</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        EGLBoolean success;</span><br><span class="line">        TIME_LOG(<span class="string">&quot;eglMakeCurrent&quot;</span>, success = eglMakeCurrent(mEglDisplay, <span class="built_in">surface</span>, <span class="built_in">surface</span>, mEglContext));</span><br><span class="line">        <span class="keyword">if</span> (!success) &#123;</span><br><span class="line">            LOG_ALWAYS_FATAL(<span class="string">&quot;Failed to make current on surface %p, error=%s&quot;</span>,</span><br><span class="line">                (void*)<span class="built_in">surface</span>, egl_error_str());</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    mCurrentSurface = <span class="built_in">surface</span>;</span><br><span class="line">    <span class="built_in">return</span> <span class="literal">true</span>;</span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+<p>这里会判断mCurrentSurface &#x3D;&#x3D; surface，如果成立，则不用再初始化操作，如果是另外一个surface。，则会执行eglMakeCurrent，来重新创建上下文。</p>
+<p>makeCurrent之后，会调用mContext-&gt;prepareTree(info)，其实现如下：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">CanvasContext::prepareTree</span><span class="params">(TreeInfo&amp; info)</span> </span>&#123;</span><br><span class="line">    mRenderThread.<span class="built_in">removeFrameCallback</span>(<span class="keyword">this</span>);</span><br><span class="line"></span><br><span class="line">    info.damageAccumulator = &amp;mDamageAccumulator;</span><br><span class="line">    info.renderer = mCanvas;</span><br><span class="line">    <span class="keyword">if</span> (mPrefetechedLayers.<span class="built_in">size</span>() &amp;&amp; info.mode == TreeInfo::MODE_FULL) &#123;</span><br><span class="line">        info.canvasContext = <span class="keyword">this</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    mAnimationContext-&gt;<span class="built_in">startFrame</span>(info.mode);</span><br><span class="line">    mRootRenderNode-&gt;<span class="built_in">prepareTree</span>(info);</span><br><span class="line">    mAnimationContext-&gt;<span class="built_in">runRemainingAnimations</span>(info);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (info.canvasContext) &#123;</span><br><span class="line">        <span class="built_in">freePrefetechedLayers</span>();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="type">int</span> runningBehind = <span class="number">0</span>;</span><br><span class="line">    <span class="comment">// <span class="doctag">TODO:</span> This query is moderately expensive, investigate adding some sort</span></span><br><span class="line">    <span class="comment">// of fast-path based off when we last called eglSwapBuffers() as well as</span></span><br><span class="line">    <span class="comment">// last vsync time. Or something.</span></span><br><span class="line">    <span class="built_in">TIME_LOG</span>(<span class="string">&quot;nativeWindowQuery&quot;</span>, mNativeWindow-&gt;<span class="built_in">query</span>(mNativeWindow.<span class="built_in">get</span>(),</span><br><span class="line">            NATIVE_WINDOW_CONSUMER_RUNNING_BEHIND, &amp;runningBehind));</span><br><span class="line">    info.out.canDrawThisFrame = !runningBehind;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (info.out.hasAnimations || !info.out.canDrawThisFrame) &#123;</span><br><span class="line">        <span class="keyword">if</span> (!info.out.requiresUiRedraw) &#123;</span><br><span class="line">            <span class="comment">// If animationsNeedsRedraw is set don&#x27;t bother posting for an RT anim</span></span><br><span class="line">            <span class="comment">// as we will just end up fighting the UI thread.</span></span><br><span class="line">            mRenderThread.<span class="built_in">postFrameCallback</span>(<span class="keyword">this</span>);</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>其中 mRootRenderNode-&gt;prepareTree(info) 又是最重要的。回到Java层，我们知道 ThreadedRenderer 在初始化时，初始化了一个指针</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">long</span> <span class="variable">rootNodePtr</span> <span class="operator">=</span> nCreateRootRenderNode();</span><br></pre></td></tr></table></figure>
+
+<p>这个RootRenderNode也就是一个根Node，</p>
+<figure class="highlight abnf"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="attribute">mRootNode</span> <span class="operator">=</span> RenderNode.adopt(rootNodePtr)<span class="comment">;</span></span><br></pre></td></tr></table></figure>
+
+<p>然后会创建一个 mNativeProxy 指针，在 Native 层初始化一个 RenderProxy 对象，将 rootNodePtr 传给 RenderProxy 对象，这样在 RenderProxy 我们就可以得到这个对象的指针了。其中 CanvasContext 也是在 RenderProxy 对象初始化的时候被初始化的，初始化的时候将 rootNodePtr 传给了 CanvasContext 对象。</p>
+<p>我们之前提到 ThreadedRenderer 的 draw 方法中首先会调用updateRootDisplayList，即我们熟悉的 getDisplayList 。这个方法中，其实也分为两个步骤，第一个步骤是 updateViewTreeDisplayList，第二个步骤是将根 Node 加入到 DrawOp 中：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">canvas.insert<span class="constructor">ReorderBarrier()</span>;</span><br><span class="line">canvas.draw<span class="constructor">RenderNode(<span class="params">view</span>.<span class="params">getDisplayList</span>()</span>);</span><br><span class="line">canvas.insert<span class="constructor">InorderBarrier()</span>;</span><br></pre></td></tr></table></figure>
+<p>其最终实现在</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">status_t DisplayListRenderer::draw<span class="constructor">RenderNode(RenderNode<span class="operator">*</span> <span class="params">renderNode</span>, Rect&amp; <span class="params">dirty</span>, <span class="params">int32_t</span> <span class="params">flags</span>)</span> &#123;</span><br><span class="line">    <span class="constructor">LOG_ALWAYS_FATAL_IF(!<span class="params">renderNode</span>, <span class="string">&quot;missing rendernode&quot;</span>)</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// dirty is an out parameter and should not be recorded,</span></span><br><span class="line">    <span class="comment">// it matters only when replaying the display list</span></span><br><span class="line">    DrawRenderNodeOp* op = <span class="keyword">new</span> (alloc<span class="literal">()</span>) <span class="constructor">DrawRenderNodeOp(<span class="params">renderNode</span>, <span class="params">flags</span>, <span class="operator">*</span><span class="params">currentTransform</span>()</span>);</span><br><span class="line">    add<span class="constructor">RenderNodeOp(<span class="params">op</span>)</span>;</span><br><span class="line"></span><br><span class="line">    return DrawGlInfo::kStatusDone;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>再回到我们之前的 CanvasContext.prepareTree 中提到的 mRootRenderNode-&gt;prepareTree(info)，这时候这里的 mRootRenderNode 就是 CanvasContext 初始化是传进来的。</p>
+<p>其实现在 RenderNode.cpp 中：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line">void RenderNode::prepare<span class="constructor">Tree(TreeInfo&amp; <span class="params">info</span>)</span> &#123;</span><br><span class="line">    prepare<span class="constructor">TreeImpl(<span class="params">info</span>)</span>;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">void RenderNode::prepare<span class="constructor">TreeImpl(TreeInfo&amp; <span class="params">info</span>)</span> &#123;</span><br><span class="line">    <span class="constructor">TT_START_MARK(<span class="params">getName</span>()</span>);</span><br><span class="line">    info.damageAccumulator-&gt;push<span class="constructor">Transform(<span class="params">this</span>)</span>;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (info.mode<span class="operator"> == </span>TreeInfo::MODE_FULL) &#123;</span><br><span class="line">        push<span class="constructor">StagingPropertiesChanges(<span class="params">info</span>)</span>; <span class="comment">//同步当前正在处理的Render Node的Property</span></span><br><span class="line">    &#125;</span><br><span class="line">    uint32_t animatorDirtyMask = <span class="number">0</span>;</span><br><span class="line">    <span class="keyword">if</span> (<span class="constructor">CC_LIKELY(<span class="params">info</span>.<span class="params">runAnimations</span>)</span>) &#123;</span><br><span class="line">        animatorDirtyMask = mAnimatorManager.animate(info);<span class="comment">//执行动画相关的操作</span></span><br><span class="line">    &#125;</span><br><span class="line">    prepare<span class="constructor">Layer(<span class="params">info</span>, <span class="params">animatorDirtyMask</span>)</span>;</span><br><span class="line">    <span class="keyword">if</span> (info.mode<span class="operator"> == </span>TreeInfo::MODE_FULL) &#123;</span><br><span class="line">        push<span class="constructor">StagingDisplayListChanges(<span class="params">info</span>)</span>;  <span class="comment">//同步当前正在处理的Render Node的Display List</span></span><br><span class="line">    &#125;</span><br><span class="line">    prepare<span class="constructor">SubTree(<span class="params">info</span>, <span class="params">mDisplayListData</span>)</span>; <span class="comment">//同步当前正在处理的Render Node的Display List引用的Bitmap，以及当前正在处理的Render Node的子Render Node的Display List等信息</span></span><br><span class="line">    push<span class="constructor">LayerUpdate(<span class="params">info</span>)</span>; <span class="comment">//检查当前正在处理的Render Node是否设置了Layer。如果设置了的话，就对这些Layer进行处理</span></span><br><span class="line"></span><br><span class="line">    info.damageAccumulator-&gt;pop<span class="constructor">Transform()</span>;</span><br><span class="line">    <span class="constructor">TT_END_MARK()</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>这里所涉及到的进一步的具体操作大家可以自行去看代码。</p>
+<h2 id="2-draw"><a href="#2-draw" class="headerlink" title="2. draw"></a>2. draw</h2><p><img src="/images/hwui/renderthread/4.png" alt="Draw"></p>
+<p>执行完syncFrameState之后，接下来就是执行draw</p>
+<figure class="highlight erlang"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="title">if</span> <span class="params">(CC_LIKELY(canDrawThisFrame)</span>) &#123;</span></span><br><span class="line"><span class="function">    <span class="title">context</span>-&gt;</span>draw();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>CanvasContext的draw函数是一个核心函数，其位置在 frameworks&#x2F;base&#x2F;libs&#x2F;hwui&#x2F;OpenGLRenderer.cpp ，其实现如下：</p>
+<figure class="highlight xl"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br></pre></td><td class="code"><pre><span class="line">void CanvasContext::draw() &#123;</span><br><span class="line">    profiler().markPlaybackStart();</span><br><span class="line"></span><br><span class="line">    SkRect dirty;</span><br><span class="line">    mDamageAccumulator.finish(&amp;dirty);</span><br><span class="line"></span><br><span class="line">    ......</span><br><span class="line"></span><br><span class="line">    status_t status;</span><br><span class="line">    <span class="keyword">if</span> (!dirty.isEmpty()) &#123;</span><br><span class="line">        <span class="function"><span class="title">status</span> = mCanvas-&gt;</span>prepareDirty(dirty.fLeft, dirty.fTop,</span><br><span class="line">                dirty.fRight, dirty.fBottom, mOpaque);</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        <span class="function"><span class="title">status</span> = mCanvas-&gt;</span>prepare(mOpaque);</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    Rect outBounds;</span><br><span class="line">    <span class="function"><span class="title">status</span> |= mCanvas-&gt;</span>drawRenderNode(mRootRenderNode.get(), outBounds);</span><br><span class="line"></span><br><span class="line">    profiler().draw(mCanvas);</span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="title">mCanvas</span>-&gt;</span>finish();</span><br><span class="line"></span><br><span class="line">    profiler().markPlaybackEnd();</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (status &amp; DrawGlInfo::kStatusDrew) &#123;</span><br><span class="line">        swapBuffers();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    profiler().finishFrame();</span><br><span class="line"></span><br><span class="line">    <span class="comment">/// M: enable to get overdraw count</span></span><br><span class="line">    <span class="keyword">if</span> (CC_UNLIKELY(g_HWUI_debug_overdraw)) &#123;</span><br><span class="line">        <span class="keyword">if</span> (!mDebugOverdrawLayer) &#123;</span><br><span class="line">            mDebugOverdrawLayer = LayerRenderer::createRenderLayer(mRenderThread.renderState(),</span><br><span class="line">                <span class="function"><span class="title">mCanvas</span>-&gt;</span><span class="function"><span class="title">getWidth</span>(), mCanvas-&gt;</span>getHeight());</span><br><span class="line">        &#125; <span class="function"><span class="title">else</span> <span class="keyword">if</span> (mDebugOverdrawLayer-&gt;</span><span class="function"><span class="title">layer</span>.getWidth() != mCanvas-&gt;</span>getWidth() ||</span><br><span class="line">                   <span class="function"><span class="title">mDebugOverdrawLayer</span>-&gt;</span><span class="function"><span class="title">layer</span>.getHeight() != mCanvas-&gt;</span>getHeight()) &#123;</span><br><span class="line">            <span class="function"><span class="title">if</span> (!LayerRenderer::resizeLayer(mDebugOverdrawLayer, mCanvas-&gt;</span><span class="function"><span class="title">getWidth</span>(), mCanvas-&gt;</span>getHeight())) &#123;</span><br><span class="line">                LayerRenderer::destroyLayer(mDebugOverdrawLayer);</span><br><span class="line">                mDebugOverdrawLayer = NULL;</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line">    ......</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h4 id="2-1-eglBeginFrame"><a href="#2-1-eglBeginFrame" class="headerlink" title="2.1 eglBeginFrame"></a>2.1 eglBeginFrame</h4><p>首先来看eglBeginFrame的实现</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">void EglManager::<span class="keyword">begin</span><span class="constructor">Frame(EGLSurface <span class="params">surface</span>, EGLint<span class="operator">*</span> <span class="params">width</span>, EGLint<span class="operator">*</span> <span class="params">height</span>)</span> &#123;</span><br><span class="line">    make<span class="constructor">Current(<span class="params">surface</span>)</span>;</span><br><span class="line">    <span class="keyword">if</span> (width) &#123;</span><br><span class="line">        egl<span class="constructor">QuerySurface(<span class="params">mEglDisplay</span>, <span class="params">surface</span>, EGL_WIDTH, <span class="params">width</span>)</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">if</span> (height) &#123;</span><br><span class="line">        egl<span class="constructor">QuerySurface(<span class="params">mEglDisplay</span>, <span class="params">surface</span>, EGL_HEIGHT, <span class="params">height</span>)</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    egl<span class="constructor">BeginFrame(<span class="params">mEglDisplay</span>, <span class="params">surface</span>)</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>makeCurrent是用来管理上下文，eglBeginFrame主要是校验参数的合法性。</p>
+<h4 id="2-2-prepareDirty"><a href="#2-2-prepareDirty" class="headerlink" title="2.2 prepareDirty"></a>2.2 prepareDirty</h4><figure class="highlight mipsasm"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">status_t status;</span><br><span class="line">if (!<span class="keyword">dirty.isEmpty()) </span>&#123;</span><br><span class="line">    status = mCanvas-&gt;prepareDirty(<span class="keyword">dirty.fLeft, </span><span class="keyword">dirty.fTop,</span></span><br><span class="line"><span class="keyword"></span>            <span class="keyword">dirty.fRight, </span><span class="keyword">dirty.fBottom, </span>mOpaque);</span><br><span class="line">&#125; else &#123;</span><br><span class="line">    status = mCanvas-&gt;prepare(mOpaque);</span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+<p>这里的mCanvas是一个OpenGLRenderer对象，其prepareDirty实现</p>
+<figure class="highlight zephir"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//<span class="doctag">TODO:</span>增加函数功能描述</span></span><br><span class="line">status_t OpenGLRenderer::prepareDirty(<span class="keyword">float</span> left, <span class="keyword">float</span> top,</span><br><span class="line">        <span class="keyword">float</span> right, <span class="keyword">float</span> bottom, <span class="keyword">bool</span> opaque) &#123;</span><br><span class="line">    setupFrameState(left, top, right, bottom, opaque);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// Layer renderers will start the frame immediately</span></span><br><span class="line">    <span class="comment">// The framebuffer renderer will first defer the display list</span></span><br><span class="line">    <span class="comment">// for each layer and wait until the first drawing command</span></span><br><span class="line">    <span class="comment">// to start the frame</span></span><br><span class="line">    <span class="keyword">if</span> (currentSnapshot()-&gt;fbo == <span class="number">0</span>) &#123;</span><br><span class="line">        syncState();</span><br><span class="line">        updateLayers();</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> startFrame();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> DrawGlInfo::kStatusDone;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h4 id="2-3-drawRenderNode"><a href="#2-3-drawRenderNode" class="headerlink" title="2.3 drawRenderNode"></a>2.3 drawRenderNode</h4><figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Rect outBounds;</span><br><span class="line">status <span class="pattern-match">|= m<span class="constructor">Canvas</span>-&gt;draw<span class="constructor">RenderNode(<span class="params">mRootRenderNode</span>.<span class="params">get</span>()</span>, out<span class="constructor">Bounds</span>);</span></span><br></pre></td></tr></table></figure>
+<p>接下来就是调用OpenGLRenderer的drawRenderNode方法进行绘制</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br></pre></td><td class="code"><pre><span class="line">status_t OpenGLRenderer::draw<span class="constructor">RenderNode(RenderNode<span class="operator">*</span> <span class="params">renderNode</span>, Rect&amp; <span class="params">dirty</span>, <span class="params">int32_t</span> <span class="params">replayFlags</span>)</span> &#123;</span><br><span class="line">    status_t status;</span><br><span class="line">    <span class="comment">// All the usual checks and setup operations (quickReject, setupDraw, etc.)</span></span><br><span class="line">    <span class="comment">// will be performed by the display list itself</span></span><br><span class="line">    <span class="keyword">if</span> (renderNode<span class="operator"> &amp;&amp; </span>renderNode-&gt;is<span class="constructor">Renderable()</span>) &#123;</span><br><span class="line">        <span class="comment">// compute 3d ordering</span></span><br><span class="line">        renderNode-&gt;compute<span class="constructor">Ordering()</span>;</span><br><span class="line">        <span class="keyword">if</span> (<span class="constructor">CC_UNLIKELY(<span class="params">mCaches</span>.<span class="params">drawDeferDisabled</span>)</span>) &#123; <span class="comment">//判断是否不重排序</span></span><br><span class="line">            status = start<span class="constructor">Frame()</span>;</span><br><span class="line">            ReplayStateStruct replay<span class="constructor">Struct(<span class="operator">*</span><span class="params">this</span>, <span class="params">dirty</span>, <span class="params">replayFlags</span>)</span>;</span><br><span class="line">            renderNode-&gt;replay(replayStruct, <span class="number">0</span>);</span><br><span class="line">            return status <span class="pattern-match">| replay<span class="constructor">Struct</span>.m<span class="constructor">DrawGlStatus</span>;</span></span><br><span class="line"><span class="pattern-match">        &#125;</span></span><br><span class="line"><span class="pattern-match"></span></span><br><span class="line"><span class="pattern-match">        <span class="operator">/</span><span class="operator">/</span> 需要重新排序</span></span><br><span class="line"><span class="pattern-match">        <span class="built_in">bool</span> avoid<span class="constructor">Overdraw</span> = !m<span class="constructor">Caches</span>.debug<span class="constructor">Overdraw</span> <span class="operator">&amp;&amp;</span> !m<span class="constructor">CountOverdraw</span>; <span class="operator">/</span><span class="operator">/</span> shh, don&#x27;t tell devs!</span></span><br><span class="line"><span class="pattern-match">        <span class="constructor">DeferredDisplayList</span> deferred<span class="constructor">List(<span class="operator">*</span><span class="params">currentClipRect</span>()</span>, avoid<span class="constructor">Overdraw</span>);</span></span><br><span class="line"><span class="pattern-match">        <span class="constructor">DeferStateStruct</span> defer<span class="constructor">Struct(<span class="params">deferredList</span>, <span class="operator">*</span><span class="params">this</span>, <span class="params">replayFlags</span>)</span>;</span></span><br><span class="line"><span class="pattern-match">        render<span class="constructor">Node</span>-&gt;defer(defer<span class="constructor">Struct</span>, 0); <span class="operator">/</span><span class="operator">/</span>递归进行重排操作</span></span><br><span class="line"><span class="pattern-match"></span></span><br><span class="line"><span class="pattern-match">        flush<span class="constructor">Layers()</span>; <span class="operator">/</span><span class="operator">/</span> 首先执行设置了 <span class="constructor">Layer</span> 的子 <span class="constructor">Render</span> <span class="constructor">Node</span> 的绘制命令，以便得到一个对应的<span class="constructor">FBO</span></span></span><br><span class="line"><span class="pattern-match">        status = start<span class="constructor">Frame()</span>; <span class="operator">/</span><span class="operator">/</span>执行一些诸如清理颜色绘冲区等基本操作</span></span><br><span class="line"><span class="pattern-match">        status = deferred<span class="constructor">List</span>.flush(<span class="operator">*</span>this, dirty) | status;</span></span><br><span class="line"><span class="pattern-match">        return status;</span></span><br><span class="line"><span class="pattern-match">    &#125;</span></span><br><span class="line"><span class="pattern-match"></span></span><br><span class="line"><span class="pattern-match">    <span class="operator">/</span><span class="operator">/</span> <span class="constructor">Even</span> <span class="keyword">if</span> there is no drawing command(<span class="constructor">Ex</span>: invisible),</span></span><br><span class="line"><span class="pattern-match">    <span class="operator">/</span><span class="operator">/</span> it still needs start<span class="constructor">Frame</span> <span class="keyword">to</span> clear buffer <span class="keyword">and</span> start tiling.</span></span><br><span class="line"><span class="pattern-match">    return start<span class="constructor">Frame()</span>;</span></span><br><span class="line"><span class="pattern-match">&#125;</span></span><br><span class="line"><span class="pattern-match"></span></span><br></pre></td></tr></table></figure>
+
+<p>这里的 renderNode 是一个 Root Render Node，</p>
+<p>可以看到，到了这里虽然只是开始，但是其实已经结束了，这个函数里面最重要的几步:</p>
+<figure class="highlight awk"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">renderNode-&gt;defer(deferStruct, <span class="number">0</span>); <span class="regexp">//</span>进行重排序</span><br><span class="line"></span><br><span class="line">flushLayers(); 首先执行设置了 Layer 的子 Render Node 的绘制命令，以便得到一个对应的FBO</span><br><span class="line"></span><br><span class="line">status = deferredList.flush(*this, dirty) | status;   <span class="regexp">//</span>对deferredList中的绘制命令进行真正的绘制操作</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+<p>这几个是渲染部分真正的核心部分，其中的代码细节需要自己去研究。老罗在这部分讲的很细，有空可以去看看他的文章<a target="_blank" rel="noopener" href="http://blog.csdn.net/Luoshengyang/article/details/46281499"><a target="_blank" rel="noopener" href="http://blog.csdn.net/luoshengyang/article/details/46281499">Android应用程序UI硬件加速渲染的Display List渲染过程分析</a></a>.</p>
+<h4 id="2-4-swapBuffers"><a href="#2-4-swapBuffers" class="headerlink" title="2.4 swapBuffers"></a>2.4 swapBuffers</h4><figure class="highlight scss"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">if (status &amp; DrawGlInfo::kStatusDrew) &#123;</span><br><span class="line">    <span class="built_in">swapBuffers</span>();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>其核心就是调用EGL的 eglSwapBuffers(mEglDisplay, surface), duration)函数。</p>
+<h4 id="2-5-FinishFrame"><a href="#2-5-FinishFrame" class="headerlink" title="2.5  FinishFrame"></a>2.5  FinishFrame</h4><figure class="highlight scss"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">profiler</span>()<span class="selector-class">.finishFrame</span>();</span><br></pre></td></tr></table></figure>
+<p>主要是记录时间信息。</p>
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>鉴于我比较懒，而且总结能力不如老罗，就直接把他的总结贴过来了。<br>RenderThread的总的流程如下：</p>
+<blockquote>
+<ol>
+<li>将Main Thread维护的Display List同步到Render Thread维护的Display List去。这个同步过程由Render Thread执行，但是Main Thread会被阻塞住。</li>
+</ol>
+</blockquote>
+<blockquote>
+<ol start="2">
+<li>如果能够完全地将Main Thread维护的Display List同步到Render Thread维护的Display List去，那么Main Thread就会被唤醒，此后Main Thread和Render Thread就互不干扰，各自操作各自内部维护的Display List；否则的话，Main Thread就会继续阻塞，直到Render Thread完成应用程序窗口当前帧的渲染为止。</li>
+</ol>
+</blockquote>
+<blockquote>
+<ol start="3">
+<li>Render Thread在渲染应用程序窗口的Root Render Node的Display List之前，首先将那些设置了Layer的子Render Node的Display List渲染在各自的一个FBO上，接下来再一起将这些FBO以及那些没有设置Layer的子Render Node的Display List一起渲染在Frame Buffer之上，也就是渲染在从Surface Flinger请求回来的一个图形缓冲区上。这个图形缓冲区最终会被提交给Surface Flinger合并以及显示在屏幕上。</li>
+</ol>
+</blockquote>
+<blockquote>
+<p>第2步能够完全将Main Thread维护的Display List同步到Render Thread维护的Display List去很关键，它使得Main Thread和Render Thread可以并行执行，这意味着Render Thread在渲染应用程序窗口当前帧的Display List的同时，Main Thread可以去准备应用程序窗口下一帧的Display List，这样就使得应用程序窗口的UI更流畅。</p>
+</blockquote>
+<p>注意最后一段，在 Android 4.x 时代，没有RenderThread的时代，只有 Main Thread ，也就是说 必须要等到 Draw 完成后，才会去准备下一帧的数据，如下图：</p>
+<p><img src="/images/hwui/renderthread/5.png" alt="Paste_Image.png"></p>
+<p>Android5.0 之后，如老罗所说，有两种情况，</p>
+<p><img src="/images/hwui/renderthread/6.png" alt="Main Thread 和 Render Thread"></p>
+<p><img src="/images/hwui/renderthread/7.png" alt="Render Thread 提前唤醒了 Main Thread"></p>
+<p>可以看到第二张图中，Render Thread 并没有绘制完成，但是由于其提前唤醒了 Main Thread ，所以 Main Thread 在下一个Vsync信号到来的时候，响应了Vsync事件，开始准备下一帧。<br>此时虽然由于第一帧绘制时间过长，导致掉了一帧，但是第二帧没有收到任何影响。</p>
+<h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p>
+<ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li>
+<li><a href="https://androidperformance.com/2019/12/01/BlogMap/">本博客内容导航</a> ：个人博客内容的一个导航。</li>
+<li><a href="https://androidperformance.com/2018/05/07/Android-performance-optimization-skills-and-tools/">个人整理和搜集的优秀博客文章 - Android 性能优化必知必会</a> ：欢迎大家自荐和推荐 （微信私聊即可）</li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a> ： 欢迎加入，多谢支持～</li>
+</ol>
+<blockquote>
+<p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p>
+</blockquote>
+<p><img src="/images/WechatIMG581.png" alt="微信扫一扫"></p>
+
+    </article>
+    <!-- license -->
+        <div class="license-wrapper">
+            <p>Author：<a href="https://androidperformance.com">Gracker</a>
+            <p>Link：<a href="https://androidperformance.com/2015/08/12/AndroidL-hwui-RenderThread-workflow/">https://androidperformance.com/2015/08/12/AndroidL-hwui-RenderThread-workflow/</a>
+            <p>Publish date：<a href="https://androidperformance.com/2015/08/12/AndroidL-hwui-RenderThread-workflow/">August 12th 2015, 10:38:01 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/2015/08/12/AndroidL-hwui-RenderThread-workflow/">January 11th 2026, 1:36:33 pm</a>
+            <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
+        </div>
+    <!-- paginator -->
+    <ul class="post-paginator">
+        <li class="next">
+                <div class="nextSlogan">Next Post</div>
+                <a href="/2015/11/18/Android-app-lunch-optimize-delay-load/" title="Android 应用启动优化 - 一种 DelayLoad 的实现和原理(上篇)">
+                    <div class="nextTitle">Android 应用启动优化 - 一种 DelayLoad 的实现和原理(上篇)</div>
+                </a>
+        </li>
+        <li class="previous">
+                <div class="prevSlogan">Previous Post</div>
+                <a href="/2015/08/05/HashMap/" title="Java7 HashMap 源码分析">
+                    <div class="prevTitle">Java7 HashMap 源码分析</div>
+                </a>
+        </li>
+    </ul>
+    <!-- comment -->
+        <div class="post-comment">
+            <!-- 来必力 City 版安装代码 -->
+
+            
+            
+            
+            <!-- utteranc评论 -->
+
+            <!-- partial('_partial/comment/changyan') -->
+            <!--PC版-->
+
+            
+            
+            
+        </div>
+    <!-- timeliness note -->
+    <!-- idea from: https://hexo.fluid-dev.com/posts/hexo-injector/#%E6%96%87%E7%AB%A0%E6%97%B6%E6%95%88%E6%80%A7%E6%8F%90%E7%A4%BA -->
+    <!-- Mathjax -->
+</main>
+
+                <!-- profile -->
+            </div>
+            <footer class="footer footer-unloaded">
+    <!-- social  -->
+        <div class="social">
+                            <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title="email" ></a>
+                <a href="https://github.com/gracker" class="iconfont-archer github" target="_blank" title="github"></a>
+                <span class="iconfont-archer wechat" title="wechat">
+                    <img class="profile-qr" src="/assets/Wechat.jpeg" />
+                </span>
+                <span class="iconfont-archer qq" title="qq">
+                    <img class="profile-qr" src="/553000664" />
+                </span>
+                <a href="https://weibo.com/gracker520" class="iconfont-archer weibo" target="_blank" title="weibo"></a>
+                <a href="https://www.zhihu.com/people/gracker" class="iconfont-archer zhihu" target="_blank" title="zhihu"></a>
+                <a href="https://twitter.com/Gracker_Gao" class="iconfont-archer twitter" target="_blank" title="twitter"></a>
+                <a href="https://juejin.im/user/557b0590e4b052e031453d76" class="iconfont-archer juejin" target="_blank" title="juejin"></a>
+                <a href="/atom.xml" class="iconfont-archer rss" target="_blank" title="rss"></a>
+
+        </div>
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- website approve for Chinese user -->
+        <div class="website-approve">
+                <span id="icp-approve" class="icp-approve">
+                    <a href="https://beian.miit.gov.cn/" target="_blank">蜀 ICP 备 20016190 号</a>
+                </span>
+        </div>
+</footer>
+
+        </div>
+        <!-- toc -->
+            <div class="toc-wrapper toc-wrapper-loding" style=    top:50vh;
+>
+                <div class="toc-catalog">
+                    <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+                </div>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%89%8D%E8%A8%80"><span class="toc-number">1.</span> <span class="toc-text">前言</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BB%8EJava%E5%B1%82%E8%AF%B4%E8%B5%B7"><span class="toc-number">2.</span> <span class="toc-text">从Java层说起</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Native%E5%B1%82"><span class="toc-number">3.</span> <span class="toc-text">Native层</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#HWUI-RenderThread"><span class="toc-number">4.</span> <span class="toc-text">HWUI-RenderThread</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#RenderThread-DrawFrame"><span class="toc-number">5.</span> <span class="toc-text">RenderThread.DrawFrame</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#1-syncFrameState"><span class="toc-number">5.1.</span> <span class="toc-text">1. syncFrameState</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#2-draw"><span class="toc-number">6.</span> <span class="toc-text">2. draw</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#2-1-eglBeginFrame"><span class="toc-number">6.0.1.</span> <span class="toc-text">2.1 eglBeginFrame</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#2-2-prepareDirty"><span class="toc-number">6.0.2.</span> <span class="toc-text">2.2 prepareDirty</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#2-3-drawRenderNode"><span class="toc-number">6.0.3.</span> <span class="toc-text">2.3 drawRenderNode</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#2-4-swapBuffers"><span class="toc-number">6.0.4.</span> <span class="toc-text">2.4 swapBuffers</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#2-5-FinishFrame"><span class="toc-number">6.0.5.</span> <span class="toc-text">2.5  FinishFrame</span></a></li></ol></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%80%BB%E7%BB%93"><span class="toc-number">7.</span> <span class="toc-text">总结</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number"></span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a>
+            </div>
+        <!-- sidebar -->
+        <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+        <div class="sidebar-panel-archives">
+    <!-- 在 ejs 中将 archive 按照时间排序 -->
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 118
+        </div>
+        <!-- search  -->
+    </div>
+    <div class="post-archive">
+            <div class="archive-year"> 2025 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 9 - CPU 信息解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/02</span>
+            <a class="archive-post-title" href="/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7 - MainThread 和 RenderThread 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/26</span>
+            <a class="archive-post-title" href="/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/26</span>
+            <a class="archive-post-title" href="/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto 系列 5：Android App 基于 Choreographer 的渲染流程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto 系列 4：使用命令行在本地打开超大 Trace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR 系列 3 ：ANR 案例分享</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR 系列 2 ：ANR 分析套路和关键 Log 介绍</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-01-ANR-Design/">Android ANR 系列 1 ：理解 Android ANR 设计思想</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2024 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto 系列 3：熟悉 Perfetto View</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto 系列 2：Perfetto Trace 抓取</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto 系列 1：Perfetto 工具简介</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/2024/03/27/Android-Perfetto-101/">Android Perfetto 系列目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/01</span>
+            <a class="archive-post-title" href="/2024/01/01/2023-review/">2023 年的方方面面</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2023 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/30</span>
+            <a class="archive-post-title" href="/2023/12/30/the-performance/">关于 The Android Performance 知识星球介绍</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/15</span>
+            <a class="archive-post-title" href="/2023/10/15/the-performance-design-of-os-en/">The Performance Design Of OS</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/2023/08/21/the-performance-design-of-os/">OS 设计之性能设计</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/2023/05/14/bad-android-app-with-system-permissions/">当 App 有了系统权限，真的可以为所欲为？</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2022 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/2022/03/27/the-performance-tea-part-01/">The Performance 星球茶话会 - 第一期</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/2022/03/13/android-systrace-cpu-state-running/">Systrace 线程 CPU 运行状态分析技巧 - Running 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/2022/01/21/android-systrace-cpu-state-runnable/">Systrace 线程 CPU 运行状态分析技巧 - Runnable 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/03</span>
+            <a class="archive-post-title" href="/2022/01/03/2021-Review/">回顾 2021</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2021 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/27</span>
+            <a class="archive-post-title" href="/2021/10/27/if-i-write-a-book-about-performance/">一本讲 Android 流畅性的书，应该有什么内容？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/26</span>
+            <a class="archive-post-title" href="/2021/10/26/build-android-12/">Android 系统开发系列（1）：Android 12 源代码下载、编译和刷机</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace 响应速度实战 3 ：响应速度延伸知识</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace 响应速度实战 2 ：响应速度实战分析-以启动速度为例</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace 响应速度实战 1 ：了解响应速度原理</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace 流畅性实战 3 ：卡顿分析过程中的一些疑问</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace 流畅性实战 2 ：案例分析 - MIUI 桌面滑动卡顿分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace 流畅性实战 1 ：了解卡顿原理</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2020 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span>
+            <a class="archive-post-title" href="/2020/08/20/weibo-imageload-opt-on-huawei/">华为手机刷微博体验更好？技术角度的一些分析和思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/2020/05/26/samsung_crash/">一个「闰」字引发的事故 - 三星系统重启分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/2020/05/07/Android-App-Chain-Wakeup/">Android App 链式唤醒分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/14</span>
+            <a class="archive-post-title" href="/2020/02/14/Android-Systrace-SurfaceFlinger/">Android Systrace 基础知识 - SurfaceFlinger 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/03</span>
+            <a class="archive-post-title" href="/2020/02/03/android-development-learning-path-2020-edition/">Android 开发者学习路线(2020 版本)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span>
+            <a class="archive-post-title" href="/2020/01/28/2020-read/">我的 2020 年读书单</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2019 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/21</span>
+            <a class="archive-post-title" href="/2019/12/21/Android-Systrace-CPU/">Android Systrace 基础知识 - CPU Info 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/15</span>
+            <a class="archive-post-title" href="/2019/12/15/Android-Systrace-Triple-Buffer/">Android Systrace 基础知识 - Triple Buffer 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/06</span>
+            <a class="archive-post-title" href="/2019/12/06/Android-Systrace-Binder/">Android Systrace 基础知识 - Binder 和锁竞争解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/2019/12/01/BlogMap/">「置顶」博客文章目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/2019/12/01/Android-Systrace-Vsync/">Android Systrace 基础知识 - Vsync 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/2019/11/18/Android-App-Lunch-Optimize/">Android App 启动优化全记录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/06</span>
+            <a class="archive-post-title" href="/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Android Systrace 基础知识 - MainThread 和 RenderThread 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/04</span>
+            <a class="archive-post-title" href="/2019/11/04/Android-Systrace-Input/">Android Systrace 基础知识 - Input 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/24</span>
+            <a class="archive-post-title" href="/2019/10/24/Android-Background-Animation/">Android 中的“后台无效动画“行为分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/22</span>
+            <a class="archive-post-title" href="/2019/10/22/Android-Choreographer/">Android 基于 Choreographer 的渲染机制详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/2019/09/18/Android-Jank-Due-To-Low-Memory/">Android 中的卡顿丢帧原因概述 - 低内存篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/17</span>
+            <a class="archive-post-title" href="/2019/09/17/Android-Kill-Background-App-Debug/">Android 桌面被杀问题分析案例</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Due-To-App/">Android 中的卡顿丢帧原因概述 - 应用篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Due-To-System/">Android 中的卡顿丢帧原因概述 - 系统篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Debug/">Android 中的卡顿丢帧原因概述 - 方法论</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/2019/09/01/Android-Activity-Lunch-Mode/">Android 中的 Activity Launch Mode 详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/2019/07/27/Android-Hardware-Layer/">Android 中的 Hardware Layer 详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/23</span>
+            <a class="archive-post-title" href="/2019/07/23/Android-Systrace-Pre/">Android Systrace 基础知识 -- 分析 Systrace 预备知识</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/29</span>
+            <a class="archive-post-title" href="/2019/06/29/Android-Systrace-SystemServer/">Android Systrace 基础知识 - SystemServer 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/2019/05/28/Android-Systrace-About/">Android Systrace 基础知识 -- Systrace 简介</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/27</span>
+            <a class="archive-post-title" href="/2019/05/27/why-60-fps/">Android Systrace 基础知识 -- Why 60 fps ？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/2019/05/26/Android_Systrace_0/">Android Systrace -- 系列文章目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/15</span>
+            <a class="archive-post-title" href="/2019/05/15/90hz-on-android/">Android 新的流畅体验，90Hz 漫谈</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/2019/04/07/liqi/">利器 - 高效工具推荐</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/2019/01/21/android-performance-case-jank-accessbility/">Android 无障碍服务导致的整机卡顿案例分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/12</span>
+            <a class="archive-post-title" href="/2019/01/12/recommend-of-2018/">2018 年度好物推荐 - 给辛勤工作的自己一点奖励</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2018 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span>
+            <a class="archive-post-title" href="/2018/11/01/android-system-develop-0/">Android 系统开发源码环境搭建</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/25</span>
+            <a class="archive-post-title" href="/2018/10/25/How-do-engineers-count-well/">陆奇：除了好代码，工程师怎样才算优秀？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/01</span>
+            <a class="archive-post-title" href="/2018/10/01/how-to-stop-sucking-and-be-awesome-instead-8/">程序员的修炼-08-阅读之美</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/30</span>
+            <a class="archive-post-title" href="/2018/09/30/how-to-stop-sucking-and-be-awesome-instead-7/">程序员的修炼-07-游戏与编程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/29</span>
+            <a class="archive-post-title" href="/2018/09/29/how-to-stop-sucking-and-be-awesome-instead-6/">程序员的修炼-06-互联网那些事</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/28</span>
+            <a class="archive-post-title" href="/2018/09/28/how-to-stop-sucking-and-be-awesome-instead-5/">程序员的修炼-05-了解你的用户</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/27</span>
+            <a class="archive-post-title" href="/2018/09/27/how-to-stop-sucking-and-be-awesome-instead-4/">程序员的修炼-04-关于测试的一些思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/26</span>
+            <a class="archive-post-title" href="/2018/09/26/how-to-stop-sucking-and-be-awesome-instead-3/">程序员的修炼-03-Web 设计原则</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/20</span>
+            <a class="archive-post-title" href="/2018/09/20/how-to-stop-sucking-and-be-awesome-instead-2/">程序员的修炼-02-编程之道</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/2018/09/19/how-to-stop-sucking-and-be-awesome-instead-1/">程序员的修炼-01-绝地反击之术</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2018/09/13/android-memory/">Android 系统不释放内存吗？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/13</span>
+            <a class="archive-post-title" href="/2018/08/13/Some-Thoughts-on-the-Fluency-of-Android/">关于 Android 系统流畅性的一些思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/20</span>
+            <a class="archive-post-title" href="/2018/05/20/zhihu-startingwindow/">知乎 救救你的 StartingWindow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/2018/05/07/Android-performance-optimization-skills-and-tools/">「置顶」Android 性能优化必知必会</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/2018/01/06/2017%E5%B9%B4%E5%BA%A6%E6%9C%80%E6%8E%A8%E8%8D%90/">2017 年度好物推荐 - 给辛勤工作的自己一点奖励</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2017 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/23</span>
+            <a class="archive-post-title" href="/2017/04/23/About-work/">2017</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2016 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/2016/04/05/android-bottom-bar-2/">Android Bottom navigation 规范二：样式、行为与规格</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/2016/04/05/android-bottom-bar-1/">Android Bottom Navigation 规范一：使用方法</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2015 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/31</span>
+            <a class="archive-post-title" href="/2015/12/31/How-to-calculation-android-app-lunch-time/">Android 中如何计算 App 的启动时间？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/29</span>
+            <a class="archive-post-title" href="/2015/12/29/Android%E5%BA%94%E7%94%A8%E5%90%AF%E5%8A%A8%E4%BC%98%E5%8C%96-%E4%B8%80%E7%A7%8DDelayLoad%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%92%8C%E5%8E%9F%E7%90%86-%E4%B8%8B%E7%AF%87/">Android 应用启动优化:一种 DelayLoad 的实现和原理(下篇)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/2015/11/18/Android-app-lunch-optimize-delay-load/">Android 应用启动优化 - 一种 DelayLoad 的实现和原理(上篇)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/12</span>
+            <a class="archive-post-title" href="/2015/08/12/AndroidL-hwui-RenderThread-workflow/">Android hwui 中 RenderThread 工作流程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/2015/08/05/HashMap/">Java7 HashMap 源码分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-onTrimMemory/">Android 代码内存优化建议 - OnTrimMemory 优化</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-AndroidResource/">Android 代码内存优化建议 - Android 资源篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-Google/">Android 代码内存优化建议 - Android 官方篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-Java/">Android 代码内存优化建议 - Java 官方篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/29</span>
+            <a class="archive-post-title" href="/2015/05/29/Nexus6-with-Android-M/">Nexus6 with Android M 开启多窗口模式</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/06</span>
+            <a class="archive-post-title" href="/2015/05/06/Java-Singleton/">细说 Java 单例模式</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-4/">Android 性能优化典范 - Profile GPU Rendering</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-3/">Android 性能优化典范 - Understanding VSYNC</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-2/">Android 性能优化典范之 Understanding Overdraw</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-1/">Android 性能优化典范 - Render Performance</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns/">Android 性能优化典范综述</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/">Android 内存优化之三 - 打开 MAT 中的 Bitmap 原图</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android 内存优化之二 - MAT使用进阶</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android 内存优化(1) - MAT 使用入门</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/31</span>
+            <a class="archive-post-title" href="/2015/03/31/android-performance-case-study-follow-up/">Android性能优化后续</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-5/">Android 小技巧 - 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-4/">Android 小技巧 - 4</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-3/">Android 小技巧 -3</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/04</span>
+            <a class="archive-post-title" href="/2015/02/04/build-rom-for-nexus5/">为 Nexus5 编译 AndroidL 固件</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/30</span>
+            <a class="archive-post-title" href="/2015/01/30/android-performance-tools-systrace-1/">Android 性能优化之 Systrace 工具介绍(一)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/16</span>
+            <a class="archive-post-title" href="/2015/01/16/view-android-source-code-with-androidstudio/">使用 Android Studio 查看 Android Lollipop 源码</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/13</span>
+            <a class="archive-post-title" href="/2015/01/13/android-performance-optimization-overdraw-2/">Android 性能优化之过渡绘制 - 实战篇</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2014 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/2014/10/20/android-performance-optimization-overdraw-1/">Android 性能优化之过渡绘制 - 理论篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/03</span>
+            <a class="archive-post-title" href="/2014/06/03/android-edittext-do-not-auto-get-focus/">Android 小技巧 - 如何让EditText不自动获取焦点</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/31</span>
+            <a class="archive-post-title" href="/2014/05/31/android-tips-round-up-2/">Android 小技巧 -2</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/2014/05/28/android-tips-round-up-1/">Android 小技巧 - 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/02</span>
+            <a class="archive-post-title" href="/2014/05/02/android_log_to_file/">Android Tools - Log2File</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/01</span>
+            <a class="archive-post-title" href="/2014/04/01/android-service-build-your-own-notification-servers-app/">Android Service：开发自己的通知中心(2):辅助性服务实战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/25</span>
+            <a class="archive-post-title" href="/2014/03/25/ubuntu-adb-can-not-find-devices/">Android:Ubuntu 下执行 Adb 命令找不到设备</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/17</span>
+            <a class="archive-post-title" href="/2014/03/17/android-build-your-own-android-notification-service-app/">Android Service：开发自己的通知中心(1):辅助性服务介绍</a>
+        </li>
+            </ul>
+    </div>
+</div>
+
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="年度推荐">
+                <span class="iconfont-archer">&#xe606;</span>
+                年度推荐
+            </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="随笔">
+                <span class="iconfont-archer">&#xe606;</span>
+                随笔
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="年终总结">
+                <span class="iconfont-archer">&#xe606;</span>
+                年终总结
+            </span>
+            <span class="sidebar-tag-name" data-tags="知识星球">
+                <span class="iconfont-archer">&#xe606;</span>
+                知识星球
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="性能优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                性能优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="线程优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                线程优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR分析">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR分析
+            </span>
+            <span class="sidebar-tag-name" data-tags="页面响应">
+                <span class="iconfont-archer">&#xe606;</span>
+                页面响应
+            </span>
+            <span class="sidebar-tag-name" data-tags="电量优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                电量优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Kotlin">
+                <span class="iconfont-archer">&#xe606;</span>
+                Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="程序员">
+                <span class="iconfont-archer">&#xe606;</span>
+                程序员
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计规范">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计规范
+            </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿
+            </span>
+            <span class="sidebar-tag-name" data-tags="读书笔记">
+                <span class="iconfont-archer">&#xe606;</span>
+                读书笔记
+            </span>
+            <span class="sidebar-tag-name" data-tags="程序员的修炼">
+                <span class="iconfont-archer">&#xe606;</span>
+                程序员的修炼
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计原则">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计原则
+            </span>
+            <span class="sidebar-tag-name" data-tags="测试">
+                <span class="iconfont-archer">&#xe606;</span>
+                测试
+            </span>
+            <span class="sidebar-tag-name" data-tags="了解你的用户">
+                <span class="iconfont-archer">&#xe606;</span>
+                了解你的用户
+            </span>
+            <span class="sidebar-tag-name" data-tags="游戏与编程">
+                <span class="iconfont-archer">&#xe606;</span>
+                游戏与编程
+            </span>
+            <span class="sidebar-tag-name" data-tags="互联网那些事">
+                <span class="iconfont-archer">&#xe606;</span>
+                互联网那些事
+            </span>
+            <span class="sidebar-tag-name" data-tags="阅读之美">
+                <span class="iconfont-archer">&#xe606;</span>
+                阅读之美
+            </span>
+            <span class="sidebar-tag-name" data-tags="利器">
+                <span class="iconfont-archer">&#xe606;</span>
+                利器
+            </span>
+            <span class="sidebar-tag-name" data-tags="iOS">
+                <span class="iconfont-archer">&#xe606;</span>
+                iOS
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design
+            </span>
+            <span class="sidebar-tag-name" data-tags="Smooth">
+                <span class="iconfont-archer">&#xe606;</span>
+                Smooth
+            </span>
+            <span class="sidebar-tag-name" data-tags="体验优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                体验优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="用户体验">
+                <span class="iconfont-archer">&#xe606;</span>
+                用户体验
+            </span>
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+        缺失模块，请参考主题文档进行安装配置：https://github.com/fi3ework/hexo-theme-archer#%E5%AE%89%E8%A3%85%E4%B8%BB%E9%A2%98
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="随笔">
+            <span class="iconfont-archer">&#xe60a;</span>
+            随笔
+        </span>
+        <span class="sidebar-category-name" data-categories="读书笔记">
+            <span class="iconfont-archer">&#xe60a;</span>
+            读书笔记
+        </span>
+        <span class="sidebar-category-name" data-categories="Android">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
+        </span>
+        <span class="sidebar-category-name" data-categories="iOS">
+            <span class="iconfont-archer">&#xe60a;</span>
+            iOS
+        </span>
+        <span class="sidebar-category-name" data-categories="Android性能优化">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android性能优化
+        </span>
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+
+    </div>
+</div>
+
+        <!-- site-meta -->
+        <script>
+    var siteMetaRoot = "/"
+    if (siteMetaRoot === "undefined") {
+        siteMetaRoot = '/'
+    }
+    var siteMeta = {
+        url: "https://androidperformance.com",
+        root: siteMetaRoot,
+        author: "Gracker"
+    }
+</script>
+
+        <!-- import experimental options here -->
+        <!-- Custom Font -->
+
+        <!-- jquery (must load before main.js) -->
+        <script defer src="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+        <!-- main func (depends on jQuery) -->
+        <script src="/scripts/main.js" defer></script>
+        <!-- fancybox -->
+        <script>
+            (function(){
+              var urls = [
+                'https://cdn.bootcdn.net/ajax/libs/fancyapps-ui/5.0.36/fancybox/fancybox.umd.js',
+                'https://cdn.jsdelivr.net/npm/@fancyapps/ui@5.0.36/dist/fancybox/fancybox.umd.js'
+              ];
+              function loadNext(){
+                var u = urls.shift();
+                if(!u) return;
+                var s = document.createElement('script');
+                s.src = u; s.defer = true;
+                s.onload = function(){ if (window.Fancybox) { window.Fancybox.bind('[data-fancybox]'); } };
+                s.onerror = loadNext;
+                document.head.appendChild(s);
+              }
+              loadNext();
+            })();
+        </script>
+        <!-- algolia -->
+        <!-- busuanzi (delay load + silent fail) -->
+        <!-- async load share.js on first click -->
+            <script>
+                (function(){
+                  var loaded = false
+                  function loadShare(){
+                    if (loaded) return
+                    loaded = true
+                    var s = document.createElement('script')
+                    s.src = '/scripts/share.js'
+                    s.async = true
+                    document.head.appendChild(s)
+                  }
+                  document.addEventListener('click', function(e){
+                    var t = e.target
+                    if (!t) return
+                    if (t.closest && t.closest('.share-wrapper')) { loadShare() }
+                    else if (t.classList && t.classList.contains('share-wrapper')) { loadShare() }
+                  }, true)
+                })();
+            </script>
+        <!-- mermaid -->
+    </body>
+</html>

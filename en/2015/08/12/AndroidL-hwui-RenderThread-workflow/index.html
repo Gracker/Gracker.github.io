@@ -1,0 +1,1786 @@
+<!DOCTYPE html>
+<html lang="en">
+    <!-- title -->
+            <!-- keywords -->
+
+                  <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <meta name="author" content="Gracker">
+                    <meta name="renderer" content="webkit">
+                    <meta name="copyright" content="Gracker">
+                      <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,Optimization,Startup,Perfetto,Systrace,RenderThread,Java,Responsiveness,Smoothness">
+                          <meta name="description" content="Technical blog about Android system performance optimization">
+                          <meta name="description" content="PrefaceThis article serves as a set of learning notes documenting the basic workflow of RenderThread in hwui as introduced in Android 5.0. Since these are notes, some details might not be exhaustive.">
+<meta property="og:type" content="article">
+<meta property="og:title" content="RenderThread Workflow in Android hwui">
+<meta property="og:url" content="https://androidperformance.com/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/index.html">
+<meta property="og:site_name" content="Android Performance">
+<meta property="og:description" content="PrefaceThis article serves as a set of learning notes documenting the basic workflow of RenderThread in hwui as introduced in Android 5.0. Since these are notes, some details might not be exhaustive.">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://androidperformance.com/en/images/hwui/renderthread/1.png">
+<meta property="og:image" content="https://androidperformance.com/en/images/hwui/renderthread/2.png">
+<meta property="og:image" content="https://androidperformance.com/en/images/hwui/renderthread/3.png">
+<meta property="og:image" content="https://androidperformance.com/en/images/hwui/renderthread/4.png">
+<meta property="og:image" content="https://androidperformance.com/en/images/hwui/renderthread/5.png">
+<meta property="og:image" content="https://androidperformance.com/en/images/hwui/renderthread/6.png">
+<meta property="og:image" content="https://androidperformance.com/en/images/hwui/renderthread/7.png">
+<meta property="og:image" content="https://androidperformance.com/en/images/WechatIMG581.png">
+<meta property="article:published_time" content="2015-08-12T14:38:01.000Z">
+<meta property="article:modified_time" content="2026-01-11T12:56:53.368Z">
+<meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Startup">
+<meta property="article:tag" content="Android">
+<meta property="article:tag" content="Systrace">
+<meta property="article:tag" content="RenderThread">
+<meta property="article:tag" content="Java">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://androidperformance.com/en/images/hwui/renderthread/1.png">
+                            <meta http-equiv="Cache-control" content="no-cache">
+                            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+                            <link rel="icon" href="/en/assets/favicon.ico">
+                                <title>
+                                  RenderThread Workflow in Android hwui · Android Performance
+                                </title>
+                                <!-- /*! loadCSS. [c]2017 Filament Group, Inc. MIT License */
+/* This file is meant as a standalone workflow for
+- testing support for link[rel=preload]
+- enabling async CSS loading in browsers that do not support rel=preload
+- applying rel preload css once loaded, whether supported or not.
+*/ -->
+<script>
+    (function (w) {
+        'use strict'
+        // rel=preload support test
+        if (!w.loadCSS) {
+            w.loadCSS = function () {}
+        }
+        // define on the loadCSS obj
+        var rp = (loadCSS.relpreload = {})
+        // rel=preload feature support test
+        // runs once and returns a function for compat purposes
+        rp.support = (function () {
+            var ret
+            try {
+                ret = w.document.createElement('link').relList.supports('preload')
+            } catch (e) {
+                ret = false
+            }
+            return function () {
+                return ret
+            }
+        })()
+
+        // if preload isn't supported, get an asynchronous load by using a non-matching media attribute
+        // then change that media back to its intended value on load
+        rp.bindMediaToggle = function (link) {
+            // remember existing media attr for ultimate state, or default to 'all'
+            var finalMedia = link.media || 'all'
+
+            function enableStylesheet() {
+                link.media = finalMedia
+            }
+
+            // bind load handlers to enable media
+            if (link.addEventListener) {
+                link.addEventListener('load', enableStylesheet)
+            } else if (link.attachEvent) {
+                link.attachEvent('onload', enableStylesheet)
+            }
+
+            // Set rel and non-applicable media type to start an async request
+            // note: timeout allows this to happen async to let rendering continue in IE
+            setTimeout(function () {
+                link.rel = 'stylesheet'
+                link.media = 'only x'
+            })
+            // also enable media after 3 seconds,
+            // which will catch very old browsers (android 2.x, old firefox) that don't support onload on link
+            setTimeout(enableStylesheet, 3000)
+        }
+
+        // loop through link elements in DOM
+        rp.poly = function () {
+            // double check this to prevent external calls from running
+            if (rp.support()) {
+                return
+            }
+            var links = w.document.getElementsByTagName('link')
+            for (var i = 0; i < links.length; i++) {
+                var link = links[i]
+                // qualify links to those with rel=preload and as=style attrs
+                if (
+                    link.rel === 'preload' &&
+                    link.getAttribute('as') === 'style' &&
+                    !link.getAttribute('data-loadcss')
+                ) {
+                    // prevent rerunning on link
+                    link.setAttribute('data-loadcss', true)
+                    // bind listeners to toggle media back
+                    rp.bindMediaToggle(link)
+                }
+            }
+        }
+
+        // if unsupported, run the polyfill
+        if (!rp.support()) {
+            // run once at least
+            rp.poly()
+
+            // rerun poly on an interval until onload
+            var run = w.setInterval(rp.poly, 500)
+            if (w.addEventListener) {
+                w.addEventListener('load', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            } else if (w.attachEvent) {
+                w.attachEvent('onload', function () {
+                    rp.poly()
+                    w.clearInterval(run)
+                })
+            }
+        }
+
+        // commonjs
+        if (typeof exports !== 'undefined') {
+            exports.loadCSS = loadCSS
+        } else {
+            w.loadCSS = loadCSS
+        }
+    })(typeof global !== 'undefined' ? global : this)
+</script>
+
+                                  <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/en/font/Oswald-Regular.woff2") format('woff2'),
+             url("/en/font/Oswald-Regular.ttf") format('truetype');
+        font-display: swap;
+    }
+
+    body {
+        margin: 0;
+    }
+
+    /* Removed initial hide to show content immediately */
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(
+            -45deg,
+            #444 0,
+            #444 80px,
+            #333 80px,
+            #333 160px
+        );
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+</style>
+
+                                    <link id="stylesheet-base" rel="preload" href="/en/css/style.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <link id="stylesheet-mobile" rel="preload" href="/en/css/mobile.css"
+                                    as="style" onload="this.onload=null;this.rel='stylesheet';this.media='screen and
+                                    (max-width: 960px)'">
+                                    <link id="stylesheet-theme-dark" rel="preload" href="/en/css/dark.css
+                                    " as="style" onload="this.onload=null;this.rel='stylesheet'">
+                                    <!-- Font Awesome CSS (with CDN fallback) -->
+                                    <link id="stylesheet-fontawesome" rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+                                      as="style" onload="this.onload=null;this.rel='stylesheet'"
+                                      onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css';this.rel='stylesheet'">
+                                    <link rel="preconnect" href="https://cdn.bootcdn.net" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.bootcdn.net">
+                                    <link rel="preconnect" href="https://cdn.staticfile.org" crossorigin>
+                                    <link rel="dns-prefetch" href="//cdn.staticfile.org">
+                                    <link rel="preload"
+                                      href="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js" as="script">
+                                    <link rel="preload" href="/en/scripts/main.js" as="script">
+                                    <!-- use compressed font format to reduce transfer size -->
+                                    <link rel="preload" href="/en/font/Source%5C%20Sans%5C%20Pro.woff2"
+                                      as="font" type="font/woff2" crossorigin>
+                                    <link rel="preload" href="/en/font/Source%5C%20Sans%5C%20Pro.woff" as="font"
+                                      type="font/woff" crossorigin>
+                                    <link rel="preload" href="https://at.alicdn.com/t/font_327081_1dta1rlogw17zaor.woff"
+                                      as="font" crossorigin>
+                                    <!-- algolia -->
+                                        <!-- 百度统计（延迟加载，失败静默）  -->
+                                            <!-- CNZZ（延迟加载，失败静默）  -->
+                                                <!-- Google tag (gtag.js) 延迟加载，失败静默 -->
+                                                  <script>
+                                                    (function () {
+                                                      function loadGtag() {
+                                                        try {
+                                                          window.dataLayer = window.dataLayer || []
+                                                          function gtag() { dataLayer.push(arguments) }
+                                                          window.gtag = gtag
+                                                          gtag('js', new Date())
+                                                          var s = document.createElement('script')
+                                                          s.async = true
+                                                          s.src = 'https://www.googletagmanager.com/gtag/js?id=UA-50993302-2'
+                                                          s.onerror = function () { }
+                                                          s.onload = function () { gtag('config', 'UA-50993302-2') }
+                                                          document.head.appendChild(s)
+                                                        } catch (e) { }
+                                                      }
+                                                      if (window.requestIdleCallback) {
+                                                        requestIdleCallback(loadGtag, { timeout: 5000 })
+                                                      } else {
+                                                        window.addEventListener('load', function () { setTimeout(loadGtag, 3000) })
+                                                      }
+                                                    })();
+                                                  </script>
+                                                    <!-- Hreflang Tags -->
+                                                    
+                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2015/08/12/AndroidL-hwui-RenderThread-workflow/" />
+                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/" />
+                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/" />
+                  <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/en/atom.xml" title="Android Performance" type="application/atom+xml">
+</head>
+        <body class="post-body">
+        <!-- header -->
+        <header class="header header-mobile">
+    <!-- top read progress line -->
+    <div class="header-element">
+        <div class="read-progress"></div>
+    </div>
+    <!-- sidebar menu button -->
+    <div class="header-element">
+        <div class="header-sidebar-menu">
+            <div style="padding-left: 1px;">&#xe775;</div>
+        </div>
+    </div>
+    <!-- header actions -->
+    <div class="header-actions">
+        <!-- theme mode switch button -->
+        <span class="header-theme-btn header-element">
+            <i class="fas fa-adjust"></i>
+        </span>
+        <!-- back to home page text -->
+        <span class="home-link header-element">
+            <a href="/en/">Android Performance</a>
+        </span>
+    </div>
+    <!-- toggle banner -->
+    <div class="banner">
+        <div class="blog-title header-element">
+            <a href="/en/">Android Performance</a>
+        </div>
+        <div class="post-title header-element">
+            <a href="#" class="post-name">RenderThread Workflow in Android hwui</a>
+        </div>
+    </div>
+</header>
+
+        <!-- fixed footer -->
+        <footer class="footer-fixed">
+    <!-- donate button -->
+    <div class="donate-popup donate-popup--hidden">
+    <div class="donate-popup__title">Buy Me A Coffee</div>
+    <div class="donate-popup__content">
+        <div class="donate-popup__content-description">If you find this article helpful, consider buying me a coffee.</div>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Wechat"
+            alt="Wechat"
+            src="/en/assets/donate-wechat.png"
+        ></img>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Alipay"
+            alt="Alipay"
+            src="/en/assets/donate-alipay.png"
+        ></img>
+    </div>
+</div>
+
+    <div
+        title="Donate to the author"
+        class="footer-fixed-btn footer-fixed-btn--hidden donate-btn"
+    >
+        <i class="fas fa-donate"></i>
+    </div>
+
+    <!-- back to top button -->
+    <div class="footer-fixed-btn footer-fixed-btn--hidden back-top">
+        <div>&#xe639;</div>
+    </div>
+</footer>
+
+        <!-- wrapper -->
+        <div class="wrapper">
+            <div class="site-intro" style="    height:50vh;
+">
+    <!-- 主页  -->
+    <!-- 404页  -->
+    <div class="site-intro-placeholder"></div>
+    <picture>
+            <source type="image/webp" srcset="/en/intro/post-bg.webp">
+        <img class="site-intro-img"
+             src="/en/intro/post-bg.jpg"
+             alt=""
+loading="lazy"             decoding="async"
+             fetchpriority="auto"
+             sizes="100vw">
+    </picture>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+                RenderThread Workflow in Android hwui
+            <!-- 404 -->
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            <!-- 404 -->
+        </p>
+        <!-- 文章页 meta -->
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                    <div class="post-intro-tags" >
+        <span class="post-category" data-categories="Android">
+            <i class="fas fa-folder post-category-icon"></i>
+            <span class="post-category-text">
+                Android
+            </span>
+        </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Startup">Startup</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Systrace">Systrace</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="RenderThread">RenderThread</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Java">Java</a>
+</div>
+
+                <!-- 文章字数统计 -->
+                    <div class="post-intro-read">
+                        <span>Word count: <span class="post-count word-count">3.1k</span>Reading time: <span class="post-count reading-time">19 min</span></span>
+                    </div>
+                <div class="post-intro-meta">
+                    <!-- 撰写日期 -->
+                    <span class="iconfont-archer post-intro-calander">&#xe676;</span>
+                    <span class="post-intro-time">2015/08/12</span>
+                    <!-- 文章分享 -->
+                    <span class="share-wrapper">
+                        <span class="iconfont-archer share-icon">&#xe71d;</span>
+                        <span class="share-text">Share</span>
+                        <ul class="share-list">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+    </div>
+</div>
+
+            
+            <script>
+  // get user agent
+  function getBrowserVersions() {
+    var u = window.navigator.userAgent
+    return {
+      userAgent: u,
+      trident: u.indexOf('Trident') > -1, //IE内核
+      presto: u.indexOf('Presto') > -1, //opera内核
+      webKit: u.indexOf('AppleWebKit') > -1, //苹果、谷歌内核
+      gecko: u.indexOf('Gecko') > -1 && u.indexOf('KHTML') == -1, //火狐内核
+      mobile: !!u.match(/AppleWebKit.*Mobile.*/), //是否为移动终端
+      ios: !!u.match(/\(i[^;]+;( U;)? CPU.+Mac OS X/), //ios终端
+      android: u.indexOf('Android') > -1 || u.indexOf('Linux') > -1, //android终端或者uc浏览器
+      iPhone: u.indexOf('iPhone') > -1 || u.indexOf('Mac') > -1, //是否为iPhone或者安卓QQ浏览器
+      iPad: u.indexOf('iPad') > -1, //是否为iPad
+      webApp: u.indexOf('Safari') == -1, //是否为web应用程序，没有头部与底部
+      weixin: u.indexOf('MicroMessenger') == -1, //是否为微信浏览器
+      uc: u.indexOf('UCBrowser') > -1, //是否为android下的UC浏览器
+    }
+  }
+  var browser = {
+    versions: getBrowserVersions(),
+  }
+  console.log('userAgent: ' + browser.versions.userAgent)
+
+  // callback
+  function fontLoaded() {
+    console.log('font loaded')
+    if (document.getElementsByClassName('site-intro-meta')) {
+      document
+        .getElementsByClassName('intro-title')[0]
+        .classList.add('intro-fade-in')
+      document
+        .getElementsByClassName('intro-subtitle')[0]
+        .classList.add('intro-fade-in')
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+      if (postIntros) {
+        postIntros.classList.add('post-fade-in')
+      }
+    }
+  }
+
+  // UC不支持跨域，所以直接显示
+  function asyncCb() {
+    if (browser.versions.uc) {
+      console.log('UCBrowser')
+      fontLoaded()
+    } else {
+      WebFont.load({
+        custom: {
+          families: ['Oswald-Regular'],
+        },
+        loading: function () {
+          // 所有字体开始加载
+          // console.log('font loading');
+        },
+        active: function () {
+          // 所有字体已渲染
+          fontLoaded()
+        },
+        inactive: function () {
+          // 字体预加载失败，无效字体或浏览器不支持加载
+          console.log('inactive: timeout')
+          fontLoaded()
+        },
+        timeout: 5000, // Set the timeout to two seconds
+      })
+    }
+  }
+
+  function asyncErr() {
+    console.warn('script load from CDN failed, will load local script')
+  }
+
+  // load webfont-loader async, and add callback function
+  function async(u, cb, err) {
+    var d = document,
+      t = 'script',
+      o = d.createElement(t),
+      s = d.getElementsByTagName(t)[0]
+    o.src = u
+    if (cb) {
+      o.addEventListener(
+        'load',
+        function (e) {
+          cb(null, e)
+        },
+        false
+      )
+    }
+    if (err) {
+      o.addEventListener(
+        'error',
+        function (e) {
+          err(null, e)
+        },
+        false
+      )
+    }
+    s.parentNode.insertBefore(o, s)
+  }
+
+  var asyncLoadWithFallBack = function (arr, success, reject) {
+    var currReject = function () {
+      reject()
+      arr.shift()
+      if (arr.length) async(arr[0], success, currReject)
+    }
+
+    async(arr[0], success, currReject)
+  }
+
+  asyncLoadWithFallBack(
+    [
+      'https://cdn.bootcdn.net/ajax/libs/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.staticfile.org/webfont/1.6.28/webfontloader.min.js',
+      'https://cdn.jsdelivr.net/npm/webfontloader@1.6.28/webfontloader.min.js',
+      "/en/lib/webfontloader.min.js",
+    ],
+    asyncCb,
+    asyncErr
+  )
+</script>
+
+            <img class="loading" src="/en/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" alt="loading">
+            <div class="container container-unloaded">
+                <main class="main post-page">
+    <article class="article-entry">
+        <h2 id="Preface"><a href="#Preface" class="headerlink" title="Preface"></a>Preface</h2><p>This article serves as a set of learning notes documenting the basic workflow of <code>RenderThread</code> in hwui as introduced in Android 5.0. Since these are notes, some details might not be exhaustive. Instead, I aim to walk through the general flow and highlight the key stages of its operation for future reference when debugging.</p>
+<p>The image below shows a Systrace capture of the first <code>Draw</code> operation by the <code>RenderThread</code> during an application startup. We can trace the <code>RenderThread</code> workflow by observing the sequence of events in this trace. If you are familiar with the application startup process, you know that the entire interface is only displayed on the phone after the first <code>drawFrame</code> is completed. Before this, the user sees the application’s <code>StartingWindow</code>.</p>
+<span id="more"></span>
+
+<p><img src="/en/images/hwui/renderthread/1.png" alt="RenderThread Draw first frame"></p>
+<h2 id="Starting-from-the-Java-Layer"><a href="#Starting-from-the-Java-Layer" class="headerlink" title="Starting from the Java Layer"></a>Starting from the Java Layer</h2><p>Every frame of an application begins its calculation and rendering upon receiving a VSYNC signal. This process originates from the <code>Choreographer</code> class. However, for the sake of brevity, let’s look directly at the call chain involved in rendering a single frame:</p>
+<p><img src="/en/images/hwui/renderthread/2.png" alt="Rendering Call Chain"></p>
+<p>The <code>drawFrame</code> method in <code>Choreographer</code> calls the <code>performTraversals</code> method in <code>ViewRootImpl</code>, which eventually leads to <code>performDraw()</code>. This then calls <code>draw(boolean fullRedrawNeeded)</code>, a private method in <code>ViewRootImpl</code> (distinct from the standard <code>draw</code> method we usually override).</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> (mAttachInfo.mHardwareRenderer != <span class="literal">null</span> &amp;&amp; mAttachInfo.mHardwareRenderer.isEnabled()) &#123;</span><br><span class="line">    mIsAnimating = <span class="literal">false</span>;</span><br><span class="line">    <span class="type">boolean</span> <span class="variable">invalidateRoot</span> <span class="operator">=</span> <span class="literal">false</span>;</span><br><span class="line">    <span class="keyword">if</span> (mHardwareYOffset != yOffset || mHardwareXOffset != xOffset) &#123;</span><br><span class="line">        mHardwareYOffset = yOffset;</span><br><span class="line">        mHardwareXOffset = xOffset;</span><br><span class="line">        mAttachInfo.mHardwareRenderer.invalidateRoot();</span><br><span class="line">    &#125;</span><br><span class="line">    mResizeAlpha = resizeAlpha;</span><br><span class="line"></span><br><span class="line">    dirty.setEmpty();</span><br><span class="line"></span><br><span class="line">    mBlockResizeBuffer = <span class="literal">false</span>;</span><br><span class="line">    mAttachInfo.mHardwareRenderer.draw(mView, mAttachInfo, <span class="built_in">this</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>If the hardware rendering path is taken, <code>mHardwareRenderer.draw</code> is called. Here, <code>mHardwareRenderer</code> refers to <code>ThreadedRenderer</code>, whose <code>draw</code> function is as follows:</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@Override</span></span><br><span class="line"><span class="keyword">void</span> <span class="title function_">draw</span><span class="params">(View view, AttachInfo attachInfo, HardwareDrawCallbacks callbacks)</span> &#123;</span><br><span class="line">    attachInfo.mIgnoreDirtyState = <span class="literal">true</span>;</span><br><span class="line">    <span class="type">long</span> <span class="variable">frameTimeNanos</span> <span class="operator">=</span> mChoreographer.getFrameTimeNanos();</span><br><span class="line">    attachInfo.mDrawingTime = frameTimeNanos / TimeUtils.NANOS_PER_MS;</span><br><span class="line"></span><br><span class="line">    <span class="type">long</span> <span class="variable">recordDuration</span> <span class="operator">=</span> <span class="number">0</span>;</span><br><span class="line">    <span class="keyword">if</span> (mProfilingEnabled) &#123;</span><br><span class="line">        recordDuration = System.nanoTime();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    updateRootDisplayList(view, callbacks);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (mProfilingEnabled) &#123;</span><br><span class="line">        recordDuration = System.nanoTime() - recordDuration;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    attachInfo.mIgnoreDirtyState = <span class="literal">false</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// register animating rendernodes which started animating prior to renderer</span></span><br><span class="line">    <span class="comment">// creation, which is typical for animators started prior to first draw</span></span><br><span class="line">    <span class="keyword">if</span> (attachInfo.mPendingAnimatingRenderNodes != <span class="literal">null</span>) &#123;</span><br><span class="line">        <span class="keyword">final</span> <span class="type">int</span> <span class="variable">count</span> <span class="operator">=</span> attachInfo.mPendingAnimatingRenderNodes.size();</span><br><span class="line">        <span class="keyword">for</span> (<span class="type">int</span> <span class="variable">i</span> <span class="operator">=</span> <span class="number">0</span>; i &lt; count; i++) &#123;</span><br><span class="line">            registerAnimatingRenderNode(</span><br><span class="line">                    attachInfo.mPendingAnimatingRenderNodes.get(i));</span><br><span class="line">        &#125;</span><br><span class="line">        attachInfo.mPendingAnimatingRenderNodes.clear();</span><br><span class="line">        <span class="comment">// We don&#x27;t need this anymore as subsequent calls to</span></span><br><span class="line">        <span class="comment">// ViewRootImpl#attachRenderNodeAnimator will go directly to us.</span></span><br><span class="line">        attachInfo.mPendingAnimatingRenderNodes = <span class="literal">null</span>;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="type">int</span> <span class="variable">syncResult</span> <span class="operator">=</span> nSyncAndDrawFrame(mNativeProxy, frameTimeNanos,</span><br><span class="line">            recordDuration, view.getResources().getDisplayMetrics().density);</span><br><span class="line">    <span class="keyword">if</span> ((syncResult &amp; SYNC_INVALIDATE_REQUIRED) != <span class="number">0</span>) &#123;</span><br><span class="line">        attachInfo.mViewRootImpl.invalidate();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>In this function, <code>updateRootDisplayList(view, callbacks)</code> performs the <code>getDisplayList</code> operation. This is followed by a crucial step:</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">int</span> <span class="variable">syncResult</span> <span class="operator">=</span> nSyncAndDrawFrame(mNativeProxy, frameTimeNanos,</span><br><span class="line">        recordDuration, view.getResources().getDisplayMetrics().density);</span><br></pre></td></tr></table></figure>
+
+<p>As we can see, this is a blocking operation. The Java layer waits for the Native layer to complete and return a result before proceeding.</p>
+<h2 id="The-Native-Layer"><a href="#The-Native-Layer" class="headerlink" title="The Native Layer"></a>The Native Layer</h2><p>The Native code is located in <code>android_view_ThreadedRenderer.cpp</code>. The implementation is as follows:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">static</span> <span class="type">int</span> <span class="title">android_view_ThreadedRenderer_syncAndDrawFrame</span><span class="params">(JNIEnv* env, jobject clazz,</span></span></span><br><span class="line"><span class="params"><span class="function">        jlong proxyPtr, jlong frameTimeNanos, jlong recordDuration, jfloat density)</span> </span>&#123;</span><br><span class="line">    RenderProxy* proxy = <span class="built_in">reinterpret_cast</span>&lt;RenderProxy*&gt;(proxyPtr);</span><br><span class="line">    <span class="keyword">return</span> proxy-&gt;<span class="built_in">syncAndDrawFrame</span>(frameTimeNanos, recordDuration, density);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>The <code>RenderProxy</code> implementation can be found in <code>frameworks/base/libs/hwui/renderthread/RenderProxy.cpp</code>:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">int</span> <span class="title">RenderProxy::syncAndDrawFrame</span><span class="params">(<span class="type">nsecs_t</span> frameTimeNanos, <span class="type">nsecs_t</span> recordDurationNanos,</span></span></span><br><span class="line"><span class="params"><span class="function">        <span class="type">float</span> density)</span> </span>&#123;</span><br><span class="line">    mDrawFrameTask.<span class="built_in">setDensity</span>(density);</span><br><span class="line">    <span class="keyword">return</span> mDrawFrameTask.<span class="built_in">drawFrame</span>(frameTimeNanos, recordDurationNanos);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>Here, <code>mDrawFrameTask</code> is a <code>DrawFrameTask</code> object, located in <code>frameworks/base/libs/hwui/renderthread/DrawFrameTask.cpp</code>. Its <code>drawFrame</code> code is:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">int</span> <span class="title">DrawFrameTask::drawFrame</span><span class="params">(<span class="type">nsecs_t</span> frameTimeNanos, <span class="type">nsecs_t</span> recordDurationNanos)</span> </span>&#123;</span><br><span class="line">    mSyncResult = kSync_OK;</span><br><span class="line">    mFrameTimeNanos = frameTimeNanos;</span><br><span class="line">    mRecordDurationNanos = recordDurationNanos;</span><br><span class="line">    <span class="built_in">postAndWait</span>();</span><br><span class="line"></span><br><span class="line">    <span class="comment">// Reset the single-frame data</span></span><br><span class="line">    mFrameTimeNanos = <span class="number">0</span>;</span><br><span class="line">    mRecordDurationNanos = <span class="number">0</span>;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> mSyncResult;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>The implementation of <code>postAndWait()</code> is:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">DrawFrameTask::postAndWait</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    AutoMutex _lock(mLock);</span><br><span class="line">    mRenderThread-&gt;<span class="built_in">queue</span>(<span class="keyword">this</span>);</span><br><span class="line">    mSignal.<span class="built_in">wait</span>(mLock);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>This places the <code>DrawFrameTask</code> into the <code>mRenderThread</code>. The <code>queue</code> method in <code>RenderThread</code> is implemented as:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">RenderThread::queue</span><span class="params">(RenderTask* task)</span> </span>&#123;</span><br><span class="line">    AutoMutex _lock(mLock);</span><br><span class="line">    mQueue.<span class="built_in">queue</span>(task);</span><br><span class="line">    <span class="keyword">if</span> (mNextWakeup &amp;&amp; task-&gt;mRunAt &lt; mNextWakeup) &#123;</span><br><span class="line">        mNextWakeup = <span class="number">0</span>;</span><br><span class="line">        mLooper-&gt;<span class="built_in">wake</span>();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p><code>mQueue</code> is a <code>TaskQueue</code> object, and its <code>queue</code> method is:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">TaskQueue::queue</span><span class="params">(RenderTask* task)</span> </span>&#123;</span><br><span class="line">    <span class="comment">// Since the RenderTask itself forms the linked list it is not allowed</span></span><br><span class="line">    <span class="comment">// to have the same task queued twice</span></span><br><span class="line">    <span class="built_in">LOG_ALWAYS_FATAL_IF</span>(task-&gt;mNext || mTail == task, <span class="string">&quot;Task is already in the queue!&quot;</span>);</span><br><span class="line">    <span class="keyword">if</span> (mTail) &#123;</span><br><span class="line">        <span class="comment">// Fast path if we can just append</span></span><br><span class="line">        <span class="keyword">if</span> (mTail-&gt;mRunAt &lt;= task-&gt;mRunAt) &#123;</span><br><span class="line">            mTail-&gt;mNext = task;</span><br><span class="line">            mTail = task;</span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            <span class="comment">// Need to find the proper insertion point</span></span><br><span class="line">            RenderTask* previous = <span class="number">0</span>;</span><br><span class="line">            RenderTask* next = mHead;</span><br><span class="line">            <span class="keyword">while</span> (next &amp;&amp; next-&gt;mRunAt &lt;= task-&gt;mRunAt) &#123;</span><br><span class="line">                previous = next;</span><br><span class="line">                next = next-&gt;mNext;</span><br><span class="line">            &#125;</span><br><span class="line">            <span class="keyword">if</span> (!previous) &#123;</span><br><span class="line">                task-&gt;mNext = mHead;</span><br><span class="line">                mHead = task;</span><br><span class="line">            &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">                previous-&gt;mNext = task;</span><br><span class="line">                <span class="keyword">if</span> (next) &#123;</span><br><span class="line">                    task-&gt;mNext = next;</span><br><span class="line">                &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">                    mTail = task;</span><br><span class="line">                &#125;</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        mTail = mHead = task;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>Going back to the <code>queue</code> method in <code>RenderThread</code>, the <code>wake()</code> function is called:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">Looper::wake</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="type">ssize_t</span> nWrite;</span><br><span class="line">    <span class="keyword">do</span> &#123;</span><br><span class="line">        nWrite = <span class="built_in">write</span>(mWakeWritePipeFd, <span class="string">&quot;W&quot;</span>, <span class="number">1</span>);</span><br><span class="line">    &#125; <span class="keyword">while</span> (nWrite == <span class="number">-1</span> &amp;&amp; errno == EINTR);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (nWrite != <span class="number">1</span>) &#123;</span><br><span class="line">        <span class="keyword">if</span> (errno != EAGAIN) &#123;</span><br><span class="line">            <span class="built_in">ALOGW</span>(<span class="string">&quot;Could not write wake signal, errno=%d&quot;</span>, errno);</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>The <code>wake</code> function is straightforward: it simply writes a single character “W” to the write end of a pipe. This wakes up the read end of the pipe, which was waiting for data.</p>
+<h2 id="HWUI-RenderThread"><a href="#HWUI-RenderThread" class="headerlink" title="HWUI RenderThread"></a>HWUI RenderThread</h2><p>Where do we go next? First, let’s get familiar with <code>RenderThread</code>. It inherits from <code>Thread</code> (defined in <code>utils/Thread.h</code>). Here is the <code>RenderThread</code> constructor:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">RenderThread::<span class="built_in">RenderThread</span>() : <span class="built_in">Thread</span>(<span class="literal">true</span>), <span class="built_in">Singleton</span>&lt;RenderThread&gt;()</span><br><span class="line">        , <span class="built_in">mNextWakeup</span>(LLONG_MAX)</span><br><span class="line">        , <span class="built_in">mDisplayEventReceiver</span>(<span class="number">0</span>)</span><br><span class="line">        , <span class="built_in">mVsyncRequested</span>(<span class="literal">false</span>)</span><br><span class="line">        , <span class="built_in">mFrameCallbackTaskPending</span>(<span class="literal">false</span>)</span><br><span class="line">        , <span class="built_in">mFrameCallbackTask</span>(<span class="number">0</span>)</span><br><span class="line">        , <span class="built_in">mRenderState</span>(<span class="literal">NULL</span>)</span><br><span class="line">        , <span class="built_in">mEglManager</span>(<span class="literal">NULL</span>) &#123;</span><br><span class="line">    mFrameCallbackTask = <span class="keyword">new</span> <span class="built_in">DispatchFrameCallbacks</span>(<span class="keyword">this</span>);</span><br><span class="line">    mLooper = <span class="keyword">new</span> <span class="built_in">Looper</span>(<span class="literal">false</span>);</span><br><span class="line">    <span class="built_in">run</span>(<span class="string">&quot;RenderThread&quot;</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>The <code>run</code> method is documented in <code>Thread</code>:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// Start the thread in threadLoop() which needs to be implemented.</span></span><br><span class="line"><span class="function"><span class="keyword">virtual</span> <span class="type">status_t</span>    <span class="title">run</span><span class="params">(    <span class="type">const</span> <span class="type">char</span>* name = <span class="number">0</span>,</span></span></span><br><span class="line"><span class="params"><span class="function">                            <span class="type">int32_t</span> priority = PRIORITY_DEFAULT,</span></span></span><br><span class="line"><span class="params"><span class="function">                            <span class="type">size_t</span> stack = <span class="number">0</span>)</span></span>;</span><br></pre></td></tr></table></figure>
+
+<p>This triggers the <code>threadLoop</code> function, which is critical:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">bool</span> <span class="title">RenderThread::threadLoop</span><span class="params">()</span> </span>&#123;</span><br><span class="line"><span class="meta">#<span class="keyword">if</span> defined(HAVE_PTHREADS)</span></span><br><span class="line">    <span class="built_in">setpriority</span>(PRIO_PROCESS, <span class="number">0</span>, PRIORITY_DISPLAY);</span><br><span class="line"><span class="meta">#<span class="keyword">endif</span></span></span><br><span class="line">    <span class="built_in">initThreadLocals</span>();</span><br><span class="line"></span><br><span class="line">    <span class="type">int</span> timeoutMillis = <span class="number">-1</span>;</span><br><span class="line">    <span class="keyword">for</span> (;;) &#123;</span><br><span class="line">        <span class="type">int</span> result = mLooper-&gt;<span class="built_in">pollOnce</span>(timeoutMillis);</span><br><span class="line">        <span class="built_in">LOG_ALWAYS_FATAL_IF</span>(result == Looper::POLL_ERROR,</span><br><span class="line">                <span class="string">&quot;RenderThread Looper POLL_ERROR!&quot;</span>);</span><br><span class="line"></span><br><span class="line">        <span class="type">nsecs_t</span> nextWakeup;</span><br><span class="line">        <span class="comment">// Process our queue, if we have anything</span></span><br><span class="line">        <span class="keyword">while</span> (RenderTask* task = <span class="built_in">nextTask</span>(&amp;nextWakeup)) &#123;</span><br><span class="line">            task-&gt;<span class="built_in">run</span>();</span><br><span class="line">            <span class="comment">// task may have deleted itself, do not reference it again</span></span><br><span class="line">        &#125;</span><br><span class="line">        <span class="keyword">if</span> (nextWakeup == LLONG_MAX) &#123;</span><br><span class="line">            timeoutMillis = <span class="number">-1</span>;</span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            <span class="type">nsecs_t</span> timeoutNanos = nextWakeup - <span class="built_in">systemTime</span>(SYSTEM_TIME_MONOTONIC);</span><br><span class="line">            timeoutMillis = <span class="built_in">nanoseconds_to_milliseconds</span>(timeoutNanos);</span><br><span class="line">            <span class="keyword">if</span> (timeoutMillis &lt; <span class="number">0</span>) &#123;</span><br><span class="line">                timeoutMillis = <span class="number">0</span>;</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line">        <span class="keyword">if</span> (mPendingRegistrationFrameCallbacks.<span class="built_in">size</span>() &amp;&amp; !mFrameCallbackTaskPending) &#123;</span><br><span class="line">            <span class="built_in">drainDisplayEventQueue</span>(<span class="literal">true</span>);</span><br><span class="line">            mFrameCallbacks.<span class="built_in">insert</span>(</span><br><span class="line">                    mPendingRegistrationFrameCallbacks.<span class="built_in">begin</span>(), mPendingRegistrationFrameCallbacks.<span class="built_in">end</span>());</span><br><span class="line">            mPendingRegistrationFrameCallbacks.<span class="built_in">clear</span>();</span><br><span class="line">            <span class="built_in">requestVsync</span>();</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> <span class="literal">false</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>The <code>for</code> loop is an infinite loop. The <code>pollOnce</code> function blocks until <code>mLooper-&gt;wake()</code> is called. Once awakened, it proceeds to the <code>while</code> loop:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">while</span> (RenderTask* task = <span class="built_in">nextTask</span>(&amp;nextWakeup)) &#123;</span><br><span class="line">    task-&gt;<span class="built_in">run</span>();</span><br><span class="line">    <span class="comment">// task may have deleted itself, do not reference it again</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>It retrieves the <code>RenderTask</code> from the queue and executes its <code>run</code> method. Based on our earlier tracing, we know this <code>RenderTask</code> is a <code>DrawFrameTask</code>. Its <code>run</code> method is as follows:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">DrawFrameTask::run</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="built_in">ATRACE_NAME</span>(<span class="string">&quot;DrawFrame&quot;</span>);</span><br><span class="line"></span><br><span class="line">    mContext-&gt;<span class="built_in">profiler</span>().<span class="built_in">setDensity</span>(mDensity);</span><br><span class="line">    mContext-&gt;<span class="built_in">profiler</span>().<span class="built_in">startFrame</span>(mRecordDurationNanos);</span><br><span class="line"></span><br><span class="line">    <span class="type">bool</span> canUnblockUiThread;</span><br><span class="line">    <span class="type">bool</span> canDrawThisFrame;</span><br><span class="line">    &#123;</span><br><span class="line">        <span class="function">TreeInfo <span class="title">info</span><span class="params">(TreeInfo::MODE_FULL, mRenderThread-&gt;renderState())</span></span>;</span><br><span class="line">        canUnblockUiThread = <span class="built_in">syncFrameState</span>(info);</span><br><span class="line">        canDrawThisFrame = info.out.canDrawThisFrame;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// Grab a copy of everything we need</span></span><br><span class="line">    CanvasContext* context = mContext;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// From this point on anything in &quot;this&quot; is *UNSAFE TO ACCESS*</span></span><br><span class="line">    <span class="keyword">if</span> (canUnblockUiThread) &#123;</span><br><span class="line">        <span class="built_in">unblockUiThread</span>();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (<span class="built_in">CC_LIKELY</span>(canDrawThisFrame)) &#123;</span><br><span class="line">        context-&gt;<span class="built_in">draw</span>();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (!canUnblockUiThread) &#123;</span><br><span class="line">        <span class="built_in">unblockUiThread</span>();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h2 id="RenderThread-DrawFrame"><a href="#RenderThread-DrawFrame" class="headerlink" title="RenderThread.DrawFrame"></a>RenderThread.DrawFrame</h2><p>The <code>run</code> method of <code>DrawFrameTask</code> coordinates the stages shown in the initial trace diagram. Let’s break down the <code>DrawFrame</code> process step by step, combining the code with the trace visualization.</p>
+<h3 id="1-syncFrameState"><a href="#1-syncFrameState" class="headerlink" title="1. syncFrameState"></a>1. syncFrameState</h3><p>The first major function is <code>syncFrameState</code>. As its name implies, it synchronizes architectural frame information, moving data maintained by the Java layer into the <code>RenderThread</code>.</p>
+<blockquote>
+<p>Both the Main Thread and the Render Thread maintain their own set of application window view information. This separation allows them to operate without interfering with each other, maximizing parallelism. The Render Thread’s view information is synchronized from the Main Thread. Therefore, whenever the Main Thread’s view information changes, it must be synced to the Render Thread.</p>
+</blockquote>
+<p>In the code, you’ll find two <code>RenderNode</code> types: one in hwui and one in <code>View</code>. Synchronization essentially involves copying data from the Java-side <code>RenderNode</code> to the hwui <code>RenderNode</code>. Note that the return value of <code>syncFrameState</code> is assigned to <code>canUnblockUiThread</code>. This boolean determines whether to wake the Main Thread early. If <code>true</code>, the Main Thread can resume work on other tasks immediately, rather than waiting for the entire <code>draw</code> operation to finish in the <code>RenderThread</code>. This is one of the most significant differences between Android 5.0 and Android 4.x.</p>
+<p><img src="/en/images/hwui/renderthread/3.png" alt="syncFrameState"></p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">bool</span> <span class="title">DrawFrameTask::syncFrameState</span><span class="params">(TreeInfo&amp; info)</span> </span>&#123;</span><br><span class="line">    mRenderThread-&gt;<span class="built_in">timeLord</span>().<span class="built_in">vsyncReceived</span>(mFrameTimeNanos);</span><br><span class="line">    mContext-&gt;<span class="built_in">makeCurrent</span>();</span><br><span class="line">    Caches::<span class="built_in">getInstance</span>().textureCache.<span class="built_in">resetMarkInUse</span>();</span><br><span class="line"></span><br><span class="line">    <span class="keyword">for</span> (<span class="type">size_t</span> i = <span class="number">0</span>; i &lt; mLayers.<span class="built_in">size</span>(); i++) &#123;</span><br><span class="line">        mContext-&gt;<span class="built_in">processLayerUpdate</span>(mLayers[i].<span class="built_in">get</span>());</span><br><span class="line">    &#125;</span><br><span class="line">    mLayers.<span class="built_in">clear</span>();</span><br><span class="line">    mContext-&gt;<span class="built_in">prepareTree</span>(info);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (info.out.hasAnimations) &#123;</span><br><span class="line">        <span class="keyword">if</span> (info.out.requiresUiRedraw) &#123;</span><br><span class="line">            mSyncResult |= kSync_UIRedrawRequired;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="comment">// If prepareTextures is false, we ran out of texture cache space</span></span><br><span class="line">    <span class="keyword">return</span> info.prepareTextures;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>First is <code>makeCurrent</code>. Here, <code>mContext</code> is a <code>CanvasContext</code> object:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">CanvasContext::makeCurrent</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="comment">// In the meantime this matches the behavior of GLRenderer, so it is not a regression</span></span><br><span class="line">    mHaveNewSurface |= mEglManager.<span class="built_in">makeCurrent</span>(mEglSurface);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p><code>mEglManager</code> is an <code>EglManager</code> object:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">bool</span> <span class="title">EglManager::makeCurrent</span><span class="params">(EGLSurface surface)</span> </span>&#123;</span><br><span class="line">    <span class="keyword">if</span> (<span class="built_in">isCurrent</span>(surface)) <span class="keyword">return</span> <span class="literal">false</span>;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (surface == EGL_NO_SURFACE) &#123;</span><br><span class="line">        <span class="comment">// If we are setting EGL_NO_SURFACE we don&#x27;t care about any of the potential</span></span><br><span class="line">        <span class="comment">// return errors, which would only happen if mEglDisplay had already been</span></span><br><span class="line">        <span class="comment">// destroyed in which case the current context is already NO_CONTEXT</span></span><br><span class="line">        <span class="built_in">TIME_LOG</span>(<span class="string">&quot;eglMakeCurrent&quot;</span>, <span class="built_in">eglMakeCurrent</span>(mEglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT));</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        EGLBoolean success;</span><br><span class="line">        <span class="built_in">TIME_LOG</span>(<span class="string">&quot;eglMakeCurrent&quot;</span>, success = <span class="built_in">eglMakeCurrent</span>(mEglDisplay, surface, surface, mEglContext));</span><br><span class="line">        <span class="keyword">if</span> (!success) &#123;</span><br><span class="line">            <span class="built_in">LOG_ALWAYS_FATAL</span>(<span class="string">&quot;Failed to make current on surface %p, error=%s&quot;</span>,</span><br><span class="line">                (<span class="type">void</span>*)surface, <span class="built_in">egl_error_str</span>());</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    mCurrentSurface = surface;</span><br><span class="line">    <span class="keyword">return</span> <span class="literal">true</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>This logic checks if <code>mCurrentSurface == surface</code>. If they match, no re-initialization is needed. If it’s a different surface, <code>eglMakeCurrent</code> is called to recreate the context.</p>
+<p>After <code>makeCurrent</code>, <code>mContext-&gt;prepareTree(info)</code> is called:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">CanvasContext::prepareTree</span><span class="params">(TreeInfo&amp; info)</span> </span>&#123;</span><br><span class="line">    mRenderThread.<span class="built_in">removeFrameCallback</span>(<span class="keyword">this</span>);</span><br><span class="line"></span><br><span class="line">    info.damageAccumulator = &amp;mDamageAccumulator;</span><br><span class="line">    info.renderer = mCanvas;</span><br><span class="line">    <span class="keyword">if</span> (mPrefetechedLayers.<span class="built_in">size</span>() &amp;&amp; info.mode == TreeInfo::MODE_FULL) &#123;</span><br><span class="line">        info.canvasContext = <span class="keyword">this</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    mAnimationContext-&gt;<span class="built_in">startFrame</span>(info.mode);</span><br><span class="line">    mRootRenderNode-&gt;<span class="built_in">prepareTree</span>(info);</span><br><span class="line">    mAnimationContext-&gt;<span class="built_in">runRemainingAnimations</span>(info);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (info.canvasContext) &#123;</span><br><span class="line">        <span class="built_in">freePrefetechedLayers</span>();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="type">int</span> runningBehind = <span class="number">0</span>;</span><br><span class="line">    <span class="comment">// <span class="doctag">TODO:</span> This query is moderately expensive, investigate adding some sort</span></span><br><span class="line">    <span class="comment">// of fast-path based off when we last called eglSwapBuffers() as well as</span></span><br><span class="line">    <span class="comment">// last vsync time. Or something.</span></span><br><span class="line">    <span class="built_in">TIME_LOG</span>(<span class="string">&quot;nativeWindowQuery&quot;</span>, mNativeWindow-&gt;<span class="built_in">query</span>(mNativeWindow.<span class="built_in">get</span>(),</span><br><span class="line">            NATIVE_WINDOW_CONSUMER_RUNNING_BEHIND, &amp;runningBehind));</span><br><span class="line">    info.out.canDrawThisFrame = !runningBehind;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (info.out.hasAnimations || !info.out.canDrawThisFrame) &#123;</span><br><span class="line">        <span class="keyword">if</span> (!info.out.requiresUiRedraw) &#123;</span><br><span class="line">            <span class="comment">// If animationsNeedsRedraw is set don&#x27;t bother posting for an RT anim</span></span><br><span class="line">            <span class="comment">// as we will just end up fighting the UI thread.</span></span><br><span class="line">            mRenderThread.<span class="built_in">postFrameCallback</span>(<span class="keyword">this</span>);</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>Within this, <code>mRootRenderNode-&gt;prepareTree(info)</code> is the most important part. Back at the Java layer, the <code>ThreadedRenderer</code> initializes a pointer:</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">long</span> <span class="variable">rootNodePtr</span> <span class="operator">=</span> nCreateRootRenderNode();</span><br></pre></td></tr></table></figure>
+
+<p>This <code>RootRenderNode</code> is the root node of the view tree:</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">mRootNode = RenderNode.adopt(rootNodePtr);</span><br></pre></td></tr></table></figure>
+
+<p>Then a <code>mNativeProxy</code> pointer is created, initializing a <code>RenderProxy</code> object in the Native layer and passing <code>rootNodePtr</code> to it. <code>CanvasContext</code> is also initialized inside <code>RenderProxy</code>, receiving the same <code>rootNodePtr</code>.</p>
+<p>We mentioned that the <code>draw</code> method in <code>ThreadedRenderer</code> first calls <code>updateRootDisplayList</code> (our familiar <code>getDisplayList</code>). This involves two steps: <code>updateViewTreeDisplayList</code> and then adding the root node to the <code>DrawOp</code>:</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">canvas.insertReorderBarrier();</span><br><span class="line">canvas.drawRenderNode(view.getDisplayList());</span><br><span class="line">canvas.insertInorderBarrier();</span><br></pre></td></tr></table></figure>
+
+<p>The final implementation is:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">status_t</span> <span class="title">DisplayListRenderer::drawRenderNode</span><span class="params">(RenderNode* renderNode, Rect&amp; dirty, <span class="type">int32_t</span> flags)</span> </span>&#123;</span><br><span class="line">    <span class="built_in">LOG_ALWAYS_FATAL_IF</span>(!renderNode, <span class="string">&quot;missing rendernode&quot;</span>);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// dirty is an out parameter and should not be recorded,</span></span><br><span class="line">    <span class="comment">// it matters only when replaying the display list</span></span><br><span class="line">    DrawRenderNodeOp* op = <span class="built_in">new</span> (<span class="built_in">alloc</span>()) <span class="built_in">DrawRenderNodeOp</span>(renderNode, flags, *<span class="built_in">currentTransform</span>());</span><br><span class="line">    <span class="built_in">addRenderNodeOp</span>(op);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> DrawGlInfo::kStatusDone;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>Returning to <code>CanvasContext::prepareTree</code>, the <code>mRootRenderNode</code> is the one passed during initialization. Its implementation is in <code>RenderNode.cpp</code>:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">RenderNode::prepareTree</span><span class="params">(TreeInfo&amp; info)</span> </span>&#123;</span><br><span class="line">    <span class="built_in">prepareTreeImpl</span>(info);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">RenderNode::prepareTreeImpl</span><span class="params">(TreeInfo&amp; info)</span> </span>&#123;</span><br><span class="line">    <span class="built_in">TT_START_MARK</span>(<span class="built_in">getName</span>());</span><br><span class="line">    info.damageAccumulator-&gt;<span class="built_in">pushTransform</span>(<span class="keyword">this</span>);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (info.mode == TreeInfo::MODE_FULL) &#123;</span><br><span class="line">        <span class="built_in">pushStagingPropertiesChanges</span>(info); <span class="comment">// Sync properties of the current Render Node</span></span><br><span class="line">    &#125;</span><br><span class="line">    <span class="type">uint32_t</span> animatorDirtyMask = <span class="number">0</span>;</span><br><span class="line">    <span class="keyword">if</span> (<span class="built_in">CC_LIKELY</span>(info.runAnimations)) &#123;</span><br><span class="line">        animatorDirtyMask = mAnimatorManager.<span class="built_in">animate</span>(info); <span class="comment">// Perform animation-related operations</span></span><br><span class="line">    &#125;</span><br><span class="line">    <span class="built_in">prepareLayer</span>(info, animatorDirtyMask);</span><br><span class="line">    <span class="keyword">if</span> (info.mode == TreeInfo::MODE_FULL) &#123;</span><br><span class="line">        <span class="built_in">pushStagingDisplayListChanges</span>(info);  <span class="comment">// Sync Display List of the current Render Node</span></span><br><span class="line">    &#125;</span><br><span class="line">    <span class="comment">// Sync Bitmaps referenced by the Display List, and the Display Lists of child Render Nodes</span></span><br><span class="line">    <span class="built_in">prepareSubTree</span>(info, mDisplayListData); </span><br><span class="line">    <span class="built_in">pushLayerUpdate</span>(info); <span class="comment">// Check if the current Render Node has a Layer set. If so, process it.</span></span><br><span class="line"></span><br><span class="line">    info.damageAccumulator-&gt;<span class="built_in">popTransform</span>();</span><br><span class="line">    <span class="built_in">TT_END_MARK</span>();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>Further details on these operations can be explored in the source code.</p>
+<h3 id="2-draw"><a href="#2-draw" class="headerlink" title="2. draw"></a>2. draw</h3><p><img src="/en/images/hwui/renderthread/4.png" alt="Draw"></p>
+<p>After <code>syncFrameState</code> comes the <code>draw</code> operation:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> (<span class="built_in">CC_LIKELY</span>(canDrawThisFrame)) &#123;</span><br><span class="line">    context-&gt;<span class="built_in">draw</span>();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>The <code>draw</code> function in <code>CanvasContext</code> is a core method located in <code>frameworks/base/libs/hwui/renderthread/CanvasContext.cpp</code> (Wait, the original text says <code>OpenGLRenderer.cpp</code>, but in 5.0 it’s often in <code>CanvasContext.cpp</code> for ThreadedRenderer). Let’s follow the provided snippet:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">CanvasContext::draw</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="built_in">profiler</span>().<span class="built_in">markPlaybackStart</span>();</span><br><span class="line"></span><br><span class="line">    SkRect dirty;</span><br><span class="line">    mDamageAccumulator.<span class="built_in">finish</span>(&amp;dirty);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// ......</span></span><br><span class="line"></span><br><span class="line">    <span class="type">status_t</span> status;</span><br><span class="line">    <span class="keyword">if</span> (!dirty.<span class="built_in">isEmpty</span>()) &#123;</span><br><span class="line">        status = mCanvas-&gt;<span class="built_in">prepareDirty</span>(dirty.fLeft, dirty.fTop,</span><br><span class="line">                dirty.fRight, dirty.fBottom, mOpaque);</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        status = mCanvas-&gt;<span class="built_in">prepare</span>(mOpaque);</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    Rect outBounds;</span><br><span class="line">    status |= mCanvas-&gt;<span class="built_in">drawRenderNode</span>(mRootRenderNode.<span class="built_in">get</span>(), outBounds);</span><br><span class="line"></span><br><span class="line">    <span class="built_in">profiler</span>().<span class="built_in">draw</span>(mCanvas);</span><br><span class="line"></span><br><span class="line">    mCanvas-&gt;<span class="built_in">finish</span>();</span><br><span class="line"></span><br><span class="line">    <span class="built_in">profiler</span>().<span class="built_in">markPlaybackEnd</span>();</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (status &amp; DrawGlInfo::kStatusDrew) &#123;</span><br><span class="line">        <span class="built_in">swapBuffers</span>();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="built_in">profiler</span>().<span class="built_in">finishFrame</span>();</span><br><span class="line"></span><br><span class="line">    <span class="comment">// M: enable to get overdraw count</span></span><br><span class="line">    <span class="keyword">if</span> (<span class="built_in">CC_UNLIKELY</span>(g_HWUI_debug_overdraw)) &#123;</span><br><span class="line">        <span class="comment">// ... debug logic ...</span></span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// ......</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h4 id="2-1-EglManager-beginFrame"><a href="#2-1-EglManager-beginFrame" class="headerlink" title="2.1 EglManager::beginFrame"></a>2.1 EglManager::beginFrame</h4><p>While not shown in the immediate snippet above, <code>beginFrame</code> is typically called during this phase:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">EglManager::beginFrame</span><span class="params">(EGLSurface surface, EGLint* width, EGLint* height)</span> </span>&#123;</span><br><span class="line">    <span class="built_in">makeCurrent</span>(surface);</span><br><span class="line">    <span class="keyword">if</span> (width) &#123;</span><br><span class="line">        <span class="built_in">eglQuerySurface</span>(mEglDisplay, surface, EGL_WIDTH, width);</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">if</span> (height) &#123;</span><br><span class="line">        <span class="built_in">eglQuerySurface</span>(mEglDisplay, surface, EGL_HEIGHT, height);</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="built_in">eglBeginFrame</span>(mEglDisplay, surface);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p><code>makeCurrent</code> manages the context, and <code>eglBeginFrame</code> validates parameter integrity.</p>
+<h4 id="2-2-prepareDirty"><a href="#2-2-prepareDirty" class="headerlink" title="2.2 prepareDirty"></a>2.2 prepareDirty</h4><figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">status_t</span> status;</span><br><span class="line"><span class="keyword">if</span> (!dirty.<span class="built_in">isEmpty</span>()) &#123;</span><br><span class="line">    status = mCanvas-&gt;<span class="built_in">prepareDirty</span>(dirty.fLeft, dirty.fTop,</span><br><span class="line">            dirty.fRight, dirty.fBottom, mOpaque);</span><br><span class="line">&#125; <span class="keyword">else</span> &#123;</span><br><span class="line">    status = mCanvas-&gt;<span class="built_in">prepare</span>(mOpaque);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>Here, <code>mCanvas</code> is an <code>OpenGLRenderer</code> object. Its <code>prepareDirty</code> implementation is:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">status_t</span> <span class="title">OpenGLRenderer::prepareDirty</span><span class="params">(<span class="type">float</span> left, <span class="type">float</span> top,</span></span></span><br><span class="line"><span class="params"><span class="function">        <span class="type">float</span> right, <span class="type">float</span> bottom, <span class="type">bool</span> opaque)</span> </span>&#123;</span><br><span class="line">    <span class="built_in">setupFrameState</span>(left, top, right, bottom, opaque);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// Layer renderers will start the frame immediately</span></span><br><span class="line">    <span class="comment">// The framebuffer renderer will first defer the display list</span></span><br><span class="line">    <span class="comment">// for each layer and wait until the first drawing command</span></span><br><span class="line">    <span class="comment">// to start the frame</span></span><br><span class="line">    <span class="keyword">if</span> (<span class="built_in">currentSnapshot</span>()-&gt;fbo == <span class="number">0</span>) &#123;</span><br><span class="line">        <span class="built_in">syncState</span>();</span><br><span class="line">        <span class="built_in">updateLayers</span>();</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> <span class="built_in">startFrame</span>();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> DrawGlInfo::kStatusDone;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h4 id="2-3-drawRenderNode"><a href="#2-3-drawRenderNode" class="headerlink" title="2.3 drawRenderNode"></a>2.3 drawRenderNode</h4><figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Rect outBounds;</span><br><span class="line">status |= mCanvas-&gt;<span class="built_in">drawRenderNode</span>(mRootRenderNode.<span class="built_in">get</span>(), outBounds);</span><br></pre></td></tr></table></figure>
+
+<p>Next, <code>OpenGLRenderer::drawRenderNode</code> is called to perform the actual rendering:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">status_t</span> <span class="title">OpenGLRenderer::drawRenderNode</span><span class="params">(RenderNode* renderNode, Rect&amp; dirty, <span class="type">int32_t</span> replayFlags)</span> </span>&#123;</span><br><span class="line">    <span class="type">status_t</span> status;</span><br><span class="line">    <span class="comment">// All the usual checks and setup operations (quickReject, setupDraw, etc.)</span></span><br><span class="line">    <span class="comment">// will be performed by the display list itself</span></span><br><span class="line">    <span class="keyword">if</span> (renderNode &amp;&amp; renderNode-&gt;<span class="built_in">isRenderable</span>()) &#123;</span><br><span class="line">        <span class="comment">// compute 3d ordering</span></span><br><span class="line">        renderNode-&gt;<span class="built_in">computeOrdering</span>();</span><br><span class="line">        <span class="keyword">if</span> (<span class="built_in">CC_UNLIKELY</span>(mCaches.drawDeferDisabled)) &#123; <span class="comment">// Check if reordering is disabled</span></span><br><span class="line">            status = <span class="built_in">startFrame</span>();</span><br><span class="line">            <span class="function">ReplayStateStruct <span class="title">replayStruct</span><span class="params">(*<span class="keyword">this</span>, dirty, replayFlags)</span></span>;</span><br><span class="line">            renderNode-&gt;<span class="built_in">replay</span>(replayStruct, <span class="number">0</span>);</span><br><span class="line">            <span class="keyword">return</span> status | replayStruct.mDrawGlStatus;</span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line">        <span class="comment">// Reordering required</span></span><br><span class="line">        <span class="type">bool</span> avoidOverdraw = !mCaches.debugOverdraw &amp;&amp; !mCountOverdraw;</span><br><span class="line">        <span class="function">DeferredDisplayList <span class="title">deferredList</span><span class="params">(*currentClipRect(), avoidOverdraw)</span></span>;</span><br><span class="line">        <span class="function">DeferStateStruct <span class="title">deferStruct</span><span class="params">(deferredList, *<span class="keyword">this</span>, replayFlags)</span></span>;</span><br><span class="line">        renderNode-&gt;<span class="built_in">defer</span>(deferStruct, <span class="number">0</span>); <span class="comment">// Recursive reordering</span></span><br><span class="line"></span><br><span class="line">        <span class="built_in">flushLayers</span>(); <span class="comment">// Draw child Render Nodes with Layers set (to FBOs)</span></span><br><span class="line">        status = <span class="built_in">startFrame</span>(); <span class="comment">// Basic operations like clearing color buffers</span></span><br><span class="line">        status = deferredList.<span class="built_in">flush</span>(*<span class="keyword">this</span>, dirty) | status;</span><br><span class="line">        <span class="keyword">return</span> status;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// Even if there is no drawing command (e.g., invisible),</span></span><br><span class="line">    <span class="comment">// it still needs startFrame to clear buffer and start tiling.</span></span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">startFrame</span>();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>Here, <code>renderNode</code> is the <code>RootRenderNode</code>. Although this is just the beginning of the draw process, the key steps are already highlighted:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">renderNode-&gt;<span class="built_in">defer</span>(deferStruct, <span class="number">0</span>); <span class="comment">// Reordering</span></span><br><span class="line"></span><br><span class="line"><span class="built_in">flushLayers</span>(); <span class="comment">// Draw Layers for child nodes to get corresponding FBOs</span></span><br><span class="line"></span><br><span class="line">status = deferredList.<span class="built_in">flush</span>(*<span class="keyword">this</span>, dirty) | status; <span class="comment">// Execute actual rendering from the deferred list</span></span><br></pre></td></tr></table></figure>
+
+<p>These are the true core of the rendering engine. The implementation details are complex. For a deeper dive, I highly recommend Luo Shengyang’s article: <a target="_blank" rel="noopener" href="http://blog.csdn.net/luoshengyang/article/details/46281499">Analysis of the Display List Rendering Process in Android UI Hardware Acceleration</a>.</p>
+<h4 id="2-4-swapBuffers"><a href="#2-4-swapBuffers" class="headerlink" title="2.4 swapBuffers"></a>2.4 swapBuffers</h4><figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> (status &amp; DrawGlInfo::kStatusDrew) &#123;</span><br><span class="line">    <span class="built_in">swapBuffers</span>();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>This ultimately calls the EGL function <code>eglSwapBuffers(mEglDisplay, surface)</code>.</p>
+<h4 id="2-5-FinishFrame"><a href="#2-5-FinishFrame" class="headerlink" title="2.5 FinishFrame"></a>2.5 FinishFrame</h4><figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">profiler</span>().<span class="built_in">finishFrame</span>();</span><br></pre></td></tr></table></figure>
+<p>Mainly used for recording timing information.</p>
+<h2 id="Summary"><a href="#Summary" class="headerlink" title="Summary"></a>Summary</h2><p>Since I’m a bit lazy and my summarizing skills don’t quite match Luo’s, I’ll quote his summary here. The overall <code>RenderThread</code> flow is as follows:</p>
+<ol>
+<li>Synchronize the Display List maintained by the Main Thread to the one maintained by the Render Thread. This synchronization is performed by the Render Thread while the Main Thread is blocked.</li>
+<li>If the synchronization completes successfully, the Main Thread is awakened. From this point, the Main Thread and Render Thread operate independently on their respective Display Lists. Otherwise, the Main Thread remains blocked until the Render Thread finishes rendering the current frame.</li>
+<li>Before rendering the Root Render Node’s Display List, the Render Thread first renders child nodes with Layers onto their own FBOs. Finally, it renders these FBOs alongside nodes without Layers onto the Frame Buffer (the graphics buffer requested from SurfaceFlinger). This buffer is then submitted to SurfaceFlinger for composition and display.</li>
+</ol>
+<p>Step 2 is crucial because it allows the Main Thread and Render Thread to run in parallel. This means that while the Render Thread is rendering the current frame, the Main Thread can start preparing the Display List for the <em>next</em> frame, leading to a much smoother UI.</p>
+<p>Before Android 5.0, without a <code>RenderThread</code>, everything happened on the Main Thread. This meant that the next frame could only be prepared <em>after</em> the current draw was complete, as shown below:</p>
+<p><img src="/en/images/hwui/renderthread/5.png" alt="Blocking Draw Flow"></p>
+<p>With Android 5.0, there are two scenarios:</p>
+<p><img src="/en/images/hwui/renderthread/6.png" alt="Main Thread and Render Thread Parallelism"></p>
+<p><img src="/en/images/hwui/renderthread/7.png" alt="Render Thread Early Wakeup"></p>
+<p>In the second scenario, the <code>RenderThread</code> hasn’t finished drawing, but since it awakened the Main Thread early, the Main Thread can respond to the next Vsync signal on time and begin preparing the next frame. Even if the first frame took longer than usual (causing a dropped frame), the second frame remains unaffected.</p>
+<hr>
+<h1 id="About-Me-amp-amp-Blog"><a href="#About-Me-amp-amp-Blog" class="headerlink" title="About Me &amp;&amp; Blog"></a>About Me &amp;&amp; Blog</h1><p>Below are my personal details and links. I look forward to connecting and sharing knowledge with fellow developers!</p>
+<ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/about/">About Me</a>: Includes my WeChat and WeChat group links.</li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2019/12/01/BlogMap/">Blog Navigation</a>: A guide to the content on this blog.</li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2018/05/07/Android-performance-optimization-skills-and-tools/">Curated Android Performance Articles</a>: A collection of must-read performance optimization articles. Self-nominations&#x2F;recommendations are welcome!</li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2023/12/30/the-performance/">Android Performance Knowledge Planet</a>: Join our community for more insights.</li>
+</ol>
+<blockquote>
+<p><strong>“If you want to go fast, go alone. If you want to go far, go together.”</strong></p>
+</blockquote>
+<p><img src="/en/images/WechatIMG581.png" alt="WeChat QR Code"></p>
+
+    </article>
+    <!-- license -->
+        <div class="license-wrapper">
+            <p>Author：<a href="https://androidperformance.com/en">Gracker</a>
+            <p>Link：<a href="https://androidperformance.com/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/">https://androidperformance.com/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/</a>
+            <p>Publish date：<a href="https://androidperformance.com/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/">August 12th 2015, 10:38:01 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/">January 11th 2026, 8:56:53 pm</a>
+            <p>License：This work is licensed under <a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a></p>
+        </div>
+    <!-- paginator -->
+    <ul class="post-paginator">
+        <li class="next">
+                <div class="nextSlogan">Next Post</div>
+                <a href="/en/2015/11/18/Android-app-lunch-optimize-delay-load/" title="Android App Startup Optimization - DelayLoad Implementation and Principles (Part 1)">
+                    <div class="nextTitle">Android App Startup Optimization - DelayLoad Implementation and Principles (Part 1)</div>
+                </a>
+        </li>
+        <li class="previous">
+                <div class="prevSlogan">Previous Post</div>
+                <a href="/en/2015/08/05/HashMap/" title="Java 7 HashMap Source Code Analysis">
+                    <div class="prevTitle">Java 7 HashMap Source Code Analysis</div>
+                </a>
+        </li>
+    </ul>
+    <!-- comment -->
+        <div class="post-comment">
+            <!-- 来必力 City 版安装代码 -->
+
+            
+            
+            
+            <!-- utteranc评论 -->
+
+            <!-- partial('_partial/comment/changyan') -->
+            <!--PC版-->
+
+            
+            
+            
+        </div>
+    <!-- timeliness note -->
+    <!-- idea from: https://hexo.fluid-dev.com/posts/hexo-injector/#%E6%96%87%E7%AB%A0%E6%97%B6%E6%95%88%E6%80%A7%E6%8F%90%E7%A4%BA -->
+    <!-- Mathjax -->
+</main>
+
+                <!-- profile -->
+            </div>
+            <footer class="footer footer-unloaded">
+    <!-- social  -->
+        <div class="social">
+                            <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title="email" ></a>
+                <a href="https://github.com/gracker" class="iconfont-archer github" target="_blank" title="github"></a>
+                <span class="iconfont-archer wechat" title="wechat">
+                    <img class="profile-qr" src="/en/assets/Wechat.jpeg" />
+                </span>
+                <span class="iconfont-archer qq" title="qq">
+                    <img class="profile-qr" src="/en/553000664" />
+                </span>
+                <a href="https://weibo.com/gracker520" class="iconfont-archer weibo" target="_blank" title="weibo"></a>
+                <a href="https://www.zhihu.com/people/gracker" class="iconfont-archer zhihu" target="_blank" title="zhihu"></a>
+                <a href="https://twitter.com/Gracker_Gao" class="iconfont-archer twitter" target="_blank" title="twitter"></a>
+                <a href="https://juejin.im/user/557b0590e4b052e031453d76" class="iconfont-archer juejin" target="_blank" title="juejin"></a>
+                <a href="https://www.youtube.com/@grackers" class="iconfont-archer youtube" target="_blank" title="youtube"></a>
+                <a href="/en/atom.xml" class="iconfont-archer rss" target="_blank" title="rss"></a>
+
+        </div>
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- website approve for Chinese user -->
+        <div class="website-approve">
+                <span id="icp-approve" class="icp-approve">
+                    <a href="https://beian.miit.gov.cn/" target="_blank">蜀 ICP 备 20016190 号</a>
+                </span>
+        </div>
+</footer>
+
+        </div>
+        <!-- toc -->
+            <div class="toc-wrapper toc-wrapper-loding" style=    top:50vh;
+>
+                <div class="toc-catalog">
+                    <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+                </div>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Preface"><span class="toc-number">1.</span> <span class="toc-text">Preface</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Starting-from-the-Java-Layer"><span class="toc-number">2.</span> <span class="toc-text">Starting from the Java Layer</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#The-Native-Layer"><span class="toc-number">3.</span> <span class="toc-text">The Native Layer</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#HWUI-RenderThread"><span class="toc-number">4.</span> <span class="toc-text">HWUI RenderThread</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#RenderThread-DrawFrame"><span class="toc-number">5.</span> <span class="toc-text">RenderThread.DrawFrame</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#1-syncFrameState"><span class="toc-number">5.1.</span> <span class="toc-text">1. syncFrameState</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-draw"><span class="toc-number">5.2.</span> <span class="toc-text">2. draw</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#2-1-EglManager-beginFrame"><span class="toc-number">5.2.1.</span> <span class="toc-text">2.1 EglManager::beginFrame</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#2-2-prepareDirty"><span class="toc-number">5.2.2.</span> <span class="toc-text">2.2 prepareDirty</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#2-3-drawRenderNode"><span class="toc-number">5.2.3.</span> <span class="toc-text">2.3 drawRenderNode</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#2-4-swapBuffers"><span class="toc-number">5.2.4.</span> <span class="toc-text">2.4 swapBuffers</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#2-5-FinishFrame"><span class="toc-number">5.2.5.</span> <span class="toc-text">2.5 FinishFrame</span></a></li></ol></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Summary"><span class="toc-number">6.</span> <span class="toc-text">Summary</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#About-Me-amp-amp-Blog"><span class="toc-number"></span> <span class="toc-text">About Me &amp;&amp; Blog</span></a>
+            </div>
+        <!-- sidebar -->
+        <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+        <div class="sidebar-panel-archives">
+    <!-- 在 ejs 中将 archive 按照时间排序 -->
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 128
+        </div>
+        <!-- search  -->
+    </div>
+    <div class="post-archive">
+            <div class="archive-year"> 2025 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/16</span>
+            <a class="archive-post-title" href="/en/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto Series 10: Binder Scheduling and Lock Contention</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/en/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto Series 9: CPU Information Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/en/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto Series 8: Understanding Vsync Mechanism and Performance Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/02</span>
+            <a class="archive-post-title" href="/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto Series 7: MainThread and RenderThread Deep Dive</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/26</span>
+            <a class="archive-post-title" href="/en/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto Series 6: Why 120Hz? Advantages and Challenges</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/26</span>
+            <a class="archive-post-title" href="/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Choreographer-based Rendering Flow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto Series 4: Opening Large Traces via Command Line</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-01-ANR-Design/">Android ANR Series 1: Understanding Android ANR Design Philosophy</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR-NEW/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share-NEW/">Android ANR Series 3: ANR Case Studies</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2024 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto Series 1: Introduction to Perfetto</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/en/2024/03/27/Android-Perfetto-101/">Android Perfetto Series Catalog</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/01</span>
+            <a class="archive-post-title" href="/en/2024/01/01/2023-review/">Reflections on 2023: Health, Career, and the Future</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2023 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/30</span>
+            <a class="archive-post-title" href="/en/2023/12/30/the-performance/">Introduction to The Android Performance Knowledge Planet</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/en/2023/08/21/the-performance-design-of-os/">Performance Considerations in Operating System Design</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/en/2023/05/14/bad-android-app-with-system-permissions-NEW/">Can Apps with System Privileges Really Do Whatever They Want?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/en/2023/05/14/bad-android-app-with-system-permissions/">Can an App Really Do Whatever It Wants With System Permissions?</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2022 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/en/2022/03/27/the-performance-tea-part-01/">The Performance Community Tea Talk - Episode 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-running/">Systrace Thread CPU State Analysis Tips - Running</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-sleep/">Systrace Thread CPU State Analysis Tips - Sleep and Uninterruptible Sleep</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2022/01/21/android-systrace-cpu-state-runnable/">Systrace Thread CPU State Analysis Tips - Runnable</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/en/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/en/2022/01/07/The-Performace-1-Performance-Tools/">Android Performance Optimization: Techniques, Methods, and Tools</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/03</span>
+            <a class="archive-post-title" href="/en/2022/01/03/2021-Review/">2021 Year in Review: Baby, Career, and Growth</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2021 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/27</span>
+            <a class="archive-post-title" href="/en/2021/10/27/if-i-write-a-book-about-performance/">What Should Be in a Book About Android Smoothness?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/26</span>
+            <a class="archive-post-title" href="/en/2021/10/26/build-android-12/">Android System Development Series (1): Downloading, Compiling, and Flashing Android 12</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace Responsiveness in Action 1 - Understanding Responsiveness Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace Responsiveness in Action 2 - Responsiveness Analysis - Using App Startup as an Example</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace Responsiveness in Action 3 - Extended Knowledge on Responsiveness</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace Smoothness in Action 3 - FAQs During Jank Analysis</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2020 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span>
+            <a class="archive-post-title" href="/en/2020/08/20/weibo-imageload-opt-on-huawei/">Why is the Weibo Experience Better on Huawei? A Technical Analysis and Reflection</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/en/2020/05/26/samsung_crash/">An Incident Caused by a 'Leap' Month - Analysis of Samsung System Reboots</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/en/2020/05/07/Android-App-Chain-Wakeup/">Analysis of Android App Chain Wakeups</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/14</span>
+            <a class="archive-post-title" href="/en/2020/02/14/Android-Systrace-SurfaceFlinger/">Android Systrace Basics - SurfaceFlinger Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/03</span>
+            <a class="archive-post-title" href="/en/2020/02/03/android-development-learning-path-2020-edition/">Android Developer Learning Path (2020 Edition)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span>
+            <a class="archive-post-title" href="/en/2020/01/28/2020-read/">My 2020 Reading List</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2019 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/21</span>
+            <a class="archive-post-title" href="/en/2019/12/21/Android-Systrace-CPU/">Android Systrace Basics - CPU Info Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/15</span>
+            <a class="archive-post-title" href="/en/2019/12/15/Android-Systrace-Triple-Buffer/">Android Systrace Basics - Triple Buffer Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/06</span>
+            <a class="archive-post-title" href="/en/2019/12/06/Android-Systrace-Binder/">Android Systrace Basics - Binder and Lock Contention Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/en/2019/12/01/BlogMap/">[Sticky] Blog Article Directory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/en/2019/12/01/Android-Systrace-Vsync/">Android Systrace Basics - Vsync Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/06</span>
+            <a class="archive-post-title" href="/en/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Android Systrace Basics - MainThread and RenderThread Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/04</span>
+            <a class="archive-post-title" href="/en/2019/11/04/Android-Systrace-Input/">Android Systrace Basics - Input Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/24</span>
+            <a class="archive-post-title" href="/en/2019/10/24/Android-Background-Animation/">Analysis of 'Zombie Animations' in the Android Background</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/22</span>
+            <a class="archive-post-title" href="/en/2019/10/22/Android-Choreographer/">Detailed Explanation of Android Rendering Mechanism Based on Choreographer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/en/2019/09/18/Android-Jank-Due-To-Low-Memory-NEW/">Android Jank and Frame Drops Due to Low Memory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/en/2019/09/18/Android-Jank-Due-To-Low-Memory/">Overview of Jank and Frame Drops in Android - Low Memory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/17</span>
+            <a class="archive-post-title" href="/en/2019/09/17/Android-Kill-Background-App-Debug/">Case Study: Debugging the Android Launcher Kill Problem</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Debug/">Overview of Jank and Frame Drops in Android - Methodology</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/en/2019/09/01/Android-Activity-Lunch-Mode-NEW/">A Detailed Guide to Activity Launch Modes in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/en/2019/09/01/Android-Activity-Lunch-Mode/">A Detailed Guide to Activity Launch Modes in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/en/2019/07/27/Android-Hardware-Layer-NEW/">Detailed Explanation of Hardware Layer in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/en/2019/07/27/Android-Hardware-Layer/">A Deep Dive into Hardware Layers in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/23</span>
+            <a class="archive-post-title" href="/en/2019/07/23/Android-Systrace-Pre/">Android Systrace Basics - Prerequisites for Analyzing Systrace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/29</span>
+            <a class="archive-post-title" href="/en/2019/06/29/Android-Systrace-SystemServer/">Android Systrace Basics - SystemServer Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/en/2019/05/28/Android-Systrace-About/">Android Systrace Basics - Introduction to Systrace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/27</span>
+            <a class="archive-post-title" href="/en/2019/05/27/why-60-fps/">Android Systrace Basics - Why 60 FPS?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/en/2019/05/26/Android_Systrace_0/">Android Systrace -- Series Article Index</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/15</span>
+            <a class="archive-post-title" href="/en/2019/05/15/90hz-on-android/">A New Era of Smoothness: Thoughts on 90Hz on Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/en/2019/04/07/Sharp-Tools/">Sharp Tools - Efficient Tool Recommendations</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/en/2019/04/07/liqi/">Liqi - High-Efficiency Tools Recommendation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2019/01/21/android-performance-case-jank-accessbility-NEW/">Case Study: System-Wide Lag Caused by Android Accessibility Services</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2019/01/21/android-performance-case-jank-accessbility/">Case Analysis of System-wide Stutter Caused by Android Accessibility Service</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/12</span>
+            <a class="archive-post-title" href="/en/2019/01/12/recommend-of-2018/">2018 Best Items Recommendations - A Reward for Your Hard Work</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2018 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span>
+            <a class="archive-post-title" href="/en/2018/11/01/android-system-develop-0/">Setting Up the Android System Development Environment</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/25</span>
+            <a class="archive-post-title" href="/en/2018/10/25/How-do-engineers-count-well/">Lu Qi: Besides Good Code, What Makes an Engineer Excellent?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/01</span>
+            <a class="archive-post-title" href="/en/2018/10/01/how-to-stop-sucking-and-be-awesome-instead-8/">The Programmer's Apprenticeship - 08: The Beauty of Reading</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/30</span>
+            <a class="archive-post-title" href="/en/2018/09/30/how-to-stop-sucking-and-be-awesome-instead-7/">The Programmer's Apprenticeship - 07: Games and Programming</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/29</span>
+            <a class="archive-post-title" href="/en/2018/09/29/how-to-stop-sucking-and-be-awesome-instead-6/">The Programmer's Apprenticeship - 06: All About the Internet</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/28</span>
+            <a class="archive-post-title" href="/en/2018/09/28/how-to-stop-sucking-and-be-awesome-instead-5/">The Programmer's Apprenticeship - 05: Know Your Users</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/27</span>
+            <a class="archive-post-title" href="/en/2018/09/27/how-to-stop-sucking-and-be-awesome-instead-4/">The Programmer's Apprenticeship - 04: Reflections on Testing</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/26</span>
+            <a class="archive-post-title" href="/en/2018/09/26/how-to-stop-sucking-and-be-awesome-instead-3/">The Programmer's Apprenticeship - 03: Web Design Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/20</span>
+            <a class="archive-post-title" href="/en/2018/09/20/how-to-stop-sucking-and-be-awesome-instead-2/">The Programmer's Apprenticeship - 02: The Way of Programming</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2018/09/19/how-to-stop-sucking-and-be-awesome-instead-1/">The Programmer's Apprenticeship - 01: The Art of Fighting Back</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2018/09/13/android-memory/">Does the Android System Not Release Memory?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/13</span>
+            <a class="archive-post-title" href="/en/2018/08/13/Some-Thoughts-on-the-Fluency-of-Android/">Some Thoughts on Android System Fluency</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/20</span>
+            <a class="archive-post-title" href="/en/2018/05/20/zhihu-startingwindow/">Zhihu: Save Your StartingWindow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/en/2018/05/07/Android-performance-optimization-skills-and-tools/">[Sticky] Android Performance Optimization: Must-Know Skills and Tools</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/en/2018/01/06/2017-most-recommended/">2017 Best Recommendations - A Reward for Hard-Working Self</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/en/2018/01/06/Most-Recommended-of-2017/">2017 Annual Best Recommendations - Reward Yourself for Hard Work</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2017 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/23</span>
+            <a class="archive-post-title" href="/en/2017/04/23/About-work/">Reflections on Work and Growth (2017)</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2016 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/en/2016/04/05/android-bottom-bar-2/">Android Bottom Navigation Spec Part 2: Style, Behavior, and Dimensions</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/en/2016/04/05/android-bottom-bar-1/">Android Bottom Navigation Spec Part 1: Usage</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2015 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/31</span>
+            <a class="archive-post-title" href="/en/2015/12/31/How-to-calculation-android-app-lunch-time/">How to Calculate App Startup Time in Android?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/29</span>
+            <a class="archive-post-title" href="/en/2015/12/29/Android-App-Launch-Optimization-DelayLoad-Part-2/">Android App Launch Optimization: Implementation and Principles of DelayLoad (Part 2)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2015/11/18/Android-app-lunch-optimize-delay-load/">Android App Startup Optimization - DelayLoad Implementation and Principles (Part 1)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/12</span>
+            <a class="archive-post-title" href="/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/">RenderThread Workflow in Android hwui</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/en/2015/08/05/HashMap/">Java 7 HashMap Source Code Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-onTrimMemory/">Android Code Memory Optimization Suggestions - OnTrimMemory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-AndroidResource/">Android Code Memory Optimization Suggestions - Android Resources</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/29</span>
+            <a class="archive-post-title" href="/en/2015/05/29/Nexus6-with-Android-M/">Enabling Multi-Window Mode on Nexus 6 with Android M</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/06</span>
+            <a class="archive-post-title" href="/en/2015/05/06/Java-Singleton/">A Detailed Guide to Java Singleton Pattern</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-1/">Android Performance Patterns: Render Performance</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-2/">Android Performance Patterns: Understanding Overdraw</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-4/">Android Performance Patterns: Profile GPU Rendering</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-3/">Android Performance Patterns: Understanding VSYNC</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns/">Overview of Android Performance Patterns</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/">Android Memory Optimization (3) - Viewing Original Bitmaps in MAT</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/31</span>
+            <a class="archive-post-title" href="/en/2015/03/31/android-performance-case-study-follow-up/">Android Performance Case Study Follow-up</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-3/">Android Tips Round-Up, Part 3</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-4/">Android Tips Round-Up, Part 4</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/04</span>
+            <a class="archive-post-title" href="/en/2015/02/04/build-rom-for-nexus5/">Compiling Android Lollipop Firmware for Nexus 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/30</span>
+            <a class="archive-post-title" href="/en/2015/01/30/android-performance-tools-systrace-1/">Android Performance Optimization - Introduction to Systrace (Part 1)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/16</span>
+            <a class="archive-post-title" href="/en/2015/01/16/view-android-source-code-with-androidstudio/">Viewing Android Lollipop Source Code with Android Studio</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/13</span>
+            <a class="archive-post-title" href="/en/2015/01/13/android-performance-optimization-overdraw-2/">Android Performance Optimization: Overdraw - Practical Application</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2014 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/en/2014/10/20/android-performance-optimization-overdraw-1-NEW/">Android Performance Optimization: Overdraw - Theory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/en/2014/10/20/android-performance-optimization-overdraw-1/">Android Performance Optimization: Overdraw - Theory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/03</span>
+            <a class="archive-post-title" href="/en/2014/06/03/android-edittext-do-not-auto-get-focus/">Android Tips: How to Prevent EditText from Automatically Getting Focus</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/31</span>
+            <a class="archive-post-title" href="/en/2014/05/31/android-tips-round-up-2/">Android Tips Round-Up, Part 2</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/en/2014/05/28/android-tips-round-up-1/">Android Tips Round-Up, Part 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/02</span>
+            <a class="archive-post-title" href="/en/2014/05/02/android_log_to_file/">Android Tools - Log2File</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/25</span>
+            <a class="archive-post-title" href="/en/2014/03/25/ubuntu-adb-can-not-find-devices/">Ubuntu: Adb Command Cannot Find Device</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/17</span>
+            <a class="archive-post-title" href="/en/2014/03/17/android-build-your-own-android-notification-service-app/">Android Service: Building Your Own Notification Center (1) - Introduction to Accessibility Service</a>
+        </li>
+            </ul>
+    </div>
+</div>
+
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="Yearly Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Yearly Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Year in Review">
+                <span class="iconfont-archer">&#xe606;</span>
+                Year in Review
+            </span>
+            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Knowledge Planet
+            </span>
+            <span class="sidebar-tag-name" data-tags="Essays">
+                <span class="iconfont-archer">&#xe606;</span>
+                Essays
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Thread Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Thread Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Battery Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Battery Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR Analysis">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR Analysis
+            </span>
+            <span class="sidebar-tag-name" data-tags="Page Response">
+                <span class="iconfont-archer">&#xe606;</span>
+                Page Response
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="Locking">
+                <span class="iconfont-archer">&#xe606;</span>
+                Locking
+            </span>
+            <span class="sidebar-tag-name" data-tags="Scheduling">
+                <span class="iconfont-archer">&#xe606;</span>
+                Scheduling
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Kotlin">
+                <span class="iconfont-archer">&#xe606;</span>
+                Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
+            <span class="sidebar-tag-name" data-tags="Programmer">
+                <span class="iconfont-archer">&#xe606;</span>
+                Programmer
+            </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="Annual Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Annual Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="Sharp Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Sharp Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Specs">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Specs
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="Accessibility">
+                <span class="iconfont-archer">&#xe606;</span>
+                Accessibility
+            </span>
+            <span class="sidebar-tag-name" data-tags="Stutter">
+                <span class="iconfont-archer">&#xe606;</span>
+                Stutter
+            </span>
+            <span class="sidebar-tag-name" data-tags="Overdraw">
+                <span class="iconfont-archer">&#xe606;</span>
+                Overdraw
+            </span>
+            <span class="sidebar-tag-name" data-tags="Reading Notes">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading Notes
+            </span>
+            <span class="sidebar-tag-name" data-tags="The Programmer's Apprenticeship">
+                <span class="iconfont-archer">&#xe606;</span>
+                The Programmer's Apprenticeship
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Principles">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Principles
+            </span>
+            <span class="sidebar-tag-name" data-tags="Testing">
+                <span class="iconfont-archer">&#xe606;</span>
+                Testing
+            </span>
+            <span class="sidebar-tag-name" data-tags="Internet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Internet
+            </span>
+            <span class="sidebar-tag-name" data-tags="Game Programming">
+                <span class="iconfont-archer">&#xe606;</span>
+                Game Programming
+            </span>
+            <span class="sidebar-tag-name" data-tags="Reading">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading
+            </span>
+            <span class="sidebar-tag-name" data-tags="User Experience">
+                <span class="iconfont-archer">&#xe606;</span>
+                User Experience
+            </span>
+            <span class="sidebar-tag-name" data-tags="Liqi">
+                <span class="iconfont-archer">&#xe606;</span>
+                Liqi
+            </span>
+            <span class="sidebar-tag-name" data-tags="Community">
+                <span class="iconfont-archer">&#xe606;</span>
+                Community
+            </span>
+            <span class="sidebar-tag-name" data-tags="Smooth">
+                <span class="iconfont-archer">&#xe606;</span>
+                Smooth
+            </span>
+            <span class="sidebar-tag-name" data-tags="Experience Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Experience Optimization
+            </span>
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+        缺失模块，请参考主题文档进行安装配置：https://github.com/fi3ework/hexo-theme-archer#%E5%AE%89%E8%A3%85%E4%B8%BB%E9%A2%98
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="Casual Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Casual Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Essays">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Essays
+        </span>
+        <span class="sidebar-category-name" data-categories="Reading Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Reading Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Android">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
+        </span>
+        <span class="sidebar-category-name" data-categories="Android Performance Optimization">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android Performance Optimization
+        </span>
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+
+    </div>
+</div>
+
+        <!-- site-meta -->
+        <script>
+    var siteMetaRoot = "/en/"
+    if (siteMetaRoot === "undefined") {
+        siteMetaRoot = '/'
+    }
+    var siteMeta = {
+        url: "https://androidperformance.com/en",
+        root: siteMetaRoot,
+        author: "Gracker"
+    }
+</script>
+
+        <!-- import experimental options here -->
+        <!-- Custom Font -->
+
+        <!-- jquery (must load before main.js) -->
+        <script defer src="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+        <!-- main func (depends on jQuery) -->
+        <script src="/en/scripts/main.js" defer></script>
+        <!-- fancybox -->
+        <script>
+            (function(){
+              var urls = [
+                'https://cdn.bootcdn.net/ajax/libs/fancyapps-ui/5.0.36/fancybox/fancybox.umd.js',
+                'https://cdn.jsdelivr.net/npm/@fancyapps/ui@5.0.36/dist/fancybox/fancybox.umd.js'
+              ];
+              function loadNext(){
+                var u = urls.shift();
+                if(!u) return;
+                var s = document.createElement('script');
+                s.src = u; s.defer = true;
+                s.onload = function(){ if (window.Fancybox) { window.Fancybox.bind('[data-fancybox]'); } };
+                s.onerror = loadNext;
+                document.head.appendChild(s);
+              }
+              loadNext();
+            })();
+        </script>
+        <!-- algolia -->
+        <!-- busuanzi (delay load + silent fail) -->
+        <!-- async load share.js on first click -->
+            <script>
+                (function(){
+                  var loaded = false
+                  function loadShare(){
+                    if (loaded) return
+                    loaded = true
+                    var s = document.createElement('script')
+                    s.src = '/en/scripts/share.js'
+                    s.async = true
+                    document.head.appendChild(s)
+                  }
+                  document.addEventListener('click', function(e){
+                    var t = e.target
+                    if (!t) return
+                    if (t.closest && t.closest('.share-wrapper')) { loadShare() }
+                    else if (t.classList && t.classList.contains('share-wrapper')) { loadShare() }
+                  }, true)
+                })();
+            </script>
+        <!-- mermaid -->
+    </body>
+</html>

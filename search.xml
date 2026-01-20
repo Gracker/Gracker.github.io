@@ -8,7 +8,7 @@
       <link href="/2025/11/12/Android-Perfetto-09-CPU/"/>
       <url>/2025/11/12/Android-Perfetto-09-CPU/</url>
       
-        <content type="html"><![CDATA[<p>本文是 Perfetto 系列的第九篇文章，主题是 Perfetto 中的 CPU 信息分析。Perfetto 提供了远超 Systrace 的数据可视化与分析能力，理解 CPU 相关信息是定位性能瓶颈、分析功耗问题的基础。</p><p>本系列的目标，就是通过 Perfetto 这个工具，从一个全新的图形化视角，来审视 Android 系统的整体运行，同时也提供一个学习 Framework 的新途径。或许你已经读过很多源码分析的文章，但总是对繁杂的调用链感到困惑，或者记不住具体的执行流程。那么通过 Perfetto，将这些流程可视化，你可能会对系统有更深入、更直观的理解。</p><span id="more"></span><h2 id="本文目录"><a href="#本文目录" class="headerlink" title="本文目录"></a>本文目录</h2><ul><li><a href="#series">Perfetto 系列文章</a></li><li><a href="#overview">Perfetto 中的 CPU 信息概览</a></li><li><a href="#traceconfig">抓取 CPU 信息所需要的 Trace Config</a></li><li><a href="#biglittle">CPU 核心架构：big.LITTLE</a></li><li><a href="#scheduling">CPU 调度</a></li><li><a href="#frequency">CPU Frequency (CPU 频率) 深度解析</a></li><li><a href="#eas">Linux 内核调度策略：选核与迁移</a></li><li><a href="#practices-sql">实战与 SQL</a></li><li><a href="#summary">总结</a></li></ul><p><a id="series"></a></p><h2 id="Perfetto-系列文章"><a href="#Perfetto-系列文章" class="headerlink" title="Perfetto 系列文章"></a>Perfetto 系列文章</h2><ol><li><a href="https://www.androidperformance.com/2024/03/27/Android-Perfetto-101/#/Perfetto-%E7%B3%BB%E5%88%97%E7%9B%AE%E5%BD%95">Android Perfetto 系列目录</a></li><li><a href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto 系列 1：Perfetto 工具简介</a></li><li><a href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto 系列 2：Perfetto Trace 抓取</a></li><li><a href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto 系列 3：熟悉 Perfetto View</a></li><li><a href="https://www.androidperformance.com/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto 系列 4：使用命令行在本地打开超大 Trace</a></li><li><a href="https://www.androidperformance.com/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto 系列 5：Android App 基于 Choreographer 的渲染流程</a></li><li><a href="https://www.androidperformance.com/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</a></li><li><a href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7 - MainThread 和 RenderThread 解读</a></li><li><a href="https://androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</a></li><li><a href="https://www.androidperformance.com/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 9 - CPU 信息解读</a></li><li><a href="https://www.bilibili.com/video/BV1oi82efE4D/?vd_source=0c6d2191e785de0a36dc21a9da7e664e">视频(B站) - Android Perfetto 基础和案例分享</a></li></ol><p><a id="overview"></a></p><h2 id="Perfetto-中的-CPU-信息概览"><a href="#Perfetto-中的-CPU-信息概览" class="headerlink" title="Perfetto 中的 CPU 信息概览"></a>Perfetto 中的 CPU 信息概览</h2><p>在 Perfetto UI 中，CPU 相关的信息通常分组置于顶部，是性能分析的起点。主要包含以下三个核心轨道：</p><ul><li><strong>CPU Scheduling (CPU 调度)</strong>: 显示在每个时间点，各个 CPU 核心上正在执行的线程。</li><li><strong>CPU Frequency (CPU 频率)</strong>: 显示每个 CPU 核心或核心簇的频率变化情况。</li><li><strong>CPU Idle (CPU 空闲状态)</strong>: 显示每个 CPU 核心进入的低功耗状态 (C-States)。</li></ul><p><img src="/images/Android-Perfetto-09-CPU/image-20251112214415666.png" alt="image-20251112214415666"></p><p>通过分析 CPU 相关的信息，可以解答以下关键性能问题， 或者进行竞品分析：</p><ul><li>应用主线程为何没有执行？是否被其他线程抢占？</li><li>某个任务执行缓慢的原因是什么？是否被调度到了低性能核心？</li><li>在特定场景下，CPU 频率是否受限？</li><li>应用在后台时，CPU 是否有效进入了深度睡眠状态？</li></ul><p><a id="traceconfig"></a></p><h2 id="抓取-CPU-信息所需要的-Trace-Config"><a href="#抓取-CPU-信息所需要的-Trace-Config" class="headerlink" title="抓取 CPU 信息所需要的 Trace Config"></a>抓取 CPU 信息所需要的 Trace Config</h2><p>为了采集到本文分析所需的所有 CPU 数据，你需要一个正确的 <code>TraceConfig</code>。不正确的配置会导致某些轨道（如 CPU 频率）或某些内核事件（如唤醒事件）丢失。以下是 Perfetto 官方文档推荐的、用于通用 CPU 分析的配置。你可以将其添加到你的  Perfetto 的 Config 中，抓 Trace 的时候使用。</p><figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br></pre></td><td class="code"><pre><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_process_exit&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_process_free&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;task/task_newtask&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;task/task_rename&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/suspend_resume&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_blocked_reason&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_wakeup&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_wakeup_new&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_process_exit&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_process_free&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;task/task_newtask&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;task/task_rename&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/cpu_frequency&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/cpu_idle&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/suspend_resume&quot;</span></span><br><span class="line">      symbolize_ksyms: <span class="literal">true</span></span><br><span class="line">      disable_generic_events: <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    process_stats_config &#123;</span><br><span class="line">      scan_all_processes_on_start: <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.sys_stats&quot;</span></span><br><span class="line">    sys_stats_config &#123;</span><br><span class="line">      cpufreq_period_ms: <span class="number">250</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure><p>这个配置启用了包括 <code>sched</code>（调度）、<code>power</code>（频率和空闲）、<code>task</code>（任务生命周期）在内的关键 ftrace 事件，是进行深度 CPU 分析的基础。</p><p><a id="biglittle"></a></p><h2 id="CPU-核心架构：big-LITTLE"><a href="#CPU-核心架构：big-LITTLE" class="headerlink" title="CPU 核心架构：big.LITTLE"></a>CPU 核心架构：big.LITTLE</h2><p>在深入分析前，必须了解现代手机 SoC 的 CPU 核心架构。目前主流的移动处理器普遍采用 <code>big.LITTLE</code> 异构多核架构，或其变种，如 <code>big.Medium.LITTLE</code>（大中小核）。</p><ul><li><strong>小核 (LITTLE cores)</strong>: 针对低功耗设计，频率较低，用于处理后台任务、轻量级计算，以保证续航。</li><li><strong>大核 (big cores)</strong>: 针对高性能设计，频率更高，功耗也更大，用于处理用户交互、游戏、应用启动等重负载场景。</li><li><strong>超大核 (Prime Core)</strong>: 部分旗舰芯片会有一个频率极高的超大核，用于应对最严苛的单核性能挑战。</li></ul><p>在 Perfetto 的 CPU 轨道中，核心通常从 0 开始编号。例如，在一个典型的八核处理器中，<code>CPU 0-3</code> 可能为小核，<code>CPU 4-6</code> 为大核，<code>CPU 7</code> 为超大核。<strong>识别核心类型对于性能分析至关重要</strong>：一个计算密集型任务如果长时间运行在小核上，其耗时必然远超预期。分析时，需要将线程的运行核心与其任务属性进行匹配，以判断调度器（Scheduler）的行为是否符合预期。</p><p>下面是一个典型的 4+4 的 CPU ：</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112214626810.png" alt="image-20251112214626810"></p><p>下面是一个典型的 4+3+1 的 CPU （ MTK 的天玑 9500、9400 ，以及高通骁龙高端系列）：</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112215105550.png" alt="image-20251112215105550"></p><p>下面是一个 5+2 的 CPU （高通 8Elite 1 阉割版，8Elite 1 的标准版 0-5 是小核，6-7 是大核，这里就不放图了）</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112214833158.png" alt="image-20251112214833158"></p><p>一般通过查阅 CPU 的 spec 就可以知道他的大中小核心的架构，或者 cat 对应的 CPU 节点也可以，这里就不再赘述了。</p><p><a id="scheduling"></a></p><h2 id="CPU-调度"><a href="#CPU-调度" class="headerlink" title="CPU 调度"></a>CPU 调度</h2><p><code>CPU Scheduling</code> 轨道是最常用且最重要的部分，它可视化了 Linux 内核调度器的决策过程。其数据来源于内核 ftrace 中的 <code>sched/sched_switch</code> 事件。</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112215332310.png" alt="CPU 调度区域"></p><p>每个 CPU 核心对应一行独立的轨迹。轨道上的不同色块，代表了在该时间片上，特定线程正在该 CPU 核心上运行。</p><ul><li>UI 细节：点击 CPU 切片，详情面板会显示该次调度的 <code>cpu</code>、<code>end_state</code>、<code>priority</code>、所属 <code>process/thread</code> 等；向下展开进程还能看到每个线程的独立轨道，便于跟踪单个线程的状态演化（参考 <a href="https://perfetto.dev/docs/data-sources/cpu-scheduling">官方文档</a>）。</li></ul><p><img src="/images/Android-Perfetto-09-CPU/image-20251112215540626.png" alt="image-20251112215540626"></p><h3 id="线程状态深度解析"><a href="#线程状态深度解析" class="headerlink" title="线程状态深度解析"></a>线程状态深度解析</h3><p>理解 Linux 的线程状态是进行性能优化的前提。在 Perfetto 中，选中一个线程，下方的 <code>Current State</code> 面板会显示其当前状态。这些状态信息来源于 Perfetto 解析得到的 <code>thread_state</code>&#x2F;<code>thread_state_slice</code> 表。</p><h4 id="Running-绿色"><a href="#Running-绿色" class="headerlink" title="Running (绿色)"></a>Running (绿色)</h4><p><strong>状态定义</strong>：绿色代表线程正在 CPU 上执行代码。这是唯一真正在消耗 CPU 资源进行计算的状态。</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112215705017.png" alt="image-20251112215705017"></p><p><strong>分析要点</strong>：</p><ul><li><strong>执行时长</strong>：过长的 <code>Running</code> 状态，尤其是在关键线程上，通常意味着密集的计算任务，例如复杂的算法或循环。这会增加任务耗时，并可能阻塞其他线程的执行。</li><li><strong>运行核心</strong>：结合 CPU 的核心架构（例如 big.LITTLE）进行分析。一个计算密集型任务是否被调度到了预期的性能核心（大核）上，是评估调度策略是否合理的重要依据。</li><li><strong>运行频率</strong>：线程的实际执行速度也受 CPU 频率影响。即使线程运行在大核上，如果因为温控等原因导致降频，其性能表现也会下降。因此需要结合 <code>CPU Frequency</code> 轨道进行综合分析。</li></ul><h4 id="R-Runnable-x2F-可运行"><a href="#R-Runnable-x2F-可运行" class="headerlink" title="R (Runnable &#x2F; 可运行)"></a>R (Runnable &#x2F; 可运行)</h4><p><strong>状态定义</strong>：线程已具备所有运行条件，正在等待调度器分配 CPU 核心。在 Perfetto 的线程私有轨道中，<code>Runnable</code> 状态通常以浅绿色或白色条显示。</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112220248837.png" alt="image-20251112220248837"></p><p><strong>分析要点</strong>：</p><ul><li><strong><code>Runnable</code> 与卡顿</strong>：对于 UI 线程这类对响应时间敏感的线程，长时间处于 <code>Runnable</code> 状态是造成卡顿的直接原因。它意味着线程无法及时获得 CPU 时间来处理任务（如 UI 绘制），从而导致掉帧。</li></ul><p><strong><code>Runnable</code> 的三种类型</strong>:<br>仔细观察会发现，线程进入 <code>Runnable</code> 状态的“前身”各不相同。根据内核的调度时机，我们可以将其分为三种情况：</p><ol><li><p>**从睡眠中唤醒 (Wake-up)**：这是最常见的一种。线程因等待的资源（如锁、I&#x2F;O、Binder 回复）已经就绪，从 <code>S</code> 或 <code>D</code> 状态被唤醒，进入 <code>Runnable</code> 状态，等待被调度器选中执行。</p></li><li><p><strong>用户抢占 (User Preemption)<strong>：指线程的运行时间片用完，或出现更高优先级的任务，导致调度器在</strong>从内核态返回用户态时</strong>（如系统调用、中断返回后）决定换下当前线程。此时，被换下的线程从 <code>Running</code> 变为 <code>Runnable</code>。在底层的 <code>sched_switch</code> trace 中，它的 <code>prev_state</code> 标记为 <code>R</code>。</p></li><li><p><strong>内核抢占 (Kernel Preemption)<strong>：指一个更高优先级的任务或中断，在当前线程</strong>正在执行内核态代码期间</strong>，就“强行”将其打断，使其让出 CPU。这种情况通常意味着一次更紧急的调度。此时，被换下的线程从 <code>Running</code> 变为 <code>Runnable (Preempted)</code>。在底层 trace 中，它的 <code>prev_state</code> 标记为 <code>R+</code>，Perfetto 据此进行了解析和展示。</p></li></ol><p>理解这三种类型的区别，有助于更精细地判断调度延迟的原因。例如，大量的 <code>Runnable (Preempted)</code> 可能暗示着系统中存在频繁的、高优先级的唤醒源，导致关键线程在内核态中被频繁打断，或者当时的 CPU 已经满载了（比较常见的情况），这时候优先级比较低的 Task 就很容易被其他优先级高的 Task 抢占，被迫让出 CPU 。如果你的关键 Task 总是被抢占，那就需要调整优先级。</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112220534899.png" alt="image-20251112220534899"></p><h4 id="S-Sleep-x2F-可中断睡眠"><a href="#S-Sleep-x2F-可中断睡眠" class="headerlink" title="S (Sleep &#x2F; 可中断睡眠)"></a>S (Sleep &#x2F; 可中断睡眠)</h4><p><strong>状态定义</strong>：线程因等待某个事件而进入睡眠，可以被信号中断。这是最常见的睡眠状态，通常情况下是良性的，因为它在等待期间不消耗 CPU 资源。</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112221122170.png" alt="image-20251112221122170"></p><p><strong>分析要点</strong>：</p><ul><li><strong>等待的资源</strong>：如果关键线程（如 UI 线程）睡眠时间过长，同样会引发性能问题。常见的等待原因包括：<ul><li><strong>锁竞争</strong>：等待获取一个 <code>mutex</code> (Java 锁或 native futex)。</li><li><strong>Binder 通信</strong>：等待另一个进程通过 Binder 调用返回结果。</li><li><strong>I&#x2F;O 操作</strong>：等待网络 socket 数据 (<code>epoll_wait</code>)。</li><li><strong>显式休眠</strong>：代码中调用了 <code>Thread.sleep()</code> 或 <code>Object.wait()</code>。</li></ul></li><li><strong>依赖分析</strong>：在 Perfetto 中，选中 CPU 区域被唤醒正在 Running 的 Task，就会有 UI 标识他是被哪个 CPU 上的哪个 Task 唤醒的，这有助于快速定位线程间的依赖关系。结合函数调用栈，可以进一步定位导致睡眠的具体代码。<br><img src="/images/Android-Perfetto-09-CPU/image-20251112221703122.png" alt="image-20251112221703122"></li></ul><h4 id="D-Uninterruptible-Sleep-x2F-不可中断睡眠"><a href="#D-Uninterruptible-Sleep-x2F-不可中断睡眠" class="headerlink" title="D (Uninterruptible Sleep &#x2F; 不可中断睡眠)"></a>D (Uninterruptible Sleep &#x2F; 不可中断睡眠)</h4><p><strong>状态定义</strong>：线程在等待硬件 I&#x2F;O 操作完成，期间不能被任何信号中断。此状态旨在保护进程与设备交互过程中的数据一致性。在 Perfetto 中，该状态通常显示为橙色或红色，是需要重点关注的信号。</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112220738143.png" alt="image-20251112220738143"></p><p><strong>分析要点</strong>：</p><ul><li><strong>严重的性能瓶颈</strong>：长时间的 <code>D</code> 状态意味着线程被完全阻塞，无法响应任何事件。如果发生在 UI 线程，极易导致 ANR。</li><li><strong>常见原因</strong>：<ol><li><strong>磁盘 I&#x2F;O</strong>：频繁或单次大量的文件读写操作。</li><li><strong>内存压力</strong>：系统物理内存不足，导致频繁的页面换入&#x2F;换出 (swap)，其本质是高频的磁盘 I&#x2F;O。</li><li><strong>内核驱动问题</strong>：部分内核驱动的实现缺陷也可能导致线程陷入 <code>D</code> 状态。</li></ol></li><li><strong>排查方向</strong>：在 <code>Current State</code> 面板中，如果 <code>D</code> 状态伴有 <code>(iowait)</code> 标记，则明确表示在等待 I&#x2F;O。需要检查应用的 I&#x2F;O 模式，评估其合理性，例如是否将耗时 I&#x2F;O 操作置于主线程，或是否存在可优化的空间（如减少 I&#x2F;O 次数和数据量）。</li></ul><h3 id="唤醒关系分析"><a href="#唤醒关系分析" class="headerlink" title="唤醒关系分析"></a>唤醒关系分析</h3><p>线程间的依赖关系是性能分析中的一个难点。一个线程长时间 <code>Sleep</code>，关键在于找出它在“等谁”。Perfetto 提供了强大的唤醒关系可视化功能。</p><ul><li><strong>UI 操作</strong>：在 Perfetto 的 CPU 区域中，用鼠标左键单击选中一个处于 <code>Running</code>   状态的线程 Task 。Perfetto 会自动绘制一条从“唤醒者”到“被唤醒者”的依赖箭头，并高亮显示唤醒源所在的线程切片。<br><img src="/images/Android-Perfetto-09-CPU/image-20251112221703122.png" alt="image-20251112221703122"></li><li><strong>底层原理</strong>：该功能依赖于内核的 <code>sched_wakeup</code> ftrace 事件。当线程 T1 释放了某个资源（如解锁、完成 Binder 调用），而线程 T2 正在等待该资源时，内核会将 T2 标记为 <code>Runnable</code> 状态，并记录下 T1 -&gt; T2 的这次唤醒事件。Perfetto 解析这些事件，从而构建出线程间的依赖链。</li></ul><p>通过唤醒分析，可以清晰地追踪复杂的调用链，例如：UI 线程等待一个 Binder 调用 -&gt; Binder 线程执行任务 -&gt; Binder 线程等待另一个锁 -&gt; 持锁线程释放锁并唤醒 Binder 线程 -&gt; Binder 线程完成任务并唤醒 UI 线程。整个过程中的瓶颈点将一目了然。</p><h4 id="调度唤醒与延迟分析"><a href="#调度唤醒与延迟分析" class="headerlink" title="调度唤醒与延迟分析"></a>调度唤醒与延迟分析</h4><p>当线程 A 在 <code>wait()</code> 上挂起时，它进入 <code>S</code>（Sleeping）并从 CPU 运行队列移除。线程 B 调用 <code>notify()</code> 后，内核会把线程 A 转换为 <code>R</code>（Runnable）。此时线程 A“有资格”被放回某个 CPU 的运行队列，但这并不意味着“立刻”运行。</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112222240991.png" alt="image-20251112222240991"></p><p>常见等待原因包括：</p><ul><li>所有 CPU 都在忙：线程 A 需要等待空出队列槽位（或当前运行的线程优先级更高）。</li><li>存在空闲 CPU，但迁移需时：负载均衡器将线程迁移到其他 CPU 需要一定时间窗口。</li></ul><p>除非使用实时优先级，大多数 Linux 调度器配置并非严格的“work‑conserving”。调度器有时会“等待”当前 CPU 线程自然空闲，以避免跨 CPU 迁移带来的额外开销与功耗。这会在 <code>R</code> 状态下形成可观测的“排队延迟”。结合 <code>sched_waking</code>&#x2F;<code>sched_wakeup_new</code> 可更精确地刻画“被唤醒”到“真正入队&#x2F;运行”之间的时间段（参考官方文档：<code>sched_waking / sched_wakeup</code> 的差异与适用场景）。</p><ul><li>在目标线程的 <code>thread_state</code> 轨道中筛选 <code>state=R</code> 的切片，用作“调度延迟”的直接证据。</li><li>同步对照同一 CPU 的其它重负载线程与 IRQ&#x2F;SoftIRQ 轨迹，验证是否存在时间重叠的抢占或高优先级压制。</li><li>若频繁在 <code>R</code> 状态排队并以 <code>end_state=R+</code> 收尾，视为非自愿抢占严重，需评估优先级、放置与负载均衡策略。</li></ul><h4 id="sched-waking-与-sched-wakeup-的差异与非严格-work-conserving"><a href="#sched-waking-与-sched-wakeup-的差异与非严格-work-conserving" class="headerlink" title="sched_waking 与 sched_wakeup 的差异与非严格 work-conserving"></a>sched_waking 与 sched_wakeup 的差异与非严格 work-conserving</h4><ul><li><code>sched_waking</code> 在线程被标记为可运行（R）时就会发出，<code>sched_wakeup</code> 与跨 CPU 唤醒有关，可能记录在源或目的 CPU 上；对大多数延迟分析而言，仅 <code>sched_waking</code> 已足够（参见官方说明）。</li><li>多数 Linux 调度配置在通用优先级下并非严格“work-conserving”。调度器有时会“等待当前 CPU 空闲”以避免跨核迁移带来的额外开销与功耗，这会造成 R 状态下的等待时间（排队延迟）并非异常，而是权衡后的结果（参见 <a href="https://perfetto.dev/docs/data-sources/cpu-scheduling">Perfetto CPU Scheduling</a>）。</li></ul><h3 id="用户态与内核态：sys-切片定位空火焰图"><a href="#用户态与内核态：sys-切片定位空火焰图" class="headerlink" title="用户态与内核态：sys_* 切片定位空火焰图"></a>用户态与内核态：sys_* 切片定位空火焰图</h3><ul><li><code>Running</code> 的绿色切片未必都是应用代码在忙。若线程陷入单个长系统调用如 <code>sys_read</code>、<code>sys_futex</code>，用户态采样火焰图可能几乎为空。</li><li>若 UI 线程某段 <code>sched_slice</code> 很长，而 CPU 火焰图热点很少或几乎没有：<ol><li>打开该线程的 <code>slice</code> 视图，查找是否存在长时间 <code>sys_*</code> 切片；</li><li>若存在：瓶颈多在 I&#x2F;O 或同步原语，优先检查 I&#x2F;O 路径、锁粒度与访问模式；</li><li>若不存在：回到火焰图，继续剖析用户态热点函数。</li></ol></li><li>建议：合并 I&#x2F;O、切换异步、优化锁竞争、降低系统调用频率与单次数据量。</li></ul><h3 id="CPU-时间与墙上时间"><a href="#CPU-时间与墙上时间" class="headerlink" title="CPU 时间与墙上时间"></a>CPU 时间与墙上时间</h3><p><img src="/images/Android-Perfetto-09-CPU/image-20251112223105996.png" alt="image-20251112223105996"></p><ul><li><code>Wall</code> 是切片从开始到结束的真实世界时间，<code>CPU</code> 是真正在 CPU 上运行的时间。</li><li>二者关系：<code>Wall = CPU + Runnable + Sleep</code>。<ol><li>选中目标切片（如 <code>Choreographer#doFrame</code>），比较 <code>Wall</code> 与 <code>CPU</code>；</li><li>若 <code>Wall ≈ CPU</code>，则为计算过重，使用火焰图定位热点；\n  3) 若 <code>Wall &gt;&gt; CPU</code>，则为调度或依赖等待，查看 <code>thread_state</code> 的 <code>R/S/D</code> 分布与唤醒链。</li></ol></li></ul><p><a id="frequency"></a></p><h2 id="CPU-Frequency-CPU-频率-深度解析"><a href="#CPU-Frequency-CPU-频率-深度解析" class="headerlink" title="CPU Frequency (CPU 频率) 深度解析"></a>CPU Frequency (CPU 频率) 深度解析</h2><p>CPU 频率直接影响代码执行速度，同时也与功耗正相关。<code>CPU Frequency</code> 轨道显示了每个核心在特定时间的运行频率（<code>scaling_cur_freq</code>）。但更重要的是理解其背后的限制因素：</p><h3 id="影响-CPU-频率的核心因素"><a href="#影响-CPU-频率的核心因素" class="headerlink" title="影响 CPU 频率的核心因素"></a>影响 CPU 频率的核心因素</h3><ol><li><p><strong>任务负载 (Task Utilization)</strong>: 这是最主要的驱动因素。现代 Android 系统多采用 <code>schedutil</code> 作为 <code>cpufreq</code> 调频策略。它直接关联调度器（Scheduler），根据线程的“繁忙”程度（<code>utilization</code>）来决定频率。一个高负载的线程（<code>util</code> 很高）会促使 <code>schedutil</code> 请求更高的频率，反之亦然。</p></li><li><p><strong>场景策略 (Power HAL)</strong>: Android Framework 通过 Power HAL 向底层传递当前的系统状态，即“场景”。例如，在应用启动、游戏、或触摸屏幕时，Power HAL 会向内核请求更高的性能，这通常通过抬高 CPU 的<strong>地板频 (Floor &#x2F; <code>scaling_min_freq</code>)</strong> 和&#x2F;或 <strong>天花板频 (Ceiling &#x2F; <code>scaling_max_freq</code>)</strong> 来实现，确保 CPU 能快速响应。</p></li><li><p><strong>温度控制 (Thermal Throttling)</strong>: 这是拥有最高优先级的限制。当设备温度（来自电池、CPU、NPU 等传感器）超过预设阈值时，温控系统会强制降低 CPU 的<strong>天花板频</strong>，以减少发热，保护硬件。此时，即使有高负载任务，CPU 频率也无法提升，是导致游戏掉帧、应用卡顿的常见外部原因。</p></li><li><p><strong>功耗限制与省电模式</strong>: 在低电量或开启省电模式时，系统同样会通过降低天花板频、限制最高性能输出来延长续航。</p></li></ol><p>因此，当发现一个重任务在运行时 CPU 频率上不去，不仅要看当前频率，更要关注 <code>scaling_max_freq</code> 是否被限制了。这通常意味着性能瓶颈的根源不在于应用代码本身，而在于系统的温控或功耗策略。</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112223237018.png" alt="image-20251112223237018"></p><p>上图是 CPU 频率区域的标识图，鼠标放上去就可以看到当前的频率，CPU 频率变化很快。图中 CPU 有带颜色和不带颜色的部分，带颜色标识当前 CPU 有 Task 在跑，不带颜色说明当前 CPU 是空的，无 Task。</p><h3 id="频率数据采集与平台差异"><a href="#频率数据采集与平台差异" class="headerlink" title="频率数据采集与平台差异"></a>频率数据采集与平台差异</h3><ul><li>两种获取方式：<ul><li>事件驱动：启用 <code>power/cpu_frequency</code>，在内核 cpufreq 驱动变更频率时记录事件。并非所有平台支持，在多数 ARM SoC 上可靠，在大量现代 Intel 平台上常无数据。</li><li>轮询采样：启用 <code>linux.sys_stats</code> 并设置 <code>cpufreq_period_ms &gt; 0</code>，定期读取 <code>/sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_cur_freq</code>，ARM&#x2F;Intel 均可用。建议与事件驱动组合使用以补齐“初始频率快照”。</li></ul></li><li>Android 设备常以“簇”为单位调频，常见现象是同簇内多个 CPU 同步变频。</li><li>已知问题：<ul><li>事件仅在频率变化时产生，短 Trace 或稳定场景可能出现左侧“空白”。此时需依赖轮询补足。</li><li>某些 UI 版本在未捕获 Idle 状态时不渲染 cpufreq 轨道，但数据仍可通过查询得到。</li><li>参考：<code>CPU frequency and idle states</code> 官方说明。</li></ul></li></ul><h3 id="big-LITTLE：相同频率不等于相同性能或能耗"><a href="#big-LITTLE：相同频率不等于相同性能或能耗" class="headerlink" title="big.LITTLE：相同频率不等于相同性能或能耗"></a>big.LITTLE：相同频率不等于相同性能或能耗</h3><ul><li>在异构 CPU 上，同为 2.0GHz，小核与大核的实际算力和能耗并不等价。频率必须结合核心类型理解。</li><li>核心容量（capacity）与 IPC：大核通常具备更宽的乱序执行、更多执行端口、更大的缓存与更激进的预取&#x2F;分支预测，单位周期完成的指令数（IPC）更高；同频下，大核完成同样工作所需时间更短、能量更少。</li><li>簇级 DVFS（cluster-level DVFS）：移动 SoC 多以“簇”为单位调频。小核簇的高频并不等同于大核簇的中频性能输出；不同簇的电压-频率-能量曲线不同，同一频点无法横向类比“每瓦性能”。</li><li>内存&#x2F;缓存&#x2F;互联瓶颈：热点若受制于内存带宽、LLC 命中率或系统互联（NoC），单纯提升小核频率收益有限；大核更大的缓存&#x2F;更强预取可显著降低同任务的访存等待，体现“同频不同效”。</li><li>能效曲线非线性：小核在接近最高频时常进入能效陡降区（电压抬升使边际能耗激增），而大核在中等频点可能达到“更高单位能效”。同频比较忽略了“电压-频率-能量”的三维权衡。</li></ul><h4 id="P-States-与-governor"><a href="#P-States-与-governor" class="headerlink" title="P-States 与 governor"></a>P-States 与 governor</h4><ul><li>CPU 频率并非连续值，而是离散的性能状态 P-States。常用 governor 为 <code>schedutil</code>，依据任务利用率等信号选择合适 P-State，并联动电压调节。</li><li>UI 上的频率变化，实质是 governor 在不同 P-State 之间切换。高频不必然更快或更省电，需要结合核簇类型与当时的上限&#x2F;下限约束理解。</li><li>核验步骤：<ol><li>在 <code>CPU Frequency</code> 观察频率的上下限是否被拉高&#x2F;压低（如场景策略&#x2F;温控限制 <code>scaling_max_freq</code>）。 </li><li>在 <code>CPU Scheduling</code> 查看关键线程运行在哪类核心（结合设备的核编号划分）。</li><li>若“高频 + 小核 + 仍慢”，优先考虑选核&#x2F;访存瓶颈，而非简单“频率不够”。</li></ol></li><li>建议结合 Power HAL 场景、热管理与任务画像（CPU 密集或访存密集）综合优化，避免单纯以频率作为调参目标。参考官方文档： <a href="https://perfetto.dev/docs/data-sources/cpu-scheduling">Perfetto CPU Scheduling</a>。</li></ul><p><a id="eas"></a></p><h2 id="Linux-内核调度策略：选核与迁移"><a href="#Linux-内核调度策略：选核与迁移" class="headerlink" title="Linux 内核调度策略：选核与迁移"></a>Linux 内核调度策略：选核与迁移</h2><p>理解了线程状态和频率后，我们还需要深入了解 Linux 内核调度器（在 Android 中主要是 EAS - Energy Aware Scheduling）的两个核心行为：如何为任务挑选一个 CPU 核心，以及为何要将任务从一个核心迁移到另一个。</p><h3 id="选核逻辑-Task-Placement"><a href="#选核逻辑-Task-Placement" class="headerlink" title="选核逻辑 (Task Placement)"></a>选核逻辑 (Task Placement)</h3><p>当一个线程从 <code>Sleep</code> 状态被唤醒，或一个新线程被创建时，EAS 调度器需要为它选择一个最合适的 CPU 核心。其核心目标是在满足任务性能需求的前提下，尽可能地降低系统功耗。决策流程大致如下：</p><ol><li><strong>评估任务负载 (Task Utilization)</strong>: 调度器会评估该线程的 <code>util</code>，即它需要多少计算资源。这是一个动态调整的值，反映了线程历史上的繁忙程度。</li><li><strong>寻找“足够”的核心</strong>: 调度器会遍历所有可用的 CPU 核心，比较任务的 <code>util</code> 和每个核心的 <code>capacity</code>（容量&#x2F;最大计算能力）。大核的 <code>capacity</code> 远高于小核。调度器会寻找 <code>capacity</code> &gt; <code>util</code> 的核心，即能“装下”这个任务的核心。</li><li><strong>寻找“最节能”的核心</strong>: 在所有满足 <code>capacity</code> 要求的核心中，调度器会利用预置在内核中的“能量模型”（Energy Model）进行计算。这个模型知道每个核心在每个频率下运行的功耗。调度器会选择一个能让整个系统（包括任务本身和其他正在运行的任务）总功耗最低的 CPU 核心作为最终选择。</li></ol><p><strong>简而言之</strong>：EAS 的目标不是为任务找一个最快的核，而是找一个“刚刚好够用”且“最省电”的核。</p><h3 id="核心迁移逻辑-Task-Migration"><a href="#核心迁移逻辑-Task-Migration" class="headerlink" title="核心迁移逻辑 (Task Migration)"></a>核心迁移逻辑 (Task Migration)</h3><p>将任务从一个 CPU 核心移动到另一个，是调度器进行动态调优的关键手段。主要发生在以下情况：</p><ol><li><p><strong>负载均衡 (Load Balancing)</strong>: 这是最常见的迁移原因。调度器会周期性地检查系统是否处于“负载不均衡”状态。例如，<code>CPU-1</code>（小核）上挤满了高负载任务导致其利用率饱和，而 <code>CPU-7</code>（大核）却很空闲。此时，调度器会判定系统失衡，并将 <code>CPU-1</code> 上的某个高负载任务“拉到”（pull）<code>CPU-7</code> 上运行，以恢复平衡，提升性能。</p></li><li><p><strong>唤醒时迁移 (Wake-up Migration)</strong>: 当一个线程睡醒时，调度器会重新评估它的最佳核心。如果这个线程在睡眠期间 <code>util</code> 发生了变化（例如，一个后台下载线程突然收到了一个大文件下载任务，<code>util</code> 飙升），或者原先运行的核心现在非常繁忙，调度器就可能在唤醒时直接为它选择一个更合适的新核心，而不是让它在原来的地方排队。</p></li></ol><p>理解选核与迁移逻辑，有助于我们判断调度器的行为是否“异常”。例如，一个明显的前台 UI 线程被不合理地长时间限制在小核上，或者在大小核之间过于频繁地“反复横跳”，都可能暗示着系统调度策略或任务优先级设置存在问题。</p><p>当然目前 Android 厂商针对调度器有做非常多的客制化，关键 Task（Critical Task）通常会占用更多的 CPU ，甚至更容易上大核。另外还有很多绑核策略、签核策略，导致大家看到的每个厂商的现象都不一样。这也是各个厂商的核心竞争力（比如 Oppo 的蜂鸟引擎）。</p><p><a id="practices-sql"></a></p><h2 id="实战与-SQL"><a href="#实战与-SQL" class="headerlink" title="实战与 SQL"></a>实战与 SQL</h2><h3 id="使用-SQL-进行量化分析"><a href="#使用-SQL-进行量化分析" class="headerlink" title="使用 SQL 进行量化分析"></a>使用 SQL 进行量化分析</h3><p>Perfetto 内置的 SQL 查询引擎是其强大功能之一，允许开发者对 Trace 数据进行精确的聚合、筛选和分析。以下是一些常用的 CPU 分析查询。</p><h3 id="1-计算各进程的-CPU-总时长"><a href="#1-计算各进程的-CPU-总时长" class="headerlink" title="1. 计算各进程的 CPU 总时长"></a>1. 计算各进程的 CPU 总时长</h3><p>此查询统计每个进程在所有 CPU 上运行的总时长，按降序排列，用于快速定位消耗 CPU 资源最多的进程。</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  process.name,</span><br><span class="line">  <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> total_cpu_time_s</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">JOIN</span> thread <span class="keyword">ON</span> sched.utid <span class="operator">=</span> thread.utid</span><br><span class="line"><span class="keyword">JOIN</span> process <span class="keyword">ON</span> thread.upid <span class="operator">=</span> process.upid</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> process.name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> total_cpu_time_s <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure><h3 id="2-分析单个线程的时间状态分布"><a href="#2-分析单个线程的时间状态分布" class="headerlink" title="2. 分析单个线程的时间状态分布"></a>2. 分析单个线程的时间状态分布</h3><p>此查询基于 <code>thread_state</code> 表，可用于分析特定线程（示例为 <code>surfaceflinger</code>）在各种状态下的时间分布，从而判断其主要瓶颈。</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  <span class="keyword">CASE</span> state</span><br><span class="line">    <span class="keyword">WHEN</span> <span class="string">&#x27;Running&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;Running&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> <span class="string">&#x27;R&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;Runnable&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> <span class="string">&#x27;S&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;Interruptible Sleep&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> <span class="string">&#x27;D&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;Uninterruptible Sleep&#x27;</span></span><br><span class="line">    <span class="keyword">ELSE</span> state</span><br><span class="line">  <span class="keyword">END</span> <span class="keyword">AS</span> human_state,</span><br><span class="line">  <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> total_time_ms</span><br><span class="line"><span class="keyword">FROM</span> thread_state</span><br><span class="line"><span class="keyword">WHERE</span> utid <span class="operator">=</span> (<span class="keyword">SELECT</span> utid <span class="keyword">FROM</span> thread <span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;surfaceflinger&#x27;</span> LIMIT <span class="number">1</span>)</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> human_state</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> total_time_ms <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure><h3 id="3-查找特定时间段内-CPU-消耗最高的线程"><a href="#3-查找特定时间段内-CPU-消耗最高的线程" class="headerlink" title="3. 查找特定时间段内 CPU 消耗最高的线程"></a>3. 查找特定时间段内 CPU 消耗最高的线程</h3><p>此查询用于分析特定场景（如应用启动的 2-5s 时间段）中，消耗 CPU 时间最长的线程。</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  thread.name,</span><br><span class="line">  <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> cpu_time_s</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">JOIN</span> thread <span class="keyword">ON</span> sched.utid <span class="operator">=</span> thread.utid</span><br><span class="line"><span class="comment">-- 时间戳单位为纳秒，可以自己加上 WHERE ts &gt; 2e9 AND ts &lt; 5e9 来取某一段时间</span></span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> thread.name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cpu_time_s <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">20</span>;</span><br></pre></td></tr></table></figure><h3 id="4-查看线程在各-CPU-核心上的运行时间分布"><a href="#4-查看线程在各-CPU-核心上的运行时间分布" class="headerlink" title="4. 查看线程在各 CPU 核心上的运行时间分布"></a>4. 查看线程在各 CPU 核心上的运行时间分布</h3><p>此查询有助于了解一个线程的 CPU 亲和性，以及它是否在预期的大小核上运行。</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  cpu,</span><br><span class="line">  <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> time_on_cpu_ms</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">WHERE</span> utid <span class="operator">=</span> (<span class="keyword">SELECT</span> utid <span class="keyword">FROM</span> thread <span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;system_server&#x27;</span> LIMIT <span class="number">1</span>)</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> cpu</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cpu;</span><br></pre></td></tr></table></figure><h3 id="5-计算各进程的-CPU-利用率"><a href="#5-计算各进程的-CPU-利用率" class="headerlink" title="5. 计算各进程的 CPU 利用率"></a>5. 计算各进程的 CPU 利用率</h3><p>此查询计算了每个进程在整个 Trace 时间范围内的 CPU 利用率。</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  process.name <span class="keyword">AS</span> process_name,</span><br><span class="line">  <span class="number">100</span> <span class="operator">*</span> <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="built_in">CAST</span>(TRACE_END() <span class="operator">-</span> TRACE_START() <span class="keyword">AS</span> <span class="type">REAL</span>) <span class="keyword">AS</span> cpu_utilization_percent</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">JOIN</span> thread <span class="keyword">ON</span> thread.utid <span class="operator">=</span> sched.utid</span><br><span class="line"><span class="keyword">JOIN</span> process <span class="keyword">ON</span> process.upid <span class="operator">=</span> thread.upid</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> process.name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cpu_utilization_percent <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure><p><a id="summary"></a></p><h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>对 Perfetto 中 CPU 信息的熟练分析，是 Android 性能优化的关键技能。通过深度理解 <strong>核心架构</strong>、<strong>线程状态</strong>、<strong>唤醒关系</strong>、<strong>频率限制</strong> 和 <strong>C-State</strong>，并结合强大的 <strong>SQL 查询</strong>进行量化分析，开发者可以精准地定位并解决各类性能与功耗问题。</p><h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p><ol><li><a href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li><li><a href="https://www.androidperformance.com/2019/12/01/BlogMap/">本博客内容导航</a> ：个人博客内容的一个导航。</li><li><a href="https://androidperformance.com/2018/05/07/Android-performance-optimization-skills-and-tools/">个人整理和搜集的优秀博客文章 - Android 性能优化必知必会</a> ：欢迎大家自荐和推荐 （微信私聊即可）</li><li><a href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a> ： 欢迎加入，多谢支持～</li></ol><blockquote><p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p></blockquote><p><img src="/images/WechatIMG581.png" alt="微信扫一扫"></p>]]></content>
+        <content type="html"><![CDATA[<p>本文是 Perfetto 系列的第九篇文章，主题是 Perfetto 中的 CPU 信息分析。Perfetto 提供了远超 Systrace 的数据可视化与分析能力，理解 CPU 相关信息是定位性能瓶颈、分析功耗问题的基础。</p><p>本系列的目标，就是通过 Perfetto 这个工具，从一个全新的图形化视角，来审视 Android 系统的整体运行，同时也提供一个学习 Framework 的新途径。或许你已经读过很多源码分析的文章，但总是对繁杂的调用链感到困惑，或者记不住具体的执行流程。那么通过 Perfetto，将这些流程可视化，你可能会对系统有更深入、更直观的理解。</p><span id="more"></span><h2 id="本文目录"><a href="#本文目录" class="headerlink" title="本文目录"></a>本文目录</h2><ul><li><a href="#series">Perfetto 系列文章</a></li><li><a href="#overview">Perfetto 中的 CPU 信息概览</a></li><li><a href="#traceconfig">抓取 CPU 信息所需要的 Trace Config</a></li><li><a href="#biglittle">CPU 核心架构：big.LITTLE</a></li><li><a href="#scheduling">CPU 调度</a></li><li><a href="#frequency">CPU Frequency (CPU 频率) 深度解析</a></li><li><a href="#eas">Linux 内核调度策略：选核与迁移</a></li><li><a href="#practices-sql">实战与 SQL</a></li><li><a href="#summary">总结</a></li></ul><p><a id="series"></a></p><h2 id="Perfetto-系列文章"><a href="#Perfetto-系列文章" class="headerlink" title="Perfetto 系列文章"></a>Perfetto 系列文章</h2><ol><li><a href="https://www.androidperformance.com/2024/03/27/Android-Perfetto-101/#/Perfetto-%E7%B3%BB%E5%88%97%E7%9B%AE%E5%BD%95">Android Perfetto 系列目录</a></li><li><a href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto 系列 1：Perfetto 工具简介</a></li><li><a href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto 系列 2：Perfetto Trace 抓取</a></li><li><a href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto 系列 3：熟悉 Perfetto View</a></li><li><a href="https://www.androidperformance.com/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto 系列 4：使用命令行在本地打开超大 Trace</a></li><li><a href="https://www.androidperformance.com/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto 系列 5：Android App 基于 Choreographer 的渲染流程</a></li><li><a href="https://www.androidperformance.com/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</a></li><li><a href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7 - MainThread 和 RenderThread 解读</a></li><li><a href="https://androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</a></li><li><a href="https://www.androidperformance.com/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 9 - CPU 信息解读</a></li><li><a href="https://www.bilibili.com/video/BV1oi82efE4D/?vd_source=0c6d2191e785de0a36dc21a9da7e664e">视频(B站) - Android Perfetto 基础和案例分享</a></li></ol><p><a id="overview"></a></p><h2 id="Perfetto-中的-CPU-信息概览"><a href="#Perfetto-中的-CPU-信息概览" class="headerlink" title="Perfetto 中的 CPU 信息概览"></a>Perfetto 中的 CPU 信息概览</h2><p>在 Perfetto UI 中，CPU 相关的信息通常分组置于顶部，是性能分析的起点。主要包含以下三个核心轨道：</p><ul><li><strong>CPU Scheduling (CPU 调度)</strong>: 显示在每个时间点，各个 CPU 核心上正在执行的线程。</li><li><strong>CPU Frequency (CPU 频率)</strong>: 显示每个 CPU 核心或核心簇的频率变化情况。</li><li><strong>CPU Idle (CPU 空闲状态)</strong>: 显示每个 CPU 核心进入的低功耗状态 (C-States)。</li></ul><p><img src="/images/Android-Perfetto-09-CPU/image-20251112214415666.png" alt="image-20251112214415666"></p><p>通过分析 CPU 相关的信息，可以解答以下关键性能问题， 或者进行竞品分析：</p><ul><li>应用主线程为何没有执行？是否被其他线程抢占？</li><li>某个任务执行缓慢的原因是什么？是否被调度到了低性能核心？</li><li>在特定场景下，CPU 频率是否受限？</li><li>应用在后台时，CPU 是否有效进入了深度睡眠状态？</li></ul><p><a id="traceconfig"></a></p><h2 id="抓取-CPU-信息所需要的-Trace-Config"><a href="#抓取-CPU-信息所需要的-Trace-Config" class="headerlink" title="抓取 CPU 信息所需要的 Trace Config"></a>抓取 CPU 信息所需要的 Trace Config</h2><p>为了采集到本文分析所需的所有 CPU 数据，你需要一个正确的 <code>TraceConfig</code>。不正确的配置会导致某些轨道（如 CPU 频率）或某些内核事件（如唤醒事件）丢失。以下是 Perfetto 官方文档推荐的、用于通用 CPU 分析的配置。你可以将其添加到你的  Perfetto 的 Config 中，抓 Trace 的时候使用。</p><figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br></pre></td><td class="code"><pre><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_process_exit&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_process_free&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;task/task_newtask&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;task/task_rename&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/suspend_resume&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_blocked_reason&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_wakeup&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_wakeup_new&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_process_exit&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_process_free&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;task/task_newtask&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;task/task_rename&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/cpu_frequency&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/cpu_idle&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/suspend_resume&quot;</span></span><br><span class="line">      symbolize_ksyms: <span class="literal">true</span></span><br><span class="line">      disable_generic_events: <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    process_stats_config &#123;</span><br><span class="line">      scan_all_processes_on_start: <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.sys_stats&quot;</span></span><br><span class="line">    sys_stats_config &#123;</span><br><span class="line">      cpufreq_period_ms: <span class="number">250</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure><p>这个配置启用了包括 <code>sched</code>（调度）、<code>power</code>（频率和空闲）、<code>task</code>（任务生命周期）在内的关键 ftrace 事件，是进行深度 CPU 分析的基础。</p><p><a id="biglittle"></a></p><h2 id="CPU-核心架构：big-LITTLE"><a href="#CPU-核心架构：big-LITTLE" class="headerlink" title="CPU 核心架构：big.LITTLE"></a>CPU 核心架构：big.LITTLE</h2><p>在深入分析前，必须了解现代手机 SoC 的 CPU 核心架构。目前主流的移动处理器普遍采用 <code>big.LITTLE</code> 异构多核架构，或其变种，如 <code>big.Medium.LITTLE</code>（大中小核）。</p><ul><li><strong>小核 (LITTLE cores)</strong>: 针对低功耗设计，频率较低，用于处理后台任务、轻量级计算，以保证续航。</li><li><strong>大核 (big cores)</strong>: 针对高性能设计，频率更高，功耗也更大，用于处理用户交互、游戏、应用启动等重负载场景。</li><li><strong>超大核 (Prime Core)</strong>: 部分旗舰芯片会有一个频率极高的超大核，用于应对最严苛的单核性能挑战。</li></ul><p>在 Perfetto 的 CPU 轨道中，核心通常从 0 开始编号。例如，在一个典型的八核处理器中，<code>CPU 0-3</code> 可能为小核，<code>CPU 4-6</code> 为大核，<code>CPU 7</code> 为超大核。<strong>识别核心类型对于性能分析至关重要</strong>：一个计算密集型任务如果长时间运行在小核上，其耗时必然远超预期。分析时，需要将线程的运行核心与其任务属性进行匹配，以判断调度器（Scheduler）的行为是否符合预期。</p><p>下面是一个典型的 4+4 的 CPU ：</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112214626810.png" alt="image-20251112214626810"></p><p>下面是一个典型的 4+3+1 的 CPU （ MTK 的天玑 9500、9400 ，以及高通骁龙高端系列）：</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112215105550.png" alt="image-20251112215105550"></p><p>下面是一个 5+2 的 CPU （高通 8Elite 1 阉割版，8Elite 1 的标准版 0-5 是小核，6-7 是大核，这里就不放图了）</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112214833158.png" alt="image-20251112214833158"></p><p>一般通过查阅 CPU 的 spec 就可以知道他的大中小核心的架构，或者 cat 对应的 CPU 节点也可以，这里就不再赘述了。</p><p><a id="scheduling"></a></p><h2 id="CPU-调度"><a href="#CPU-调度" class="headerlink" title="CPU 调度"></a>CPU 调度</h2><p><code>CPU Scheduling</code> 轨道是最常用且最重要的部分，它可视化了 Linux 内核调度器的决策过程。其数据来源于内核 ftrace 中的 <code>sched/sched_switch</code> 事件。</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112215332310.png" alt="CPU 调度区域"></p><p>每个 CPU 核心对应一行独立的轨迹。轨道上的不同色块，代表了在该时间片上，特定线程正在该 CPU 核心上运行。</p><ul><li>UI 细节：点击 CPU 切片，详情面板会显示该次调度的 <code>cpu</code>、<code>end_state</code>、<code>priority</code>、所属 <code>process/thread</code> 等；向下展开进程还能看到每个线程的独立轨道，便于跟踪单个线程的状态演化（参考 <a href="https://perfetto.dev/docs/data-sources/cpu-scheduling">官方文档</a>）。</li></ul><p><img src="/images/Android-Perfetto-09-CPU/image-20251112215540626.png" alt="image-20251112215540626"></p><h3 id="线程状态深度解析"><a href="#线程状态深度解析" class="headerlink" title="线程状态深度解析"></a>线程状态深度解析</h3><p>理解 Linux 的线程状态是进行性能优化的前提。在 Perfetto 中，选中一个线程，下方的 <code>Current State</code> 面板会显示其当前状态。这些状态信息来源于 Perfetto 解析得到的 <code>thread_state</code>&#x2F;<code>thread_state_slice</code> 表。</p><h4 id="Running-绿色"><a href="#Running-绿色" class="headerlink" title="Running (绿色)"></a>Running (绿色)</h4><p><strong>状态定义</strong>：绿色代表线程正在 CPU 上执行代码。这是唯一真正在消耗 CPU 资源进行计算的状态。</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112215705017.png" alt="image-20251112215705017"></p><p><strong>分析要点</strong>：</p><ul><li><strong>执行时长</strong>：过长的 <code>Running</code> 状态，尤其是在关键线程上，通常意味着密集的计算任务，例如复杂的算法或循环。这会增加任务耗时，并可能阻塞其他线程的执行。</li><li><strong>运行核心</strong>：结合 CPU 的核心架构（例如 big.LITTLE）进行分析。一个计算密集型任务是否被调度到了预期的性能核心（大核）上，是评估调度策略是否合理的重要依据。</li><li><strong>运行频率</strong>：线程的实际执行速度也受 CPU 频率影响。即使线程运行在大核上，如果因为温控等原因导致降频，其性能表现也会下降。因此需要结合 <code>CPU Frequency</code> 轨道进行综合分析。</li></ul><h4 id="R-Runnable-x2F-可运行"><a href="#R-Runnable-x2F-可运行" class="headerlink" title="R (Runnable &#x2F; 可运行)"></a>R (Runnable &#x2F; 可运行)</h4><p><strong>状态定义</strong>：线程已具备所有运行条件，正在等待调度器分配 CPU 核心。在 Perfetto 的线程私有轨道中，<code>Runnable</code> 状态通常以浅绿色或白色条显示。</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112220248837.png" alt="image-20251112220248837"></p><p><strong>分析要点</strong>：</p><ul><li><strong><code>Runnable</code> 与卡顿</strong>：对于 UI 线程这类对响应时间敏感的线程，长时间处于 <code>Runnable</code> 状态是造成卡顿的直接原因。它意味着线程无法及时获得 CPU 时间来处理任务（如 UI 绘制），从而导致掉帧。</li></ul><p><strong><code>Runnable</code> 的三种类型</strong>:<br>仔细观察会发现，线程进入 <code>Runnable</code> 状态的“前身”各不相同。根据内核的调度时机，我们可以将其分为三种情况：</p><ol><li><p><strong>从睡眠中唤醒-Wake-up</strong>：这是最常见的一种。线程因等待的资源（如锁、I&#x2F;O、Binder 回复）已经就绪，从 <code>S</code> 或 <code>D</code> 状态被唤醒，进入 <code>Runnable</code> 状态，等待被调度器选中执行。</p></li><li><p><strong>用户抢占-User Preemption</strong>：指线程的运行时间片用完，或出现更高优先级的任务，导致调度器在<strong>从内核态返回用户态时</strong>（如系统调用、中断返回后）决定换下当前线程。此时，被换下的线程从 <code>Running</code> 变为 <code>Runnable</code>。在底层的 <code>sched_switch</code> trace 中，它的 <code>prev_state</code> 标记为 <code>R</code>。</p></li><li><p><strong>内核抢占-Kernel Preemption</strong>：指一个更高优先级的任务或中断，在当前线程<strong>正在执行内核态代码期间</strong>，就“强行”将其打断，使其让出 CPU。这种情况通常意味着一次更紧急的调度。此时，被换下的线程从 <code>Running</code> 变为 <code>Runnable (Preempted)</code>。在底层 trace 中，它的 <code>prev_state</code> 标记为 <code>R+</code>，Perfetto 据此进行了解析和展示。</p></li></ol><p>理解这三种类型的区别，有助于更精细地判断调度延迟的原因。例如，大量的 <code>Runnable (Preempted)</code> 可能暗示着系统中存在频繁的、高优先级的唤醒源，导致关键线程在内核态中被频繁打断，或者当时的 CPU 已经满载了（比较常见的情况），这时候优先级比较低的 Task 就很容易被其他优先级高的 Task 抢占，被迫让出 CPU 。如果你的关键 Task 总是被抢占，那就需要调整优先级。</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112220534899.png" alt="image-20251112220534899"></p><h4 id="S-Sleep-x2F-可中断睡眠"><a href="#S-Sleep-x2F-可中断睡眠" class="headerlink" title="S (Sleep &#x2F; 可中断睡眠)"></a>S (Sleep &#x2F; 可中断睡眠)</h4><p><strong>状态定义</strong>：线程因等待某个事件而进入睡眠，可以被信号中断。这是最常见的睡眠状态，通常情况下是良性的，因为它在等待期间不消耗 CPU 资源。</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112221122170.png" alt="image-20251112221122170"></p><p><strong>分析要点</strong>：</p><ul><li><strong>等待的资源</strong>：如果关键线程（如 UI 线程）睡眠时间过长，同样会引发性能问题。常见的等待原因包括：<ul><li><strong>锁竞争</strong>：等待获取一个 <code>mutex</code> (Java 锁或 native futex)。</li><li><strong>Binder 通信</strong>：等待另一个进程通过 Binder 调用返回结果。</li><li><strong>I&#x2F;O 操作</strong>：等待网络 socket 数据 (<code>epoll_wait</code>)。</li><li><strong>显式休眠</strong>：代码中调用了 <code>Thread.sleep()</code> 或 <code>Object.wait()</code>。</li></ul></li><li><strong>依赖分析</strong>：在 Perfetto 中，选中 CPU 区域被唤醒正在 Running 的 Task，就会有 UI 标识他是被哪个 CPU 上的哪个 Task 唤醒的，这有助于快速定位线程间的依赖关系。结合函数调用栈，可以进一步定位导致睡眠的具体代码。<br><img src="/images/Android-Perfetto-09-CPU/image-20251112221703122.png" alt="image-20251112221703122"></li></ul><h4 id="D-Uninterruptible-Sleep-x2F-不可中断睡眠"><a href="#D-Uninterruptible-Sleep-x2F-不可中断睡眠" class="headerlink" title="D (Uninterruptible Sleep &#x2F; 不可中断睡眠)"></a>D (Uninterruptible Sleep &#x2F; 不可中断睡眠)</h4><p><strong>状态定义</strong>：线程在等待硬件 I&#x2F;O 操作完成，期间不能被任何信号中断。此状态旨在保护进程与设备交互过程中的数据一致性。在 Perfetto 中，该状态通常显示为橙色或红色，是需要重点关注的信号。</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112220738143.png" alt="image-20251112220738143"></p><p><strong>分析要点</strong>：</p><ul><li><strong>严重的性能瓶颈</strong>：长时间的 <code>D</code> 状态意味着线程被完全阻塞，无法响应任何事件。如果发生在 UI 线程，极易导致 ANR。</li><li><strong>常见原因</strong>：<ol><li><strong>磁盘 I&#x2F;O</strong>：频繁或单次大量的文件读写操作。</li><li><strong>内存压力</strong>：系统物理内存不足，导致频繁的页面换入&#x2F;换出 (swap)，其本质是高频的磁盘 I&#x2F;O。</li><li><strong>内核驱动问题</strong>：部分内核驱动的实现缺陷也可能导致线程陷入 <code>D</code> 状态。</li></ol></li><li><strong>排查方向</strong>：在 <code>Current State</code> 面板中，如果 <code>D</code> 状态伴有 <code>(iowait)</code> 标记，则明确表示在等待 I&#x2F;O。需要检查应用的 I&#x2F;O 模式，评估其合理性，例如是否将耗时 I&#x2F;O 操作置于主线程，或是否存在可优化的空间（如减少 I&#x2F;O 次数和数据量）。</li></ul><h3 id="唤醒关系分析"><a href="#唤醒关系分析" class="headerlink" title="唤醒关系分析"></a>唤醒关系分析</h3><p>线程间的依赖关系是性能分析中的一个难点。一个线程长时间 <code>Sleep</code>，关键在于找出它在“等谁”。Perfetto 提供了强大的唤醒关系可视化功能。</p><ul><li><strong>UI 操作</strong>：在 Perfetto 的 CPU 区域中，用鼠标左键单击选中一个处于 <code>Running</code>   状态的线程 Task 。Perfetto 会自动绘制一条从“唤醒者”到“被唤醒者”的依赖箭头，并高亮显示唤醒源所在的线程切片。<br><img src="/images/Android-Perfetto-09-CPU/image-20251112221703122.png" alt="image-20251112221703122"></li><li><strong>底层原理</strong>：该功能依赖于内核的 <code>sched_wakeup</code> ftrace 事件。当线程 T1 释放了某个资源（如解锁、完成 Binder 调用），而线程 T2 正在等待该资源时，内核会将 T2 标记为 <code>Runnable</code> 状态，并记录下 T1 -&gt; T2 的这次唤醒事件。Perfetto 解析这些事件，从而构建出线程间的依赖链。</li></ul><p>通过唤醒分析，可以清晰地追踪复杂的调用链，例如：UI 线程等待一个 Binder 调用 -&gt; Binder 线程执行任务 -&gt; Binder 线程等待另一个锁 -&gt; 持锁线程释放锁并唤醒 Binder 线程 -&gt; Binder 线程完成任务并唤醒 UI 线程。整个过程中的瓶颈点将一目了然。</p><h4 id="调度唤醒与延迟分析"><a href="#调度唤醒与延迟分析" class="headerlink" title="调度唤醒与延迟分析"></a>调度唤醒与延迟分析</h4><p>当线程 A 在 <code>wait()</code> 上挂起时，它进入 <code>S</code>（Sleeping）并从 CPU 运行队列移除。线程 B 调用 <code>notify()</code> 后，内核会把线程 A 转换为 <code>R</code>（Runnable）。此时线程 A“有资格”被放回某个 CPU 的运行队列，但这并不意味着“立刻”运行。</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112222240991.png" alt="image-20251112222240991"></p><p>常见等待原因包括：</p><ul><li>所有 CPU 都在忙：线程 A 需要等待空出队列槽位（或当前运行的线程优先级更高）。</li><li>存在空闲 CPU，但迁移需时：负载均衡器将线程迁移到其他 CPU 需要一定时间窗口。</li></ul><p>除非使用实时优先级，大多数 Linux 调度器配置并非严格的“work‑conserving”。调度器有时会“等待”当前 CPU 线程自然空闲，以避免跨 CPU 迁移带来的额外开销与功耗。这会在 <code>R</code> 状态下形成可观测的“排队延迟”。结合 <code>sched_waking</code>&#x2F;<code>sched_wakeup_new</code> 可更精确地刻画“被唤醒”到“真正入队&#x2F;运行”之间的时间段（参考官方文档：<code>sched_waking / sched_wakeup</code> 的差异与适用场景）。</p><ul><li>在目标线程的 <code>thread_state</code> 轨道中筛选 <code>state=R</code> 的切片，用作“调度延迟”的直接证据。</li><li>同步对照同一 CPU 的其它重负载线程与 IRQ&#x2F;SoftIRQ 轨迹，验证是否存在时间重叠的抢占或高优先级压制。</li><li>若频繁在 <code>R</code> 状态排队并以 <code>end_state=R+</code> 收尾，视为非自愿抢占严重，需评估优先级、放置与负载均衡策略。</li></ul><h4 id="sched-waking-与-sched-wakeup-的差异与非严格-work-conserving"><a href="#sched-waking-与-sched-wakeup-的差异与非严格-work-conserving" class="headerlink" title="sched_waking 与 sched_wakeup 的差异与非严格 work-conserving"></a>sched_waking 与 sched_wakeup 的差异与非严格 work-conserving</h4><ul><li><code>sched_waking</code> 在线程被标记为可运行（R）时就会发出，<code>sched_wakeup</code> 与跨 CPU 唤醒有关，可能记录在源或目的 CPU 上；对大多数延迟分析而言，仅 <code>sched_waking</code> 已足够（参见官方说明）。</li><li>多数 Linux 调度配置在通用优先级下并非严格“work-conserving”。调度器有时会“等待当前 CPU 空闲”以避免跨核迁移带来的额外开销与功耗，这会造成 R 状态下的等待时间（排队延迟）并非异常，而是权衡后的结果（参见 <a href="https://perfetto.dev/docs/data-sources/cpu-scheduling">Perfetto CPU Scheduling</a>）。</li></ul><h3 id="用户态与内核态：sys-切片定位空火焰图"><a href="#用户态与内核态：sys-切片定位空火焰图" class="headerlink" title="用户态与内核态：sys_* 切片定位空火焰图"></a>用户态与内核态：sys_* 切片定位空火焰图</h3><ul><li><code>Running</code> 的绿色切片未必都是应用代码在忙。若线程陷入单个长系统调用如 <code>sys_read</code>、<code>sys_futex</code>，用户态采样火焰图可能几乎为空。</li><li>若 UI 线程某段 <code>sched_slice</code> 很长，而 CPU 火焰图热点很少或几乎没有：<ol><li>打开该线程的 <code>slice</code> 视图，查找是否存在长时间 <code>sys_*</code> 切片；</li><li>若存在：瓶颈多在 I&#x2F;O 或同步原语，优先检查 I&#x2F;O 路径、锁粒度与访问模式；</li><li>若不存在：回到火焰图，继续剖析用户态热点函数。</li></ol></li><li>建议：合并 I&#x2F;O、切换异步、优化锁竞争、降低系统调用频率与单次数据量。</li></ul><h3 id="CPU-时间与墙上时间"><a href="#CPU-时间与墙上时间" class="headerlink" title="CPU 时间与墙上时间"></a>CPU 时间与墙上时间</h3><p><img src="/images/Android-Perfetto-09-CPU/image-20251112223105996.png" alt="image-20251112223105996"></p><ul><li><code>Wall</code> 是切片从开始到结束的真实世界时间，<code>CPU</code> 是真正在 CPU 上运行的时间。</li><li>二者关系：<code>Wall = CPU + Runnable + Sleep</code>。<ol><li>选中目标切片（如 <code>Choreographer#doFrame</code>），比较 <code>Wall</code> 与 <code>CPU</code>；</li><li>若 <code>Wall ≈ CPU</code>，则为计算过重，使用火焰图定位热点；\n  3) 若 <code>Wall &gt;&gt; CPU</code>，则为调度或依赖等待，查看 <code>thread_state</code> 的 <code>R/S/D</code> 分布与唤醒链。</li></ol></li></ul><p><a id="frequency"></a></p><h2 id="CPU-Frequency-CPU-频率-深度解析"><a href="#CPU-Frequency-CPU-频率-深度解析" class="headerlink" title="CPU Frequency (CPU 频率) 深度解析"></a>CPU Frequency (CPU 频率) 深度解析</h2><p>CPU 频率直接影响代码执行速度，同时也与功耗正相关。<code>CPU Frequency</code> 轨道显示了每个核心在特定时间的运行频率（<code>scaling_cur_freq</code>）。但更重要的是理解其背后的限制因素：</p><h3 id="影响-CPU-频率的核心因素"><a href="#影响-CPU-频率的核心因素" class="headerlink" title="影响 CPU 频率的核心因素"></a>影响 CPU 频率的核心因素</h3><ol><li><p><strong>任务负载 (Task Utilization)</strong>: 这是最主要的驱动因素。现代 Android 系统多采用 <code>schedutil</code> 作为 <code>cpufreq</code> 调频策略。它直接关联调度器（Scheduler），根据线程的“繁忙”程度（<code>utilization</code>）来决定频率。一个高负载的线程（<code>util</code> 很高）会促使 <code>schedutil</code> 请求更高的频率，反之亦然。</p></li><li><p><strong>场景策略 (Power HAL)</strong>: Android Framework 通过 Power HAL 向底层传递当前的系统状态，即“场景”。例如，在应用启动、游戏、或触摸屏幕时，Power HAL 会向内核请求更高的性能，这通常通过抬高 CPU 的<strong>地板频 (Floor &#x2F; <code>scaling_min_freq</code>)</strong> 和&#x2F;或 <strong>天花板频 (Ceiling &#x2F; <code>scaling_max_freq</code>)</strong> 来实现，确保 CPU 能快速响应。</p></li><li><p><strong>温度控制 (Thermal Throttling)</strong>: 这是拥有最高优先级的限制。当设备温度（来自电池、CPU、NPU 等传感器）超过预设阈值时，温控系统会强制降低 CPU 的<strong>天花板频</strong>，以减少发热，保护硬件。此时，即使有高负载任务，CPU 频率也无法提升，是导致游戏掉帧、应用卡顿的常见外部原因。</p></li><li><p><strong>功耗限制与省电模式</strong>: 在低电量或开启省电模式时，系统同样会通过降低天花板频、限制最高性能输出来延长续航。</p></li></ol><p>因此，当发现一个重任务在运行时 CPU 频率上不去，不仅要看当前频率，更要关注 <code>scaling_max_freq</code> 是否被限制了。这通常意味着性能瓶颈的根源不在于应用代码本身，而在于系统的温控或功耗策略。</p><p><img src="/images/Android-Perfetto-09-CPU/image-20251112223237018.png" alt="image-20251112223237018"></p><p>上图是 CPU 频率区域的标识图，鼠标放上去就可以看到当前的频率，CPU 频率变化很快。图中 CPU 有带颜色和不带颜色的部分，带颜色标识当前 CPU 有 Task 在跑，不带颜色说明当前 CPU 是空的，无 Task。</p><h3 id="频率数据采集与平台差异"><a href="#频率数据采集与平台差异" class="headerlink" title="频率数据采集与平台差异"></a>频率数据采集与平台差异</h3><ul><li>两种获取方式：<ul><li>事件驱动：启用 <code>power/cpu_frequency</code>，在内核 cpufreq 驱动变更频率时记录事件。并非所有平台支持，在多数 ARM SoC 上可靠，在大量现代 Intel 平台上常无数据。</li><li>轮询采样：启用 <code>linux.sys_stats</code> 并设置 <code>cpufreq_period_ms &gt; 0</code>，定期读取 <code>/sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_cur_freq</code>，ARM&#x2F;Intel 均可用。建议与事件驱动组合使用以补齐“初始频率快照”。</li></ul></li><li>Android 设备常以“簇”为单位调频，常见现象是同簇内多个 CPU 同步变频。</li><li>已知问题：<ul><li>事件仅在频率变化时产生，短 Trace 或稳定场景可能出现左侧“空白”。此时需依赖轮询补足。</li><li>某些 UI 版本在未捕获 Idle 状态时不渲染 cpufreq 轨道，但数据仍可通过查询得到。</li><li>参考：<code>CPU frequency and idle states</code> 官方说明。</li></ul></li></ul><h3 id="big-LITTLE：相同频率不等于相同性能或能耗"><a href="#big-LITTLE：相同频率不等于相同性能或能耗" class="headerlink" title="big.LITTLE：相同频率不等于相同性能或能耗"></a>big.LITTLE：相同频率不等于相同性能或能耗</h3><ul><li>在异构 CPU 上，同为 2.0GHz，小核与大核的实际算力和能耗并不等价。频率必须结合核心类型理解。</li><li>核心容量（capacity）与 IPC：大核通常具备更宽的乱序执行、更多执行端口、更大的缓存与更激进的预取&#x2F;分支预测，单位周期完成的指令数（IPC）更高；同频下，大核完成同样工作所需时间更短、能量更少。</li><li>簇级 DVFS（cluster-level DVFS）：移动 SoC 多以“簇”为单位调频。小核簇的高频并不等同于大核簇的中频性能输出；不同簇的电压-频率-能量曲线不同，同一频点无法横向类比“每瓦性能”。</li><li>内存&#x2F;缓存&#x2F;互联瓶颈：热点若受制于内存带宽、LLC 命中率或系统互联（NoC），单纯提升小核频率收益有限；大核更大的缓存&#x2F;更强预取可显著降低同任务的访存等待，体现“同频不同效”。</li><li>能效曲线非线性：小核在接近最高频时常进入能效陡降区（电压抬升使边际能耗激增），而大核在中等频点可能达到“更高单位能效”。同频比较忽略了“电压-频率-能量”的三维权衡。</li></ul><h4 id="P-States-与-governor"><a href="#P-States-与-governor" class="headerlink" title="P-States 与 governor"></a>P-States 与 governor</h4><ul><li>CPU 频率并非连续值，而是离散的性能状态 P-States。常用 governor 为 <code>schedutil</code>，依据任务利用率等信号选择合适 P-State，并联动电压调节。</li><li>UI 上的频率变化，实质是 governor 在不同 P-State 之间切换。高频不必然更快或更省电，需要结合核簇类型与当时的上限&#x2F;下限约束理解。</li><li>核验步骤：<ol><li>在 <code>CPU Frequency</code> 观察频率的上下限是否被拉高&#x2F;压低（如场景策略&#x2F;温控限制 <code>scaling_max_freq</code>）。 </li><li>在 <code>CPU Scheduling</code> 查看关键线程运行在哪类核心（结合设备的核编号划分）。</li><li>若“高频 + 小核 + 仍慢”，优先考虑选核&#x2F;访存瓶颈，而非简单“频率不够”。</li></ol></li><li>建议结合 Power HAL 场景、热管理与任务画像（CPU 密集或访存密集）综合优化，避免单纯以频率作为调参目标。参考官方文档： <a href="https://perfetto.dev/docs/data-sources/cpu-scheduling">Perfetto CPU Scheduling</a>。</li></ul><p><a id="eas"></a></p><h2 id="Linux-内核调度策略：选核与迁移"><a href="#Linux-内核调度策略：选核与迁移" class="headerlink" title="Linux 内核调度策略：选核与迁移"></a>Linux 内核调度策略：选核与迁移</h2><p>理解了线程状态和频率后，我们还需要深入了解 Linux 内核调度器（在 Android 中主要是 EAS - Energy Aware Scheduling）的两个核心行为：如何为任务挑选一个 CPU 核心，以及为何要将任务从一个核心迁移到另一个。</p><h3 id="选核逻辑-Task-Placement"><a href="#选核逻辑-Task-Placement" class="headerlink" title="选核逻辑 (Task Placement)"></a>选核逻辑 (Task Placement)</h3><p>当一个线程从 <code>Sleep</code> 状态被唤醒，或一个新线程被创建时，EAS 调度器需要为它选择一个最合适的 CPU 核心。其核心目标是在满足任务性能需求的前提下，尽可能地降低系统功耗。决策流程大致如下：</p><ol><li><strong>评估任务负载 (Task Utilization)</strong>: 调度器会评估该线程的 <code>util</code>，即它需要多少计算资源。这是一个动态调整的值，反映了线程历史上的繁忙程度。</li><li><strong>寻找“足够”的核心</strong>: 调度器会遍历所有可用的 CPU 核心，比较任务的 <code>util</code> 和每个核心的 <code>capacity</code>（容量&#x2F;最大计算能力）。大核的 <code>capacity</code> 远高于小核。调度器会寻找 <code>capacity</code> &gt; <code>util</code> 的核心，即能“装下”这个任务的核心。</li><li><strong>寻找“最节能”的核心</strong>: 在所有满足 <code>capacity</code> 要求的核心中，调度器会利用预置在内核中的“能量模型”（Energy Model）进行计算。这个模型知道每个核心在每个频率下运行的功耗。调度器会选择一个能让整个系统（包括任务本身和其他正在运行的任务）总功耗最低的 CPU 核心作为最终选择。</li></ol><p><strong>简而言之</strong>：EAS 的目标不是为任务找一个最快的核，而是找一个“刚刚好够用”且“最省电”的核。</p><h3 id="核心迁移逻辑-Task-Migration"><a href="#核心迁移逻辑-Task-Migration" class="headerlink" title="核心迁移逻辑 (Task Migration)"></a>核心迁移逻辑 (Task Migration)</h3><p>将任务从一个 CPU 核心移动到另一个，是调度器进行动态调优的关键手段。主要发生在以下情况：</p><ol><li><p><strong>负载均衡 (Load Balancing)</strong>: 这是最常见的迁移原因。调度器会周期性地检查系统是否处于“负载不均衡”状态。例如，<code>CPU-1</code>（小核）上挤满了高负载任务导致其利用率饱和，而 <code>CPU-7</code>（大核）却很空闲。此时，调度器会判定系统失衡，并将 <code>CPU-1</code> 上的某个高负载任务“拉到”（pull）<code>CPU-7</code> 上运行，以恢复平衡，提升性能。</p></li><li><p><strong>唤醒时迁移 (Wake-up Migration)</strong>: 当一个线程睡醒时，调度器会重新评估它的最佳核心。如果这个线程在睡眠期间 <code>util</code> 发生了变化（例如，一个后台下载线程突然收到了一个大文件下载任务，<code>util</code> 飙升），或者原先运行的核心现在非常繁忙，调度器就可能在唤醒时直接为它选择一个更合适的新核心，而不是让它在原来的地方排队。</p></li></ol><p>理解选核与迁移逻辑，有助于我们判断调度器的行为是否“异常”。例如，一个明显的前台 UI 线程被不合理地长时间限制在小核上，或者在大小核之间过于频繁地“反复横跳”，都可能暗示着系统调度策略或任务优先级设置存在问题。</p><p>当然目前 Android 厂商针对调度器有做非常多的客制化，关键 Task（Critical Task）通常会占用更多的 CPU ，甚至更容易上大核。另外还有很多绑核策略、签核策略，导致大家看到的每个厂商的现象都不一样。这也是各个厂商的核心竞争力（比如 Oppo 的蜂鸟引擎）。</p><p><a id="practices-sql"></a></p><h2 id="实战与-SQL"><a href="#实战与-SQL" class="headerlink" title="实战与 SQL"></a>实战与 SQL</h2><h3 id="使用-SQL-进行量化分析"><a href="#使用-SQL-进行量化分析" class="headerlink" title="使用 SQL 进行量化分析"></a>使用 SQL 进行量化分析</h3><p>Perfetto 内置的 SQL 查询引擎是其强大功能之一，允许开发者对 Trace 数据进行精确的聚合、筛选和分析。以下是一些常用的 CPU 分析查询。</p><h3 id="1-计算各进程的-CPU-总时长"><a href="#1-计算各进程的-CPU-总时长" class="headerlink" title="1. 计算各进程的 CPU 总时长"></a>1. 计算各进程的 CPU 总时长</h3><p>此查询统计每个进程在所有 CPU 上运行的总时长，按降序排列，用于快速定位消耗 CPU 资源最多的进程。</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  process.name,</span><br><span class="line">  <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> total_cpu_time_s</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">JOIN</span> thread <span class="keyword">ON</span> sched.utid <span class="operator">=</span> thread.utid</span><br><span class="line"><span class="keyword">JOIN</span> process <span class="keyword">ON</span> thread.upid <span class="operator">=</span> process.upid</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> process.name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> total_cpu_time_s <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure><h3 id="2-分析单个线程的时间状态分布"><a href="#2-分析单个线程的时间状态分布" class="headerlink" title="2. 分析单个线程的时间状态分布"></a>2. 分析单个线程的时间状态分布</h3><p>此查询基于 <code>thread_state</code> 表，可用于分析特定线程（示例为 <code>surfaceflinger</code>）在各种状态下的时间分布，从而判断其主要瓶颈。</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  <span class="keyword">CASE</span> state</span><br><span class="line">    <span class="keyword">WHEN</span> <span class="string">&#x27;Running&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;Running&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> <span class="string">&#x27;R&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;Runnable&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> <span class="string">&#x27;S&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;Interruptible Sleep&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> <span class="string">&#x27;D&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;Uninterruptible Sleep&#x27;</span></span><br><span class="line">    <span class="keyword">ELSE</span> state</span><br><span class="line">  <span class="keyword">END</span> <span class="keyword">AS</span> human_state,</span><br><span class="line">  <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> total_time_ms</span><br><span class="line"><span class="keyword">FROM</span> thread_state</span><br><span class="line"><span class="keyword">WHERE</span> utid <span class="operator">=</span> (<span class="keyword">SELECT</span> utid <span class="keyword">FROM</span> thread <span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;surfaceflinger&#x27;</span> LIMIT <span class="number">1</span>)</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> human_state</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> total_time_ms <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure><h3 id="3-查找特定时间段内-CPU-消耗最高的线程"><a href="#3-查找特定时间段内-CPU-消耗最高的线程" class="headerlink" title="3. 查找特定时间段内 CPU 消耗最高的线程"></a>3. 查找特定时间段内 CPU 消耗最高的线程</h3><p>此查询用于分析特定场景（如应用启动的 2-5s 时间段）中，消耗 CPU 时间最长的线程。</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  thread.name,</span><br><span class="line">  <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> cpu_time_s</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">JOIN</span> thread <span class="keyword">ON</span> sched.utid <span class="operator">=</span> thread.utid</span><br><span class="line"><span class="comment">-- 时间戳单位为纳秒，可以自己加上 WHERE ts &gt; 2e9 AND ts &lt; 5e9 来取某一段时间</span></span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> thread.name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cpu_time_s <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">20</span>;</span><br></pre></td></tr></table></figure><h3 id="4-查看线程在各-CPU-核心上的运行时间分布"><a href="#4-查看线程在各-CPU-核心上的运行时间分布" class="headerlink" title="4. 查看线程在各 CPU 核心上的运行时间分布"></a>4. 查看线程在各 CPU 核心上的运行时间分布</h3><p>此查询有助于了解一个线程的 CPU 亲和性，以及它是否在预期的大小核上运行。</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  cpu,</span><br><span class="line">  <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> time_on_cpu_ms</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">WHERE</span> utid <span class="operator">=</span> (<span class="keyword">SELECT</span> utid <span class="keyword">FROM</span> thread <span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;system_server&#x27;</span> LIMIT <span class="number">1</span>)</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> cpu</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cpu;</span><br></pre></td></tr></table></figure><h3 id="5-计算各进程的-CPU-利用率"><a href="#5-计算各进程的-CPU-利用率" class="headerlink" title="5. 计算各进程的 CPU 利用率"></a>5. 计算各进程的 CPU 利用率</h3><p>此查询计算了每个进程在整个 Trace 时间范围内的 CPU 利用率。</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  process.name <span class="keyword">AS</span> process_name,</span><br><span class="line">  <span class="number">100</span> <span class="operator">*</span> <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="built_in">CAST</span>(TRACE_END() <span class="operator">-</span> TRACE_START() <span class="keyword">AS</span> <span class="type">REAL</span>) <span class="keyword">AS</span> cpu_utilization_percent</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">JOIN</span> thread <span class="keyword">ON</span> thread.utid <span class="operator">=</span> sched.utid</span><br><span class="line"><span class="keyword">JOIN</span> process <span class="keyword">ON</span> process.upid <span class="operator">=</span> thread.upid</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> process.name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cpu_utilization_percent <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure><p><a id="summary"></a></p><h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>对 Perfetto 中 CPU 信息的熟练分析，是 Android 性能优化的关键技能。通过深度理解 <strong>核心架构</strong>、<strong>线程状态</strong>、<strong>唤醒关系</strong>、<strong>频率限制</strong> 和 <strong>C-State</strong>，并结合强大的 <strong>SQL 查询</strong>进行量化分析，开发者可以精准地定位并解决各类性能与功耗问题。</p><h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p><ol><li><a href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li><li><a href="https://www.androidperformance.com/2019/12/01/BlogMap/">本博客内容导航</a> ：个人博客内容的一个导航。</li><li><a href="https://androidperformance.com/2018/05/07/Android-performance-optimization-skills-and-tools/">个人整理和搜集的优秀博客文章 - Android 性能优化必知必会</a> ：欢迎大家自荐和推荐 （微信私聊即可）</li><li><a href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a> ： 欢迎加入，多谢支持～</li></ol><blockquote><p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p></blockquote><p><img src="/images/WechatIMG581.png" alt="微信扫一扫"></p>]]></content>
       
       
       <categories>
@@ -94,9 +94,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Jank </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -127,9 +127,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Jank </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -160,9 +160,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Jank </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -193,13 +193,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -226,11 +226,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> ANR </tag>
             
@@ -259,13 +259,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> ANR </tag>
             
@@ -292,13 +292,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> ANR </tag>
             
@@ -325,13 +325,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -358,13 +358,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -391,13 +391,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -550,9 +550,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -583,13 +583,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -637,7 +637,7 @@
       <link href="/2022/03/13/android-systrace-cpu-state-sleep/"/>
       <url>/2022/03/13/android-systrace-cpu-state-sleep/</url>
       
-        <content type="html"><![CDATA[<p>本文是 Systrace 线程 CPU 运行状态分析技巧系列的第三篇，本文主要讲了使用 Systrace 分析 CPU 状态时遇到的 <strong>Sleep</strong> 与 <strong>Uninterruptible Sleep</strong> 状态的原因排查方法与优化方法，这两个状态导致性能变差概率非常高，而且排查起来也比较费劲，网上也没有系统化的文档。</p><p>本系列的目的是通过 Systrace 这个工具，从另外一个角度来看待 Android 系统整体的运行，同时也从另外一个角度来对 Framework 进行学习。也许你看了很多讲 Framework 的文章，但是总是记不住代码，或者不清楚其运行的流程，也许从 Systrace 这个图形化的角度，你可以理解的更深入一些。Systrace 基础和实战系列大家可以在 <a href="https://www.androidperformance.com/2019/07/23/Android-Systrace-Pre/">Systrace 基础知识 - Systrace 预备知识</a> 或者 <a href="https://www.androidperformance.com/2019/12/01/BlogMap/">博客文章目录</a> 这里看到完整的目录</p><span id="more"></span><h2 id="本文目录"><a href="#本文目录" class="headerlink" title="本文目录"></a>本文目录</h2><ul><li><a href="#sleep-overview">Linux 中的 Sleep 状态是什么</a></li><li><a href="#sleep-analysis">Sleep 状态分析</a></li><li><a href="#usleep-analysis">UninterruptibleSleep 状态分析</a></li><li><a href="#appendix">附录</a></li><li><a href="#about">关于我 &amp;&amp; 博客</a></li></ul><ol><li><a href="https://www.androidperformance.com/2022/01/21/android-systrace-cpu-state-runnable/">Systrace 线程 CPU 运行状态分析技巧 - Runnable 篇</a></li><li><a href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-running/">Systrace 线程 CPU 运行状态分析技巧 - Running 篇</a></li><li><a href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a></li></ol><p><a id="sleep-overview"></a></p><h1 id="Linux-中的-Sleep-状态是什么"><a href="#Linux-中的-Sleep-状态是什么" class="headerlink" title="Linux 中的 Sleep 状态是什么"></a>Linux 中的 Sleep 状态是什么</h1><h2 id="TASK-INTERUPTIBLE-vs-TASK-UNINTERRUPTIBLE"><a href="#TASK-INTERUPTIBLE-vs-TASK-UNINTERRUPTIBLE" class="headerlink" title="TASK_INTERUPTIBLE vs TASK_UNINTERRUPTIBLE"></a>TASK_INTERUPTIBLE vs TASK_UNINTERRUPTIBLE</h2><p>一个线程的状态不属于 Running 或者 Runnable 的时候，那就是 Sleep 状态了（严谨来说，还有其他状态，不过对性能分析来说不常见，比如 STOP、Trace 等）。</p><p>在 Linux 中的Sleep 状态可以细分为 3 个状态：</p><ul><li><strong>TASK_INTERUPTIBLE</strong> → 可中断 </li><li><strong>TASK_UNINTERRUPTIBLE</strong> → 不可中断 </li><li><strong>TASK_KILLABLE</strong>  → 等同于 TASK_WAKEKILL | TASK_UNINTERRUPTIBLE</li></ul><p><img src="/images/android-systrace-cpu-state-sleep/image.png" alt=" &quot;图 1: 性能之巅 2 CPU 优化&quot;"></p><p>在 Systrace&#x2F;Perfetto 中，Sleep 状态指的是 Linux 中的TASK_INTERUPTIBLE，trace 中的颜色为白色。Uninterruptible Sleep 指的是 Linux 中的 TASK_UNINTERRUPTIBLE，trace 中的颜色为橙色。 </p><p>本质上他们都是处于睡眠状态，拿不到 CPU的时间片，只有满足某些条件时才会拿到时间片，即变为 Runnable，随后是 Running。  </p><p>TASK_INTERRUPTIBLE 与 TASK_UNINTERRUPTIBLE 本质上都是 Sleep，<strong>区别在于前者是可以处理 Signal 而后者不能，即使是 Kill 类型的Signal</strong>。因此，除非是拿到自己等待的资源之外，没有其他方法可以唤醒它们。 TASK_WAKEKILL 是指可以接受 Kill 类型的Signal 的TASK_UNINTERRUPTIBLE。</p><p>Android 中的 Looper、Java&#x2F;Native 锁等待都属于 TAKS_INTERRUPTIBLE，因为他们可以被其他进程唤醒，应该说绝大部分的程序都处于 TAKS_INTERRUPTIBLE 状态，即 Sleep 状态。 看看 Systrace 中的一大片进程的白色状态就知道了（trace 中表现为白色块），它们绝大部分时间都是在 Runnning 跟 Sleep 状态之间转换，零星会看到几个 Runnable 或者 UninterruptibleSleep，即蓝色跟橙色。</p><h2 id="TASK-UNINTERRUPTIBLE-作用"><a href="#TASK-UNINTERRUPTIBLE-作用" class="headerlink" title="TASK_UNINTERRUPTIBLE 作用"></a>TASK_UNINTERRUPTIBLE 作用</h2><p>似乎看来 TASK_INTERUPTIBLE 就可以了，那为什么还要有 TASK_UNINTERRUPTIBLE 状态呢？</p><p>中断来源有两个，一个是硬件，另一个就是软件。硬件中断是外围控制芯片直接向 CPU 发送了中断信号，被 CPU 捕获并调用了对应的硬件处理函数。软件中断，前面说的 Signal、驱动程序里的 softirq 机制，主要用来在软件层面触发执行中断处理程序，也可以用作进程间通讯机制。</p><p>一个进程可以随时处理软中断或者硬件中断，他们的执行是在当前进程的上下文上，意味着共享进程的堆栈。但是在某种情况下，程序不希望有任何打扰，它就想等待自己所等待的事情执行完成。比如与硬件驱动打交道的流程，如 IO 等待、网络操作。 这是为了保护这段逻辑不会被其他事情所干扰，<code>避免它进入不可控的状态</code>。</p><p>Linux 处理硬件调度的时候也会临时关闭中断控制器、调度的时候会临时关闭抢占功能，本质上为了 <code>防止程序流程进入不可控的状态</code>。这类状态本身执行时间非常短，但系统出异常、运行压力较大的时候可能会影响到性能。</p><p><a href="https://elixir.bootlin.com/linux/latest/ident/TASK_UNINTERRUPTIBLE">https://elixir.bootlin.com/linux/latest/ident/TASK_UNINTERRUPTIBLE</a> </p><p>可以看到内核中使用此状态的情况，典型的有 Swap 读数据、信号量机制、mutex 锁、内存慢路径回收等场景。  </p><h2 id="分析时候的注意点"><a href="#分析时候的注意点" class="headerlink" title="分析时候的注意点"></a>分析时候的注意点</h2><p>首先要认识到 TASK_INTERUPTIBLE、TASK_UNINTERRUPTIBLE 状态的出现是正常的，但是如果这些这些状态的累计占比达到了一定程度，就要引起注意了。特别是在关键操作路径上这类状态的占比较多的时候，需要排查原因之后做相应的优化。 分析问题以及做优化的时候需要牢牢把握两个关键点，它类似于内功心法一样: </p><ol><li><strong>原因的排查方法</strong></li><li><strong>优化方法论</strong></li></ol><p>你需要知道是什么原因导致了这次睡眠，是主动的还是被动的？如果是主动的，通过走读代码调查是否是正常的逻辑。如果是被动的，故事的源头是什么？ 这需要你对系统有足够多的认识，以及分析问题的经验，你需要经常看案例以增强自己的知识。 </p><p>以下把 TASK_INTERUPTIBLE 称之为 Sleep，TASK_UNINTERRUPTIBLE称之为 UninterruptibleSleep，目的是与 Systrac 中的用词保持一致。 </p><p>初期分析 Sleep 与 UninterruptibleSleep 状态的经验不足时你会感到困惑，这种困惑主要是来自于对系统的不了解。你需要读大量的框架层、内核层的代码才能从 Trace 中找出蛛丝马迹。目前并没有一种 Trace 工具能把整个逻辑链路描述的很清楚，而且他们有时候还有不准的时候，比如 Systrace 中的 wakeup_from 信息。只有广泛的系统运行原理做为支持储备，再结合 Trace 工具分析问题，才能做到准确定位问题根因。否则就是我经常说的「性能优化流氓」，你说什么是什么，别人也没法证伪。反复折磨测试同学复测，没测出来之后，这个问题也就不了了之了。 </p><p>本文没办法列举完所有状态的原因，因此只能列举最为常见的类型，以及典型的实际案例。更重要的是，你需要掌握诊断方法，并结合源代码来定位问题。</p><h2 id="Trace-中的可视化效果"><a href="#Trace-中的可视化效果" class="headerlink" title="Trace 中的可视化效果"></a>Trace 中的可视化效果</h2><p><img src="/images/android-systrace-cpu-state-sleep/image_1.png" alt="Pefetto 中支持显示的状态"></p><p><img src="/images/android-systrace-cpu-state-sleep/image_2.png" alt="Systrace 支持显示的状态"></p><p><a id="sleep-analysis"></a></p><h1 id="Sleep-状态分析"><a href="#Sleep-状态分析" class="headerlink" title="Sleep 状态分析"></a>Sleep 状态分析</h1><p><img src="/images/android-systrace-cpu-state-sleep/image_3.png" alt="图 1: UIThread 等待 RenderThread"></p><p><img src="/images/android-systrace-cpu-state-sleep/image_4.png" alt="图 2: Binder 调用等待"></p><h2 id="诊断方法"><a href="#诊断方法" class="headerlink" title="诊断方法"></a>诊断方法</h2><h3 id="通过-wakeup-from-tid-查看唤醒线程"><a href="#通过-wakeup-from-tid-查看唤醒线程" class="headerlink" title="通过 wakeup from tid: ***查看唤醒线程"></a>通过 <code>wakeup from tid: ***</code>查看唤醒线程</h3><p>Sleep 最常见的有图 1（UIThread 与 RenderThread 同步）的情况与图 2（Binder 调用）的情况。 Sleep 状态一般是由程序主动等待某个事件的发生而造成的，比如锁等待，因此它有个比较明确的唤醒源。比如图 1，UIThread 等待的是 RenderThread，你可以通过阅读代码来了解这种多线程之间的交互关系。虽然最直接，但是对开发者的要求非常高，因为这需要你熟读图形栈的代码。这可不是一般的难度，是追求的目标，但不具备普适性。 </p><p>更简单的方法是通过所谓的 <code>wakeup from tid: ***</code> 来调查线程之间的交互关系。从前面的 <a href="https://articles.zsxq.com/id_wzkkiwop5pgm.html">Runnable 文章</a> 中讲过，任何线程进入 Running 之前会先进入到 Runnable 状态，由此再转换成 Running。从 Sleep 状态切换到 Running，必然也要经过 Runnable。</p><p>进入到 Runnable 有两种方式，一种是 Running 中的程序被抢占了，暂时进入到 Runnable。还有一种是由另外一个线程将此线程（处于 Sleep 的线程）变成了 Runnable。 </p><p>我们在调查Sleep 唤醒线程关系的时候，应用到的原理是第二种情况。在 Systrace 中这种是被 <code>wakeup from tid: ***</code> 信息所呈现。线程被抢占之后变成 Runnable，在 Systrace 中是被 <code>Running Instead</code> 呈现。 </p><p><img src="/images/android-systrace-cpu-state-sleep/image_5.png"></p><p>需要特别注意的是 <code>wakeupfrom</code> 这个有时候不准，原因是跟具体的 tracepoint 类型有关。分析的时候要注意甄别，不要一味地相信这个数据是对的。</p><h3 id="其他方法"><a href="#其他方法" class="headerlink" title="其他方法"></a>其他方法</h3><ol><li>Simpleperf 还原代码执行流</li><li>在 Systrace 寻找时间点对齐的事件</li></ol><p>方法 1 适合用来看程序到底在执行什么操作进入到这种状态，是 IO 还是锁等待？球里连载 Simpleperf 工具的使用方法，其中「<a href="https://articles.zsxq.com/id_xc0a7uwmsf3z.html">Simpleperf 分析篇 (1): 使用 Firefox Profiler 可视分析 Simpleperf 数据</a>」介绍了可以按时间顺序看函数调用的可视化方法。其他使用也会陆续更新，直接搜关键字即可。</p><p>方法 2 是个比较笨的方法，但有时候也可以通过它找到蛛丝马迹，不过缺点是错误率比较高。</p><h2 id="耗时过长的常见原因"><a href="#耗时过长的常见原因" class="headerlink" title="耗时过长的常见原因"></a>耗时过长的常见原因</h2><ul><li><strong>Binder 操作</strong> → 通过打开 Binder 对应的 trace，可方便地观察到调用到远端的 Binder 执行线程。如果 Binder 耗时长，要分析远端的 Binder 执行情况，是否是锁竞争？得不到CPU 时间片？要具体问题具体分析  </li><li><strong>Java\futex锁竞争等待</strong> → 最常见也是最容易引起性能问题，当负载较高时候特别容易出现，特别是在 SystemServer 进程中。这是 Binder 多线程并行化或抢占公共资源导致的弊端。  </li><li><strong>主动等待</strong> → 线程主动进入 Sleep 状态，等待其它线程的唤醒，比如等待信号量的释放。优化建议：需要看代码逻辑分析等待是否合理，不合理就要优化掉。</li><li><strong>等待 GPU 执行完毕</strong> → 等 GPU 任务执行完毕，Trace 中可以看到等 GPU fence 时间。常见的原因有渲染任务过重、 GPU 能力弱、GPU 频率低等。优化建议：提升 GPU 频率、降低渲染任务复杂度，比如精简 Shader、降低渲染分辨率、降低Texture 画质等。</li></ul><p><a id="usleep-analysis"></a></p><h1 id="UninterruptibleSleep-状态分析"><a href="#UninterruptibleSleep-状态分析" class="headerlink" title="UninterruptibleSleep 状态分析"></a>UninterruptibleSleep 状态分析</h1><h2 id="诊断方法-1"><a href="#诊断方法-1" class="headerlink" title="诊断方法"></a>诊断方法</h2><p>本质上UninterruptibleSleep 也是一种 Sleep，因此分析 Sleep 状态时用到的方法也是通用的。不过此状态有两个特殊点与 Sleep 不同，因此在此特别说明。 </p><ol><li><strong>UninterruptibleSleep 分为 IOWait 与 Non-IOWait</strong></li><li><strong>UninterruptibleSleep 有 Block reason</strong></li></ol><h3 id="UninterruptibleSleep-分为-IOWait-与-Non-IOWait"><a href="#UninterruptibleSleep-分为-IOWait-与-Non-IOWait" class="headerlink" title="UninterruptibleSleep 分为 IOWait 与 Non-IOWait"></a>UninterruptibleSleep 分为 IOWait 与 Non-IOWait</h3><p>IO 等待好理解，就是程序执行了 IO 操作。最简单的，程序如果没法从 PageCache 缓存里快速拿到数据，那就要与设备进行 IO 操作。CPU 内部缓存的访问速度是最快的，其次是内存，最后是磁盘。它们之间的延迟差异是数量级差异，因此系统越是从磁盘中读取数据，对整体性能的影响就越大。  </p><p>非 IO 等待主要是指内核级别的锁等待，或者驱动程序中人为设置的等待。Linux 内核中某些路径是热点区域，因此不得不拿锁来进行保护。比如Binder 驱动，当负载大到一定程度，Binder 的内部的锁竞争导致的性能瓶颈就会呈现出来。 </p><h3 id="Block-Reason"><a href="#Block-Reason" class="headerlink" title="Block Reason"></a>Block Reason</h3><p>谷歌的 Riley Andrews(<a href="mailto:&#114;&#105;&#x61;&#110;&#x64;&#114;&#x65;&#x77;&#115;&#x40;&#x67;&#111;&#111;&#x67;&#108;&#101;&#46;&#x63;&#111;&#109;">&#114;&#105;&#x61;&#110;&#x64;&#114;&#x65;&#x77;&#115;&#x40;&#x67;&#111;&#111;&#x67;&#108;&#101;&#46;&#x63;&#111;&#109;</a>) 15年左右往内核里提交了一个 tracepoint 补丁，用于记录当发生 UninterruptibleSleep 的时候是否是 IO 等待、调用函数等信息。Systrace 中的展示的 IOWait 与 BlockReason，就是通过解析这条 tracepoint 而来的。这条代码提交的介绍如下（由于这笔提交未合入到 Linux 上游主线，因此要注意你用的内核是否单独带了此补丁）: </p><figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">sched: add sched blocked tracepoint which dumps out context of sleep.</span><br><span class="line">Decare war on uninterruptible sleep. Add a tracepoint which</span><br><span class="line">walks the kernel stack and dumps the first non-scheduler function</span><br><span class="line">called before the scheduler is invoked.</span><br><span class="line"></span><br><span class="line">Change-Id: [I19e965d5206329360a92cbfe2afcc8c30f65c229](https://android-review.googlesource.com/#/q/I19e965d5206329360a92cbfe2afcc8c30f65c229)</span><br><span class="line">Signed-off-by: Riley Andrews [riandrews@google.com](mailto:riandrews@google.com)</span><br></pre></td></tr></table></figure><p>在 ftrace（Systrace 使用的数据抓取机制） 中的被记录为</p><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">sched_blocked_reason: pid=<span class="number">30235</span> iowait=<span class="number">0</span> caller=get_user_pages_fast+<span class="number">0x34</span>/<span class="number">0x70</span> </span><br></pre></td></tr></table></figure><p>这句话被 Systrace 可视化的效果为: </p><p><img src="/images/android-systrace-cpu-state-sleep/image_6.png"></p><p>主线程中有一段 Uninterruptible Sleep 状态，它的 BlockReason 是 <code>get_user_pages_fast</code>。它是一个 Linux 内核中函数的名字，代表着是线程是被它切换到了 UninterruptibleSleep 状态。为了查看具体的原因，需要查看这个函数的具体实现。</p><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> * get_user_pages_fast() - pin user pages in memory</span></span><br><span class="line"><span class="comment"> * @start:      starting user address</span></span><br><span class="line"><span class="comment"> * @nr_pages:   number of pages from start to pin</span></span><br><span class="line"><span class="comment"> * @gup_flags:  flags modifying pin behaviour</span></span><br><span class="line"><span class="comment"> * @pages:      array that receives pointers to the pages pinned.</span></span><br><span class="line"><span class="comment"> *              Should be at least nr_pages long.</span></span><br><span class="line"><span class="comment"> *</span></span><br><span class="line"><span class="comment"> * Attempt to pin user pages in memory without taking mm-&gt;mmap_lock.</span></span><br><span class="line"><span class="comment"> * If not successful, it will fall back to taking the lock and</span></span><br><span class="line"><span class="comment"> * calling get_user_pages().</span></span><br><span class="line"><span class="comment"> *</span></span><br><span class="line"><span class="comment"> * Returns number of pages pinned. This may be fewer than the number requested.</span></span><br><span class="line"><span class="comment"> * If nr_pages is 0 or negative, returns 0. If no pages were pinned, returns</span></span><br><span class="line"><span class="comment"> * -errno.</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line"><span class="type">int</span> <span class="title function_">get_user_pages_fast</span><span class="params">(<span class="type">unsigned</span> <span class="type">long</span> start, <span class="type">int</span> nr_pages,</span></span><br><span class="line"><span class="params">      <span class="type">unsigned</span> <span class="type">int</span> gup_flags, <span class="keyword">struct</span> page **pages)</span></span><br><span class="line">&#123;</span><br><span class="line">  <span class="keyword">if</span> (!is_valid_gup_flags(gup_flags))</span><br><span class="line">    <span class="keyword">return</span> -EINVAL;</span><br><span class="line"></span><br><span class="line">  <span class="comment">/*</span></span><br><span class="line"><span class="comment">   * The caller may or may not have explicitly set FOLL_GET; either way is</span></span><br><span class="line"><span class="comment">   * OK. However, internally (within mm/gup.c), gup fast variants must set</span></span><br><span class="line"><span class="comment">   * FOLL_GET, because gup fast is always a &quot;pin with a +1 page refcount&quot;</span></span><br><span class="line"><span class="comment">   * request.</span></span><br><span class="line"><span class="comment">   */</span></span><br><span class="line">  gup_flags |= FOLL_GET;</span><br><span class="line">  <span class="keyword">return</span> internal_get_user_pages_fast(start, nr_pages, gup_flags, pages);</span><br><span class="line">&#125;</span><br><span class="line">EXPORT_SYMBOL_GPL(get_user_pages_fast);</span><br></pre></td></tr></table></figure><p>从函数解释上可以看到，函数首先是通过无锁的方式pin 应用侧的 pages，如果失败的时候不得不尝试持锁后走慢速执行路径。此时，无法持锁的时候那就要等待了，直到先前持锁的人释放锁。那之前被谁持有了呢？这时候可以利用之前介绍的Sleep 诊断方法，如下图。</p><p><img src="/images/android-systrace-cpu-state-sleep/image_7.png"></p><p>UninterruptibleSleep 状态相比 Sleep 有点复杂，因为它涉及到 Linux 内部的实现。可能是内核本身的机制有问题，也有可能是应用层使用不对，因此要联合上层的行为综合诊断才行。毕竟内核也不是万能的，它也有自己的能力边界，当应用层的使用超过其边界的时候，就会出现影响性能的现象。 </p><h2 id="IOWait-常见原因与优化方法"><a href="#IOWait-常见原因与优化方法" class="headerlink" title="IOWait 常见原因与优化方法"></a>IOWait 常见原因与优化方法</h2><h3 id="1-主动IO-操作"><a href="#1-主动IO-操作" class="headerlink" title="1. 主动IO 操作"></a>1. <strong>主动IO 操作</strong></h3><ul><li>程序进行频繁、大量的读或者写 IO 操作，这是最常见的情况。  </li><li>多个应用同时下发 IO 操作，导致器件的压力较大。同时执行的程序多的时候 IO 负载高的可能性也大。</li><li>器件本身的 IO 性能较差，可通过 IO Benchmark 来进行排查。 常见的原因有磁盘碎片化、器件老化、剩余空间较少（越是低端机越明显）、读放大、写放大等等。</li><li>文件系统特性，比如有些文件系统的内部操作会表现为 IO 等待。</li><li>开启 Swap 机制的内核下，数据从 Swap 中读取。</li></ul><p><strong>优化方法</strong></p><ul><li>调优 Readahead 机制</li><li>指定文件到 PageCache，即 PinFile 机制 </li><li>调整 PageCache 回收策略 </li><li>调优清理垃圾文件策略</li></ul><h3 id="2-低内存导致的-IO-变多"><a href="#2-低内存导致的-IO-变多" class="headerlink" title="2. 低内存导致的 IO 变多"></a>2. 低内存导致的 IO 变多</h3><p>内存是个非常有意思的东西，由于它的速度比磁盘快，因此 OS 设计者们把内存当做磁盘的缓存，通过它来避免了部分IO操作的请求，非常有效的提升了整体 IO 性能。有两个极端情况，当系统内存特别大的时候，绝大部分操作都可以在内存中执行，此时整体 IO 性能会非常好。当系统内存特别低，以至于没办法缓存 IO 数据的时候，几乎所有的 IO 操作都直接与器件打交道，这时候整体性能相比内存多的时候而言是非常差的。</p><p>所以系统中的内存较少的时候 IO 等待的概率也会变高。所以，这个问题就变成了如何让系统中有足够多的内存？如何调节磁盘缓存的淘汰算法？</p><p><strong>优化方法</strong></p><ul><li>关键路径上减少 IO 操作</li><li>通过Readahead 机制读数据</li><li>将热点数据尽量聚集在一起，使被 Readahead 机制命中的概率高 </li><li>最后一个老生常谈的，减少大量的内存分配、内存浪费等操作</li></ul><p>系统中的内存是被各个进程所共用。当app 只考虑自己，肆无忌惮的使用计算资源，必然会影响到其他程序。这时候系统还是会回来压制你，到头来亏损的还是自己。 不过能想到这一步的开发者比较少，也不现实。明文化的执行系统约定，可能是个终极解决方案。 </p><h2 id="Non-IOWait-常见原因"><a href="#Non-IOWait-常见原因" class="headerlink" title="Non-IOWait 常见原因"></a>Non-IOWait 常见原因</h2><ul><li><strong>低内存导致等待</strong> → 低内存的时候要回收其他程序或者缓存上的内存。</li><li><strong>Binder 等待</strong> → 有大量 Binder 操作的时候出现概率较高。  </li><li><strong>各种各样的内核锁，不胜枚举</strong>。结合「诊断方法」来分析。</li></ul><h2 id="系统调度与-UninterruptibleSleep-耦合的问题"><a href="#系统调度与-UninterruptibleSleep-耦合的问题" class="headerlink" title="系统调度与 UninterruptibleSleep   耦合的问题"></a>系统调度与 UninterruptibleSleep   耦合的问题</h2><p>当线程处于 UninterruptibleSleep 非 IO等待状态（即内核锁），而持有该锁的其他线程因 CPU 调度原因，较长时间处于 Runnable 状态。这时候就出现了有意思的现象，即使被等待的线程处于高优先级，它的依赖方没有被调度器及时的识别到，即使是非常短的锁持有，也会出现较长时间的等待。 </p><p>规避或者彻底解决这类问题都是件比较难的事情，不同厂家实现了不同的解决方案，也是比较考虑厂家技术能力的一个问题。 </p><p><a id="appendix"></a></p><h1 id="附录"><a href="#附录" class="headerlink" title="附录"></a>附录</h1><h2 id="Linux-线程状态释义"><a href="#Linux-线程状态释义" class="headerlink" title="Linux 线程状态释义"></a>Linux 线程状态释义</h2><table><thead><tr><th>线程状态</th><th>描述</th></tr></thead><tbody><tr><td>S</td><td>SLEEPING</td></tr><tr><td>R、R+</td><td>RUNNABLE</td></tr><tr><td>D</td><td>UNINTR_SLEEP</td></tr><tr><td>T</td><td>STOPPED</td></tr><tr><td>t</td><td>DEBUG</td></tr><tr><td>Z</td><td>ZOMBIE</td></tr><tr><td>X</td><td>EXIT_DEAD</td></tr><tr><td>x</td><td>TASK_DEAD</td></tr><tr><td>K</td><td>WAKE_KILL</td></tr><tr><td>W</td><td>WAKING</td></tr><tr><td>D</td><td>K</td></tr><tr><td>D</td><td>W</td></tr></tbody></table><h2 id="案例-从-Swap-读取数据时的等待"><a href="#案例-从-Swap-读取数据时的等待" class="headerlink" title="案例: 从 Swap 读取数据时的等待"></a>案例: 从 Swap 读取数据时的等待</h2><p><img src="/images/android-systrace-cpu-state-sleep/image_8.png"></p><h2 id="案例-同进程的多个线程进行-mmap"><a href="#案例-同进程的多个线程进行-mmap" class="headerlink" title="案例: 同进程的多个线程进行 mmap"></a>案例: 同进程的多个线程进行 mmap</h2><p><img src="/images/android-systrace-cpu-state-sleep/image_9.png"></p><p>共享同一个 mm_struct 的线程同时执行 mmap() 系统调用进行 vma 分配时发生锁竞争。</p><p>mmap_write_lock_killable() 与 mmap_write_unlock() 包起来的区域就是由锁受保护的区域。 </p><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">unsigned</span> <span class="type">long</span> <span class="title function_">vm_mmap_pgoff</span><span class="params">(<span class="keyword">struct</span> file *file, <span class="type">unsigned</span> <span class="type">long</span> addr,</span></span><br><span class="line"><span class="params">  <span class="type">unsigned</span> <span class="type">long</span> len, <span class="type">unsigned</span> <span class="type">long</span> prot,</span></span><br><span class="line"><span class="params">  <span class="type">unsigned</span> <span class="type">long</span> flag, <span class="type">unsigned</span> <span class="type">long</span> pgoff)</span></span><br><span class="line">&#123;</span><br><span class="line">  <span class="type">unsigned</span> <span class="type">long</span> ret;</span><br><span class="line">  <span class="class"><span class="keyword">struct</span> <span class="title">mm_struct</span> *<span class="title">mm</span> =</span> current-&gt;mm;</span><br><span class="line">  <span class="type">unsigned</span> <span class="type">long</span> populate;</span><br><span class="line">  LIST_HEAD(uf);</span><br><span class="line"></span><br><span class="line">  ret = security_mmap_file(file, prot, flag);</span><br><span class="line">  <span class="keyword">if</span> (!ret) &#123;</span><br><span class="line">    <span class="keyword">if</span> (mmap_write_lock_killable(mm))</span><br><span class="line">      <span class="keyword">return</span> -EINTR;</span><br><span class="line">    ret = do_mmap(file, addr, len, prot, flag, pgoff, &amp;populate,</span><br><span class="line">            &amp;uf);</span><br><span class="line">    mmap_write_unlock(mm);</span><br><span class="line">    userfaultfd_unmap_complete(mm, &amp;uf);</span><br><span class="line">    <span class="keyword">if</span> (populate)</span><br><span class="line">      mm_populate(ret, populate);</span><br><span class="line">  &#125;</span><br><span class="line">  <span class="keyword">return</span> ret;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure><p><a id="about"></a></p><h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p><ol><li><a href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li><li><a href="https://androidperformance.com/2019/12/01/BlogMap/">本博客内容导航</a> ：个人博客内容的一个导航。</li><li><a href="https://androidperformance.com/2018/05/07/Android-performance-optimization-skills-and-tools/">个人整理和搜集的优秀博客文章 - Android 性能优化必知必会</a> ：欢迎大家自荐和推荐 （微信私聊即可）</li><li><a href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a> ： 欢迎加入，多谢支持～</li></ol><blockquote><p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p></blockquote><p><img src="/images/WechatIMG581.png" alt="微信扫一扫"></p>]]></content>
+        <content type="html"><![CDATA[<p>本文是 Systrace 线程 CPU 运行状态分析技巧系列的第三篇，本文主要讲了使用 Systrace 分析 CPU 状态时遇到的 <strong>Sleep</strong> 与 <strong>Uninterruptible Sleep</strong> 状态的原因排查方法与优化方法，这两个状态导致性能变差概率非常高，而且排查起来也比较费劲，网上也没有系统化的文档。</p><p>本系列的目的是通过 Systrace 这个工具，从另外一个角度来看待 Android 系统整体的运行，同时也从另外一个角度来对 Framework 进行学习。也许你看了很多讲 Framework 的文章，但是总是记不住代码，或者不清楚其运行的流程，也许从 Systrace 这个图形化的角度，你可以理解的更深入一些。Systrace 基础和实战系列大家可以在 <a href="https://www.androidperformance.com/2019/07/23/Android-Systrace-Pre/">Systrace 基础知识 - Systrace 预备知识</a> 或者 <a href="https://www.androidperformance.com/2019/12/01/BlogMap/">博客文章目录</a> 这里看到完整的目录</p><span id="more"></span><h2 id="本文目录"><a href="#本文目录" class="headerlink" title="本文目录"></a>本文目录</h2><ul><li><a href="#sleep-overview">Linux 中的 Sleep 状态是什么</a></li><li><a href="#sleep-analysis">Sleep 状态分析</a></li><li><a href="#usleep-analysis">UninterruptibleSleep 状态分析</a></li><li><a href="#appendix">附录</a></li><li><a href="#about">关于我 &amp;&amp; 博客</a></li></ul><ol><li><a href="https://www.androidperformance.com/2022/01/21/android-systrace-cpu-state-runnable/">Systrace 线程 CPU 运行状态分析技巧 - Runnable 篇</a></li><li><a href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-running/">Systrace 线程 CPU 运行状态分析技巧 - Running 篇</a></li><li><a href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a></li></ol><p><a id="sleep-overview"></a></p><h1 id="Linux-中的-Sleep-状态是什么"><a href="#Linux-中的-Sleep-状态是什么" class="headerlink" title="Linux 中的 Sleep 状态是什么"></a>Linux 中的 Sleep 状态是什么</h1><h2 id="TASK-INTERUPTIBLE-vs-TASK-UNINTERRUPTIBLE"><a href="#TASK-INTERUPTIBLE-vs-TASK-UNINTERRUPTIBLE" class="headerlink" title="TASK_INTERUPTIBLE vs TASK_UNINTERRUPTIBLE"></a>TASK_INTERUPTIBLE vs TASK_UNINTERRUPTIBLE</h2><p>一个线程的状态不属于 Running 或者 Runnable 的时候，那就是 Sleep 状态了（严谨来说，还有其他状态，不过对性能分析来说不常见，比如 STOP、Trace 等）。</p><p>在 Linux 中的Sleep 状态可以细分为 3 个状态：</p><ul><li><strong>TASK_INTERUPTIBLE</strong> → 可中断 </li><li><strong>TASK_UNINTERRUPTIBLE</strong> → 不可中断 </li><li><strong>TASK_KILLABLE</strong>  → 等同于 TASK_WAKEKILL | TASK_UNINTERRUPTIBLE</li></ul><p><img src="/images/android-systrace-cpu-state-sleep/image.png" alt=" &quot;图 1: 性能之巅 2 CPU 优化&quot;"></p><p>在 Systrace&#x2F;Perfetto 中，Sleep 状态指的是 Linux 中的TASK_INTERUPTIBLE，trace 中的颜色为白色。Uninterruptible Sleep 指的是 Linux 中的 TASK_UNINTERRUPTIBLE，trace 中的颜色为橙色。 </p><p>本质上他们都是处于睡眠状态，拿不到 CPU的时间片，只有满足某些条件时才会拿到时间片，即变为 Runnable，随后是 Running。  </p><p>TASK_INTERRUPTIBLE 与 TASK_UNINTERRUPTIBLE 本质上都是 Sleep，<strong>区别在于前者是可以处理 Signal 而后者不能，即使是 Kill 类型的Signal</strong>。因此，除非是拿到自己等待的资源之外，没有其他方法可以唤醒它们。 TASK_WAKEKILL 是指可以接受 Kill 类型的Signal 的TASK_UNINTERRUPTIBLE。</p><p>Android 中的 Looper、Java&#x2F;Native 锁等待都属于 TAKS_INTERRUPTIBLE，因为他们可以被其他进程唤醒，应该说绝大部分的程序都处于 TAKS_INTERRUPTIBLE 状态，即 Sleep 状态。 看看 Systrace 中的一大片进程的白色状态就知道了（trace 中表现为白色块），它们绝大部分时间都是在 Runnning 跟 Sleep 状态之间转换，零星会看到几个 Runnable 或者 UninterruptibleSleep，即蓝色跟橙色。</p><h2 id="TASK-UNINTERRUPTIBLE-作用"><a href="#TASK-UNINTERRUPTIBLE-作用" class="headerlink" title="TASK_UNINTERRUPTIBLE 作用"></a>TASK_UNINTERRUPTIBLE 作用</h2><p>似乎看来 TASK_INTERUPTIBLE 就可以了，那为什么还要有 TASK_UNINTERRUPTIBLE 状态呢？</p><p>中断来源有两个，一个是硬件，另一个就是软件。硬件中断是外围控制芯片直接向 CPU 发送了中断信号，被 CPU 捕获并调用了对应的硬件处理函数。软件中断，前面说的 Signal、驱动程序里的 softirq 机制，主要用来在软件层面触发执行中断处理程序，也可以用作进程间通讯机制。</p><p>一个进程可以随时处理软中断或者硬件中断，他们的执行是在当前进程的上下文上，意味着共享进程的堆栈。但是在某种情况下，程序不希望有任何打扰，它就想等待自己所等待的事情执行完成。比如与硬件驱动打交道的流程，如 IO 等待、网络操作。 这是为了保护这段逻辑不会被其他事情所干扰，<code>避免它进入不可控的状态</code>。</p><p>Linux 处理硬件调度的时候也会临时关闭中断控制器、调度的时候会临时关闭抢占功能，本质上为了 <code>防止程序流程进入不可控的状态</code>。这类状态本身执行时间非常短，但系统出异常、运行压力较大的时候可能会影响到性能。</p><p><a href="https://elixir.bootlin.com/linux/latest/ident/TASK_UNINTERRUPTIBLE">https://elixir.bootlin.com/linux/latest/ident/TASK_UNINTERRUPTIBLE</a> </p><p>可以看到内核中使用此状态的情况，典型的有 Swap 读数据、信号量机制、mutex 锁、内存慢路径回收等场景。  </p><h2 id="分析时候的注意点"><a href="#分析时候的注意点" class="headerlink" title="分析时候的注意点"></a>分析时候的注意点</h2><p>首先要认识到 TASK_INTERUPTIBLE、TASK_UNINTERRUPTIBLE 状态的出现是正常的，但是如果这些这些状态的累计占比达到了一定程度，就要引起注意了。特别是在关键操作路径上这类状态的占比较多的时候，需要排查原因之后做相应的优化。 分析问题以及做优化的时候需要牢牢把握两个关键点，它类似于内功心法一样: </p><ol><li><strong>原因的排查方法</strong></li><li><strong>优化方法论</strong></li></ol><p>你需要知道是什么原因导致了这次睡眠，是主动的还是被动的？如果是主动的，通过走读代码调查是否是正常的逻辑。如果是被动的，故事的源头是什么？ 这需要你对系统有足够多的认识，以及分析问题的经验，你需要经常看案例以增强自己的知识。 </p><p>以下把 TASK_INTERUPTIBLE 称之为 Sleep，TASK_UNINTERRUPTIBLE称之为 UninterruptibleSleep，目的是与 Systrac 中的用词保持一致。 </p><p>初期分析 Sleep 与 UninterruptibleSleep 状态的经验不足时你会感到困惑，这种困惑主要是来自于对系统的不了解。你需要读大量的框架层、内核层的代码才能从 Trace 中找出蛛丝马迹。目前并没有一种 Trace 工具能把整个逻辑链路描述的很清楚，而且他们有时候还有不准的时候，比如 Systrace 中的 wakeup_from 信息。只有广泛的系统运行原理做为支持储备，再结合 Trace 工具分析问题，才能做到准确定位问题根因。否则就是我经常说的「性能优化流氓」，你说什么是什么，别人也没法证伪。反复折磨测试同学复测，没测出来之后，这个问题也就不了了之了。 </p><p>本文没办法列举完所有状态的原因，因此只能列举最为常见的类型，以及典型的实际案例。更重要的是，你需要掌握诊断方法，并结合源代码来定位问题。</p><h2 id="Trace-中的可视化效果"><a href="#Trace-中的可视化效果" class="headerlink" title="Trace 中的可视化效果"></a>Trace 中的可视化效果</h2><p><img src="/images/android-systrace-cpu-state-sleep/image_1.png" alt="Pefetto 中支持显示的状态"></p><p><img src="/images/android-systrace-cpu-state-sleep/image_2.png" alt="Systrace 支持显示的状态"></p><p><a id="sleep-analysis"></a></p><h1 id="Sleep-状态分析"><a href="#Sleep-状态分析" class="headerlink" title="Sleep 状态分析"></a>Sleep 状态分析</h1><p><img src="/images/android-systrace-cpu-state-sleep/image_3.png" alt="图 1: UIThread 等待 RenderThread"></p><p><img src="/images/android-systrace-cpu-state-sleep/image_4.png" alt="图 2: Binder 调用等待"></p><h2 id="诊断方法"><a href="#诊断方法" class="headerlink" title="诊断方法"></a>诊断方法</h2><h3 id="通过-wakeup-from-tid-查看唤醒线程"><a href="#通过-wakeup-from-tid-查看唤醒线程" class="headerlink" title="通过 wakeup from tid: ***查看唤醒线程"></a>通过 <code>wakeup from tid: ***</code>查看唤醒线程</h3><p>Sleep 最常见的有图 1（UIThread 与 RenderThread 同步）的情况与图 2（Binder 调用）的情况。 Sleep 状态一般是由程序主动等待某个事件的发生而造成的，比如锁等待，因此它有个比较明确的唤醒源。比如图 1，UIThread 等待的是 RenderThread，你可以通过阅读代码来了解这种多线程之间的交互关系。虽然最直接，但是对开发者的要求非常高，因为这需要你熟读图形栈的代码。这可不是一般的难度，是追求的目标，但不具备普适性。 </p><p>更简单的方法是通过所谓的 <code>wakeup from tid: ***</code> 来调查线程之间的交互关系。从前面的 <a href="https://articles.zsxq.com/id_wzkkiwop5pgm.html">Runnable 文章</a> 中讲过，任何线程进入 Running 之前会先进入到 Runnable 状态，由此再转换成 Running。从 Sleep 状态切换到 Running，必然也要经过 Runnable。</p><p>进入到 Runnable 有两种方式，一种是 Running 中的程序被抢占了，暂时进入到 Runnable。还有一种是由另外一个线程将此线程（处于 Sleep 的线程）变成了 Runnable。 </p><p>我们在调查Sleep 唤醒线程关系的时候，应用到的原理是第二种情况。在 Systrace 中这种是被 <code>wakeup from tid: ***</code> 信息所呈现。线程被抢占之后变成 Runnable，在 Systrace 中是被 <code>Running Instead</code> 呈现。 </p><p><img src="/images/android-systrace-cpu-state-sleep/image_5.png"></p><p>需要特别注意的是 <code>wakeupfrom</code> 这个有时候不准，原因是跟具体的 tracepoint 类型有关。分析的时候要注意甄别，不要一味地相信这个数据是对的。</p><h3 id="其他方法"><a href="#其他方法" class="headerlink" title="其他方法"></a>其他方法</h3><ol><li>Simpleperf 还原代码执行流</li><li>在 Systrace 寻找时间点对齐的事件</li></ol><p>方法 1 适合用来看程序到底在执行什么操作进入到这种状态，是 IO 还是锁等待？球里连载 Simpleperf 工具的使用方法，其中「<a href="https://articles.zsxq.com/id_xc0a7uwmsf3z.html">Simpleperf 分析篇 (1): 使用 Firefox Profiler 可视分析 Simpleperf 数据</a>」介绍了可以按时间顺序看函数调用的可视化方法。其他使用也会陆续更新，直接搜关键字即可。</p><p>方法 2 是个比较笨的方法，但有时候也可以通过它找到蛛丝马迹，不过缺点是错误率比较高。</p><h2 id="耗时过长的常见原因"><a href="#耗时过长的常见原因" class="headerlink" title="耗时过长的常见原因"></a>耗时过长的常见原因</h2><ul><li><strong>Binder 操作</strong> → 通过打开 Binder 对应的 trace，可方便地观察到调用到远端的 Binder 执行线程。如果 Binder 耗时长，要分析远端的 Binder 执行情况，是否是锁竞争？得不到CPU 时间片？要具体问题具体分析  </li><li><strong>Java\futex锁竞争等待</strong> → 最常见也是最容易引起性能问题，当负载较高时候特别容易出现，特别是在 SystemServer 进程中。这是 Binder 多线程并行化或抢占公共资源导致的弊端。  </li><li><strong>主动等待</strong> → 线程主动进入 Sleep 状态，等待其它线程的唤醒，比如等待信号量的释放。优化建议：需要看代码逻辑分析等待是否合理，不合理就要优化掉。</li><li><strong>等待 GPU 执行完毕</strong> → 等 GPU 任务执行完毕，Trace 中可以看到等 GPU fence 时间。常见的原因有渲染任务过重、 GPU 能力弱、GPU 频率低等。优化建议：提升 GPU 频率、降低渲染任务复杂度，比如精简 Shader、降低渲染分辨率、降低Texture 画质等。</li></ul><p><a id="usleep-analysis"></a></p><h1 id="UninterruptibleSleep-状态分析"><a href="#UninterruptibleSleep-状态分析" class="headerlink" title="UninterruptibleSleep 状态分析"></a>UninterruptibleSleep 状态分析</h1><h2 id="诊断方法-1"><a href="#诊断方法-1" class="headerlink" title="诊断方法"></a>诊断方法</h2><p>本质上UninterruptibleSleep 也是一种 Sleep，因此分析 Sleep 状态时用到的方法也是通用的。不过此状态有两个特殊点与 Sleep 不同，因此在此特别说明。 </p><ol><li><strong>UninterruptibleSleep 分为 IOWait 与 Non-IOWait</strong></li><li><strong>UninterruptibleSleep 有 Block reason</strong></li></ol><h3 id="UninterruptibleSleep-分为-IOWait-与-Non-IOWait"><a href="#UninterruptibleSleep-分为-IOWait-与-Non-IOWait" class="headerlink" title="UninterruptibleSleep 分为 IOWait 与 Non-IOWait"></a>UninterruptibleSleep 分为 IOWait 与 Non-IOWait</h3><p>IO 等待好理解，就是程序执行了 IO 操作。最简单的，程序如果没法从 PageCache 缓存里快速拿到数据，那就要与设备进行 IO 操作。CPU 内部缓存的访问速度是最快的，其次是内存，最后是磁盘。它们之间的延迟差异是数量级差异，因此系统越是从磁盘中读取数据，对整体性能的影响就越大。  </p><p>非 IO 等待主要是指内核级别的锁等待，或者驱动程序中人为设置的等待。Linux 内核中某些路径是热点区域，因此不得不拿锁来进行保护。比如Binder 驱动，当负载大到一定程度，Binder 的内部的锁竞争导致的性能瓶颈就会呈现出来。 </p><h3 id="Block-Reason"><a href="#Block-Reason" class="headerlink" title="Block Reason"></a>Block Reason</h3><p>谷歌的 Riley Andrews(<a href="mailto:&#x72;&#105;&#97;&#110;&#100;&#114;&#101;&#119;&#115;&#x40;&#x67;&#111;&#111;&#103;&#108;&#101;&#46;&#x63;&#111;&#x6d;">&#x72;&#105;&#97;&#110;&#100;&#114;&#101;&#119;&#115;&#x40;&#x67;&#111;&#111;&#103;&#108;&#101;&#46;&#x63;&#111;&#x6d;</a>) 15年左右往内核里提交了一个 tracepoint 补丁，用于记录当发生 UninterruptibleSleep 的时候是否是 IO 等待、调用函数等信息。Systrace 中的展示的 IOWait 与 BlockReason，就是通过解析这条 tracepoint 而来的。这条代码提交的介绍如下（由于这笔提交未合入到 Linux 上游主线，因此要注意你用的内核是否单独带了此补丁）: </p><figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">sched: add sched blocked tracepoint which dumps out context of sleep.</span><br><span class="line">Decare war on uninterruptible sleep. Add a tracepoint which</span><br><span class="line">walks the kernel stack and dumps the first non-scheduler function</span><br><span class="line">called before the scheduler is invoked.</span><br><span class="line"></span><br><span class="line">Change-Id: [I19e965d5206329360a92cbfe2afcc8c30f65c229](https://android-review.googlesource.com/#/q/I19e965d5206329360a92cbfe2afcc8c30f65c229)</span><br><span class="line">Signed-off-by: Riley Andrews [riandrews@google.com](mailto:riandrews@google.com)</span><br></pre></td></tr></table></figure><p>在 ftrace（Systrace 使用的数据抓取机制） 中的被记录为</p><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">sched_blocked_reason: pid=<span class="number">30235</span> iowait=<span class="number">0</span> caller=get_user_pages_fast+<span class="number">0x34</span>/<span class="number">0x70</span> </span><br></pre></td></tr></table></figure><p>这句话被 Systrace 可视化的效果为: </p><p><img src="/images/android-systrace-cpu-state-sleep/image_6.png"></p><p>主线程中有一段 Uninterruptible Sleep 状态，它的 BlockReason 是 <code>get_user_pages_fast</code>。它是一个 Linux 内核中函数的名字，代表着是线程是被它切换到了 UninterruptibleSleep 状态。为了查看具体的原因，需要查看这个函数的具体实现。</p><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> * get_user_pages_fast() - pin user pages in memory</span></span><br><span class="line"><span class="comment"> * @start:      starting user address</span></span><br><span class="line"><span class="comment"> * @nr_pages:   number of pages from start to pin</span></span><br><span class="line"><span class="comment"> * @gup_flags:  flags modifying pin behaviour</span></span><br><span class="line"><span class="comment"> * @pages:      array that receives pointers to the pages pinned.</span></span><br><span class="line"><span class="comment"> *              Should be at least nr_pages long.</span></span><br><span class="line"><span class="comment"> *</span></span><br><span class="line"><span class="comment"> * Attempt to pin user pages in memory without taking mm-&gt;mmap_lock.</span></span><br><span class="line"><span class="comment"> * If not successful, it will fall back to taking the lock and</span></span><br><span class="line"><span class="comment"> * calling get_user_pages().</span></span><br><span class="line"><span class="comment"> *</span></span><br><span class="line"><span class="comment"> * Returns number of pages pinned. This may be fewer than the number requested.</span></span><br><span class="line"><span class="comment"> * If nr_pages is 0 or negative, returns 0. If no pages were pinned, returns</span></span><br><span class="line"><span class="comment"> * -errno.</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line"><span class="type">int</span> <span class="title function_">get_user_pages_fast</span><span class="params">(<span class="type">unsigned</span> <span class="type">long</span> start, <span class="type">int</span> nr_pages,</span></span><br><span class="line"><span class="params">      <span class="type">unsigned</span> <span class="type">int</span> gup_flags, <span class="keyword">struct</span> page **pages)</span></span><br><span class="line">&#123;</span><br><span class="line">  <span class="keyword">if</span> (!is_valid_gup_flags(gup_flags))</span><br><span class="line">    <span class="keyword">return</span> -EINVAL;</span><br><span class="line"></span><br><span class="line">  <span class="comment">/*</span></span><br><span class="line"><span class="comment">   * The caller may or may not have explicitly set FOLL_GET; either way is</span></span><br><span class="line"><span class="comment">   * OK. However, internally (within mm/gup.c), gup fast variants must set</span></span><br><span class="line"><span class="comment">   * FOLL_GET, because gup fast is always a &quot;pin with a +1 page refcount&quot;</span></span><br><span class="line"><span class="comment">   * request.</span></span><br><span class="line"><span class="comment">   */</span></span><br><span class="line">  gup_flags |= FOLL_GET;</span><br><span class="line">  <span class="keyword">return</span> internal_get_user_pages_fast(start, nr_pages, gup_flags, pages);</span><br><span class="line">&#125;</span><br><span class="line">EXPORT_SYMBOL_GPL(get_user_pages_fast);</span><br></pre></td></tr></table></figure><p>从函数解释上可以看到，函数首先是通过无锁的方式pin 应用侧的 pages，如果失败的时候不得不尝试持锁后走慢速执行路径。此时，无法持锁的时候那就要等待了，直到先前持锁的人释放锁。那之前被谁持有了呢？这时候可以利用之前介绍的Sleep 诊断方法，如下图。</p><p><img src="/images/android-systrace-cpu-state-sleep/image_7.png"></p><p>UninterruptibleSleep 状态相比 Sleep 有点复杂，因为它涉及到 Linux 内部的实现。可能是内核本身的机制有问题，也有可能是应用层使用不对，因此要联合上层的行为综合诊断才行。毕竟内核也不是万能的，它也有自己的能力边界，当应用层的使用超过其边界的时候，就会出现影响性能的现象。 </p><h2 id="IOWait-常见原因与优化方法"><a href="#IOWait-常见原因与优化方法" class="headerlink" title="IOWait 常见原因与优化方法"></a>IOWait 常见原因与优化方法</h2><h3 id="1-主动IO-操作"><a href="#1-主动IO-操作" class="headerlink" title="1. 主动IO 操作"></a>1. <strong>主动IO 操作</strong></h3><ul><li>程序进行频繁、大量的读或者写 IO 操作，这是最常见的情况。  </li><li>多个应用同时下发 IO 操作，导致器件的压力较大。同时执行的程序多的时候 IO 负载高的可能性也大。</li><li>器件本身的 IO 性能较差，可通过 IO Benchmark 来进行排查。 常见的原因有磁盘碎片化、器件老化、剩余空间较少（越是低端机越明显）、读放大、写放大等等。</li><li>文件系统特性，比如有些文件系统的内部操作会表现为 IO 等待。</li><li>开启 Swap 机制的内核下，数据从 Swap 中读取。</li></ul><p><strong>优化方法</strong></p><ul><li>调优 Readahead 机制</li><li>指定文件到 PageCache，即 PinFile 机制 </li><li>调整 PageCache 回收策略 </li><li>调优清理垃圾文件策略</li></ul><h3 id="2-低内存导致的-IO-变多"><a href="#2-低内存导致的-IO-变多" class="headerlink" title="2. 低内存导致的 IO 变多"></a>2. 低内存导致的 IO 变多</h3><p>内存是个非常有意思的东西，由于它的速度比磁盘快，因此 OS 设计者们把内存当做磁盘的缓存，通过它来避免了部分IO操作的请求，非常有效的提升了整体 IO 性能。有两个极端情况，当系统内存特别大的时候，绝大部分操作都可以在内存中执行，此时整体 IO 性能会非常好。当系统内存特别低，以至于没办法缓存 IO 数据的时候，几乎所有的 IO 操作都直接与器件打交道，这时候整体性能相比内存多的时候而言是非常差的。</p><p>所以系统中的内存较少的时候 IO 等待的概率也会变高。所以，这个问题就变成了如何让系统中有足够多的内存？如何调节磁盘缓存的淘汰算法？</p><p><strong>优化方法</strong></p><ul><li>关键路径上减少 IO 操作</li><li>通过Readahead 机制读数据</li><li>将热点数据尽量聚集在一起，使被 Readahead 机制命中的概率高 </li><li>最后一个老生常谈的，减少大量的内存分配、内存浪费等操作</li></ul><p>系统中的内存是被各个进程所共用。当app 只考虑自己，肆无忌惮的使用计算资源，必然会影响到其他程序。这时候系统还是会回来压制你，到头来亏损的还是自己。 不过能想到这一步的开发者比较少，也不现实。明文化的执行系统约定，可能是个终极解决方案。 </p><h2 id="Non-IOWait-常见原因"><a href="#Non-IOWait-常见原因" class="headerlink" title="Non-IOWait 常见原因"></a>Non-IOWait 常见原因</h2><ul><li><strong>低内存导致等待</strong> → 低内存的时候要回收其他程序或者缓存上的内存。</li><li><strong>Binder 等待</strong> → 有大量 Binder 操作的时候出现概率较高。  </li><li><strong>各种各样的内核锁，不胜枚举</strong>。结合「诊断方法」来分析。</li></ul><h2 id="系统调度与-UninterruptibleSleep-耦合的问题"><a href="#系统调度与-UninterruptibleSleep-耦合的问题" class="headerlink" title="系统调度与 UninterruptibleSleep   耦合的问题"></a>系统调度与 UninterruptibleSleep   耦合的问题</h2><p>当线程处于 UninterruptibleSleep 非 IO等待状态（即内核锁），而持有该锁的其他线程因 CPU 调度原因，较长时间处于 Runnable 状态。这时候就出现了有意思的现象，即使被等待的线程处于高优先级，它的依赖方没有被调度器及时的识别到，即使是非常短的锁持有，也会出现较长时间的等待。 </p><p>规避或者彻底解决这类问题都是件比较难的事情，不同厂家实现了不同的解决方案，也是比较考虑厂家技术能力的一个问题。 </p><p><a id="appendix"></a></p><h1 id="附录"><a href="#附录" class="headerlink" title="附录"></a>附录</h1><h2 id="Linux-线程状态释义"><a href="#Linux-线程状态释义" class="headerlink" title="Linux 线程状态释义"></a>Linux 线程状态释义</h2><table><thead><tr><th>线程状态</th><th>描述</th></tr></thead><tbody><tr><td>S</td><td>SLEEPING</td></tr><tr><td>R、R+</td><td>RUNNABLE</td></tr><tr><td>D</td><td>UNINTR_SLEEP</td></tr><tr><td>T</td><td>STOPPED</td></tr><tr><td>t</td><td>DEBUG</td></tr><tr><td>Z</td><td>ZOMBIE</td></tr><tr><td>X</td><td>EXIT_DEAD</td></tr><tr><td>x</td><td>TASK_DEAD</td></tr><tr><td>K</td><td>WAKE_KILL</td></tr><tr><td>W</td><td>WAKING</td></tr><tr><td>D</td><td>K</td></tr><tr><td>D</td><td>W</td></tr></tbody></table><h2 id="案例-从-Swap-读取数据时的等待"><a href="#案例-从-Swap-读取数据时的等待" class="headerlink" title="案例: 从 Swap 读取数据时的等待"></a>案例: 从 Swap 读取数据时的等待</h2><p><img src="/images/android-systrace-cpu-state-sleep/image_8.png"></p><h2 id="案例-同进程的多个线程进行-mmap"><a href="#案例-同进程的多个线程进行-mmap" class="headerlink" title="案例: 同进程的多个线程进行 mmap"></a>案例: 同进程的多个线程进行 mmap</h2><p><img src="/images/android-systrace-cpu-state-sleep/image_9.png"></p><p>共享同一个 mm_struct 的线程同时执行 mmap() 系统调用进行 vma 分配时发生锁竞争。</p><p>mmap_write_lock_killable() 与 mmap_write_unlock() 包起来的区域就是由锁受保护的区域。 </p><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">unsigned</span> <span class="type">long</span> <span class="title function_">vm_mmap_pgoff</span><span class="params">(<span class="keyword">struct</span> file *file, <span class="type">unsigned</span> <span class="type">long</span> addr,</span></span><br><span class="line"><span class="params">  <span class="type">unsigned</span> <span class="type">long</span> len, <span class="type">unsigned</span> <span class="type">long</span> prot,</span></span><br><span class="line"><span class="params">  <span class="type">unsigned</span> <span class="type">long</span> flag, <span class="type">unsigned</span> <span class="type">long</span> pgoff)</span></span><br><span class="line">&#123;</span><br><span class="line">  <span class="type">unsigned</span> <span class="type">long</span> ret;</span><br><span class="line">  <span class="class"><span class="keyword">struct</span> <span class="title">mm_struct</span> *<span class="title">mm</span> =</span> current-&gt;mm;</span><br><span class="line">  <span class="type">unsigned</span> <span class="type">long</span> populate;</span><br><span class="line">  LIST_HEAD(uf);</span><br><span class="line"></span><br><span class="line">  ret = security_mmap_file(file, prot, flag);</span><br><span class="line">  <span class="keyword">if</span> (!ret) &#123;</span><br><span class="line">    <span class="keyword">if</span> (mmap_write_lock_killable(mm))</span><br><span class="line">      <span class="keyword">return</span> -EINTR;</span><br><span class="line">    ret = do_mmap(file, addr, len, prot, flag, pgoff, &amp;populate,</span><br><span class="line">            &amp;uf);</span><br><span class="line">    mmap_write_unlock(mm);</span><br><span class="line">    userfaultfd_unmap_complete(mm, &amp;uf);</span><br><span class="line">    <span class="keyword">if</span> (populate)</span><br><span class="line">      mm_populate(ret, populate);</span><br><span class="line">  &#125;</span><br><span class="line">  <span class="keyword">return</span> ret;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure><p><a id="about"></a></p><h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p><ol><li><a href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li><li><a href="https://androidperformance.com/2019/12/01/BlogMap/">本博客内容导航</a> ：个人博客内容的一个导航。</li><li><a href="https://androidperformance.com/2018/05/07/Android-performance-optimization-skills-and-tools/">个人整理和搜集的优秀博客文章 - Android 性能优化必知必会</a> ：欢迎大家自荐和推荐 （微信私聊即可）</li><li><a href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a> ： 欢迎加入，多谢支持～</li></ol><blockquote><p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p></blockquote><p><img src="/images/WechatIMG581.png" alt="微信扫一扫"></p>]]></content>
       
       
       <categories>
@@ -649,13 +649,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -682,13 +682,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -715,9 +715,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Jank </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -775,9 +775,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Framework </tag>
             
@@ -804,15 +804,15 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
-            
-            <tag> Jank </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
         </tags>
       
@@ -837,13 +837,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> ANR </tag>
             
@@ -870,9 +870,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Linux </tag>
             
@@ -899,13 +899,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> ANR </tag>
             
@@ -932,13 +932,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> ANR </tag>
             
@@ -965,13 +965,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> ANR </tag>
             
@@ -998,13 +998,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> ANR </tag>
             
@@ -1031,13 +1031,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> ANR </tag>
             
@@ -1064,13 +1064,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> ANR </tag>
             
@@ -1097,9 +1097,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Jank </tag>
+            
+            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -1157,11 +1157,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
         </tags>
       
@@ -1186,13 +1186,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Performance </tag>
             
@@ -1219,9 +1219,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Java </tag>
             
@@ -1250,9 +1250,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Jank </tag>
+            
+            <tag> Android </tag>
             
         </tags>
       
@@ -1277,13 +1277,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Performance </tag>
             
@@ -1310,13 +1310,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Performance </tag>
             
@@ -1343,13 +1343,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Performance </tag>
             
@@ -1407,13 +1407,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Performance </tag>
             
@@ -1440,11 +1440,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -1473,13 +1473,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Performance </tag>
             
@@ -1506,13 +1506,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Performance </tag>
             
@@ -1539,11 +1539,11 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Framework </tag>
             
@@ -1572,13 +1572,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> RenderThread </tag>
             
@@ -1605,13 +1605,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Linux </tag>
             
@@ -1638,15 +1638,15 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
         </tags>
       
@@ -1671,13 +1671,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -1704,13 +1704,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -1737,13 +1737,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -1770,11 +1770,11 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Performance </tag>
             
@@ -1836,13 +1836,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -1869,13 +1869,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Performance </tag>
             
@@ -1902,13 +1902,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -1935,13 +1935,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Performance </tag>
             
@@ -1968,13 +1968,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Performance </tag>
             
@@ -2001,15 +2001,15 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
         </tags>
       
@@ -2059,9 +2059,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Jank </tag>
+            
+            <tag> Android </tag>
             
             <tag> Systrace </tag>
             
@@ -2092,11 +2092,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> 年度推荐 </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Linux </tag>
             
@@ -2123,11 +2123,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Framework </tag>
             
@@ -2343,9 +2343,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Jank </tag>
+            
+            <tag> Android </tag>
             
             <tag> 读书笔记 </tag>
             
@@ -2401,13 +2401,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Process </tag>
             
@@ -2434,13 +2434,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> RenderThread </tag>
             
@@ -2467,11 +2467,11 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> RenderThread </tag>
             
@@ -2500,13 +2500,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -2533,13 +2533,13 @@
       
         <tags>
             
-            <tag> 年度推荐 </tag>
+            <tag> Android </tag>
             
             <tag> Startup </tag>
             
-            <tag> Memory </tag>
+            <tag> 年度推荐 </tag>
             
-            <tag> Android </tag>
+            <tag> Memory </tag>
             
         </tags>
       
@@ -2643,11 +2643,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -2674,9 +2674,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Java </tag>
             
@@ -2705,9 +2705,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> RenderThread </tag>
             
@@ -2738,11 +2738,11 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> RenderThread </tag>
             
@@ -2800,11 +2800,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -2833,13 +2833,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -2866,11 +2866,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -2899,9 +2899,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -2932,9 +2932,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Java </tag>
             
@@ -2992,11 +2992,11 @@
       
         <tags>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3025,11 +3025,11 @@
       
         <tags>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3058,9 +3058,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3091,11 +3091,11 @@
       
         <tags>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3124,9 +3124,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3157,15 +3157,15 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
-            <tag> Java </tag>
-            
             <tag> Linux </tag>
+            
+            <tag> Java </tag>
             
         </tags>
       
@@ -3190,9 +3190,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3223,9 +3223,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3256,9 +3256,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3314,9 +3314,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
         </tags>
       
@@ -3468,9 +3468,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
         </tags>
       
@@ -3522,9 +3522,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
         </tags>
       
@@ -3549,11 +3549,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -3634,13 +3634,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
-            <tag> Java </tag>
+            <tag> Startup </tag>
             
             <tag> Linux </tag>
+            
+            <tag> Java </tag>
             
         </tags>
       
@@ -3665,9 +3665,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Java </tag>
             

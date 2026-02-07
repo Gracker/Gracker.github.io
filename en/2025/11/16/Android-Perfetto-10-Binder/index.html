@@ -18,12 +18,12 @@
 <meta property="og:site_name" content="Android Performance">
 <meta property="og:description" content="The tenth article in the Perfetto series focuses on Binder, Android’s core Inter-Process Communication (IPC) mechanism. Binder carries most interactions between system services and apps, and is often">
 <meta property="og:locale" content="en_US">
-<meta property="og:image" content="https://androidperformance.com/en/images/image-20260207113358540.png">
-<meta property="og:image" content="https://androidperformance.com/en/images/image-20260207110047680.png">
-<meta property="og:image" content="https://androidperformance.com/en/images/image-20260207105941270.png">
+<meta property="og:image" content="https://androidperformance.com/en/images/image-20260207113358540.webp">
+<meta property="og:image" content="https://androidperformance.com/en/images/image-20260207110047680.webp">
+<meta property="og:image" content="https://androidperformance.com/en/images/image-20260207105941270.webp">
 <meta property="og:image" content="https://androidperformance.com/en/images/WechatIMG581.webp">
 <meta property="article:published_time" content="2025-11-16T07:33:30.000Z">
-<meta property="article:modified_time" content="2026-02-07T05:18:07.391Z">
+<meta property="article:modified_time" content="2026-02-07T05:24:46.714Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Android">
 <meta property="article:tag" content="Perfetto">
@@ -32,7 +32,7 @@
 <meta property="article:tag" content="Locking">
 <meta property="article:tag" content="Scheduling">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:image" content="https://androidperformance.com/en/images/image-20260207113358540.png">
+<meta name="twitter:image" content="https://androidperformance.com/en/images/image-20260207113358540.webp">
                             <meta http-equiv="Cache-control" content="no-cache">
                             <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
                             <link rel="icon" href="/en/assets/favicon.ico">
@@ -645,7 +645,7 @@ loading="lazy"             decoding="async"
 <p>Therefore, when an app process calls <code>IActivityManager#attachApplication()</code> during startup, Binder is the channel that safely and reliably delivers that request to <code>system_server</code>.</p>
 <h3 id="Case-from-App-Developer’s-Perspective"><a href="#Case-from-App-Developer’s-Perspective" class="headerlink" title="Case from App Developer’s Perspective"></a>Case from App Developer’s Perspective</h3><p>Suppose the trace contains <code>AIDL::java::IActivityManager::attachApplication::server</code>. This corresponds to a <strong>synchronous</strong> Binder call to <code>IActivityManager#attachApplication(...)</code>, handled by <code>ActivityManagerService</code> in <code>system_server</code>. The path is: on the <strong>Proxy side</strong>, app code gets <code>IActivityManager</code> via <code>ActivityManager.getService()</code>; the proxy <strong>serializes</strong> arguments into a <code>Parcel</code> and calls <code>transact()</code>; the Binder driver queues the transaction and wakes an idle <code>system_server</code> Binder thread (for example <code>Binder:1460_5</code>); on the <strong>Stub side</strong>, <code>ActivityManagerService</code> processes <code>attachApplication</code>; finally, the reply is marshaled back and the app thread resumes from <code>waitForResponse()</code>.</p>
 <p>In Perfetto, this appears as one transaction on <strong>Android Binder &#x2F; Transactions</strong> (if AIDL info is decoded, the slice name is often <code>AIDL::java::IActivityManager::attachApplication::client/server</code>, or SQL shows <code>aidl_name=IActivityManager</code>, <code>method_name=attachApplication</code>); the app thread stays in <code>S</code> (Sleeping) with <code>blocked_function</code> often at <code>binder_thread_read</code> &#x2F; <code>epoll_wait</code> &#x2F; <code>ioctl(BINDER_WRITE_READ)</code>; a <code>system_server</code> Binder thread runs; and <strong>Flow arrows</strong> connect client and server work.</p>
-<p><img src="/en/images/image-20260207113358540.png" alt="image-20260207113358540"></p>
+<p><img src="/en/images/image-20260207113358540.webp" alt="image-20260207113358540"></p>
 <p><a id="setup"></a></p>
 <h2 id="Perfetto-Setup-and-Data-Sources"><a href="#Perfetto-Setup-and-Data-Sources" class="headerlink" title="Perfetto Setup and Data Sources"></a>Perfetto Setup and Data Sources</h2><p>To diagnose Binder in Perfetto, you need to prepare the data sources and Trace configuration in advance.</p>
 <h3 id="Data-Sources-and-Track-Overview"><a href="#Data-Sources-and-Track-Overview" class="headerlink" title="Data Sources and Track Overview"></a>Data Sources and Track Overview</h3><p>Binder analysis needs to connect transaction events with scheduling, blocking, and lock signals. In practice, recording is mainly based on <code>linux.ftrace</code> (binder tracepoints + sched + optional atrace categories), plus lightweight process&#x2F;thread metadata.</p>
@@ -738,7 +738,7 @@ loading="lazy"             decoding="async"
 <p>Run this in Perfetto SQL to list slow synchronous transactions:</p>
 <figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.binder;</span><br><span class="line"></span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  aidl_name,</span><br><span class="line">  method_name,</span><br><span class="line">  client_process,</span><br><span class="line">  client_thread,</span><br><span class="line">  client_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> client_ms,</span><br><span class="line">  server_process,</span><br><span class="line">  server_thread,</span><br><span class="line">  server_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> server_ms,</span><br><span class="line">  (server_ts <span class="operator">-</span> client_ts) <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> dispatch_ms</span><br><span class="line"><span class="keyword">FROM</span> android_binder_txns</span><br><span class="line"><span class="keyword">WHERE</span> is_sync</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> client_dur <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">20</span>;</span><br></pre></td></tr></table></figure>
 
-<p><img src="/en/images/image-20260207110047680.png" alt="image-20260207110047680"></p>
+<p><img src="/en/images/image-20260207110047680.webp" alt="image-20260207110047680"></p>
 <p>These relationships determine next steps: if <code>client_dur</code> is long but <code>server_dur</code> is short, the bottleneck is likely dispatch&#x2F;queueing; if <code>server_dur</code> itself is long, inspect what the server Binder thread is doing (business logic, lock wait, or I&#x2F;O).</p>
 <p><a id="workflow-threadpool"></a></p>
 <h3 id="Step-2-Evaluate-Thread-Pool-and-Oneway-Queue"><a href="#Step-2-Evaluate-Thread-Pool-and-Oneway-Queue" class="headerlink" title="Step 2: Evaluate Thread Pool and Oneway Queue"></a>Step 2: Evaluate Thread Pool and Oneway Queue</h3><p>If Step 1 analysis finds that latency is mainly not in server-side processing, but in “queuing”, then you need to further check the status of the Binder thread pool. Before deep analysis, first answer a frequently asked question: <strong>“approximately how many Binder threads does each process have? What’s the scale of system_server’s Binder thread pool? Under what circumstances will it be ‘exhausted’?”</strong></p>
@@ -774,7 +774,7 @@ loading="lazy"             decoding="async"
 <blockquote>
 <p><strong>Tip</strong>: if this returns nothing, make sure <code>atrace_categories</code> includes <code>dalvik</code> and contention actually occurred during capture.</p>
 </blockquote>
-<p><img src="/en/images/image-20260207105941270.png" alt="image-20260207105941270"></p>
+<p><img src="/en/images/image-20260207105941270.webp" alt="image-20260207105941270"></p>
 <p><a id="case"></a><br><a id="case-wm"></a></p>
 <h2 id="Case-Study-Window-Management-Delay"><a href="#Case-Study-Window-Management-Delay" class="headerlink" title="Case Study: Window Management Delay"></a>Case Study: Window Management Delay</h2><p>A real case to demonstrate the workflow: <strong>startup animation stutter</strong>.</p>
 <p><strong>1. Discover Anomaly</strong></p>
@@ -851,7 +851,7 @@ loading="lazy"             decoding="async"
             <p>Author：<a href="https://androidperformance.com/en">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/">https://androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/</a>
             <p>Publish date：<a href="https://androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/">November 16th 2025, 3:33:30 pm</a>
-            <p>Update date：<a href="https://androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/">February 7th 2026, 1:18:07 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/">February 7th 2026, 1:24:46 pm</a>
             <p>License：This work is licensed under <a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a></p>
         </div>
     <!-- paginator -->
@@ -1155,11 +1155,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/13</span>
-            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-sleep/">Systrace Thread CPU State Analysis Tips - Sleep and Uninterruptible Sleep</a>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-running/">Systrace Thread CPU State Analysis Tips - Running</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/13</span>
-            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-running/">Systrace Thread CPU State Analysis Tips - Running</a>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-sleep/">Systrace Thread CPU State Analysis Tips - Sleep and Uninterruptible Sleep</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/21</span>
@@ -1190,15 +1190,15 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/13</span>
-            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace Responsiveness in Action 1 - Understanding Responsiveness Principles</a>
-        </li>
-        <li class="archive-post-item">
-            <span class="archive-post-date">09/13</span>
             <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace Responsiveness in Action 2 - Responsiveness Analysis - Using App Startup as an Example</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/13</span>
             <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace Responsiveness in Action 3 - Extended Knowledge on Responsiveness</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace Responsiveness in Action 1 - Understanding Responsiveness Principles</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
@@ -1492,11 +1492,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/19</span>
-            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-2/">Android Performance Patterns: Understanding Overdraw</a>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-1/">Android Performance Patterns: Render Performance</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/19</span>
-            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-1/">Android Performance Patterns: Render Performance</a>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-2/">Android Performance Patterns: Understanding Overdraw</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/19</span>
@@ -1528,7 +1528,7 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/15</span>
-            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-3/">Android Tips Round-Up, Part 3</a>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-4/">Android Tips Round-Up, Part 4</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/15</span>
@@ -1536,7 +1536,7 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/15</span>
-            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-4/">Android Tips Round-Up, Part 4</a>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-3/">Android Tips Round-Up, Part 3</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/04</span>
@@ -1591,6 +1591,14 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-tags">
     <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
             <span class="sidebar-tag-name" data-tags="Yearly Recommendations">
                 <span class="iconfont-archer">&#xe606;</span>
                 Yearly Recommendations
@@ -1603,10 +1611,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Memory
             </span>
-            <span class="sidebar-tag-name" data-tags="Android">
-                <span class="iconfont-archer">&#xe606;</span>
-                Android
-            </span>
             <span class="sidebar-tag-name" data-tags="Perfetto">
                 <span class="iconfont-archer">&#xe606;</span>
                 Perfetto
@@ -1614,10 +1618,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Systrace">
                 <span class="iconfont-archer">&#xe606;</span>
                 Systrace
-            </span>
-            <span class="sidebar-tag-name" data-tags="Jank">
-                <span class="iconfont-archer">&#xe606;</span>
-                Jank
             </span>
             <span class="sidebar-tag-name" data-tags="Year in Review">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1635,10 +1635,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 ANR
             </span>
-            <span class="sidebar-tag-name" data-tags="RenderThread">
-                <span class="iconfont-archer">&#xe606;</span>
-                RenderThread
-            </span>
             <span class="sidebar-tag-name" data-tags="Performance">
                 <span class="iconfont-archer">&#xe606;</span>
                 Performance
@@ -1646,6 +1642,10 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Tools">
                 <span class="iconfont-archer">&#xe606;</span>
                 Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
             </span>
             <span class="sidebar-tag-name" data-tags="DelayLoad">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1662,6 +1662,18 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Framework">
                 <span class="iconfont-archer">&#xe606;</span>
                 Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="Locking">
+                <span class="iconfont-archer">&#xe606;</span>
+                Locking
+            </span>
+            <span class="sidebar-tag-name" data-tags="Scheduling">
+                <span class="iconfont-archer">&#xe606;</span>
+                Scheduling
             </span>
             <span class="sidebar-tag-name" data-tags="Performance Optimization">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1687,18 +1699,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Page Response
             </span>
-            <span class="sidebar-tag-name" data-tags="Binder">
-                <span class="iconfont-archer">&#xe606;</span>
-                Binder
-            </span>
-            <span class="sidebar-tag-name" data-tags="Locking">
-                <span class="iconfont-archer">&#xe606;</span>
-                Locking
-            </span>
-            <span class="sidebar-tag-name" data-tags="Scheduling">
-                <span class="iconfont-archer">&#xe606;</span>
-                Scheduling
-            </span>
             <span class="sidebar-tag-name" data-tags="MAT">
                 <span class="iconfont-archer">&#xe606;</span>
                 MAT
@@ -1711,13 +1711,9 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Programmer
             </span>
-            <span class="sidebar-tag-name" data-tags="Nexus">
+            <span class="sidebar-tag-name" data-tags="Singleton">
                 <span class="iconfont-archer">&#xe606;</span>
-                Nexus
-            </span>
-            <span class="sidebar-tag-name" data-tags="Annual Recommendations">
-                <span class="iconfont-archer">&#xe606;</span>
-                Annual Recommendations
+                Singleton
             </span>
             <span class="sidebar-tag-name" data-tags="Sharp Tools">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1727,25 +1723,25 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Productivity
             </span>
-            <span class="sidebar-tag-name" data-tags="Singleton">
+            <span class="sidebar-tag-name" data-tags="Annual Recommendations">
                 <span class="iconfont-archer">&#xe606;</span>
-                Singleton
+                Annual Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
             </span>
             <span class="sidebar-tag-name" data-tags="Design Specs">
                 <span class="iconfont-archer">&#xe606;</span>
                 Design Specs
             </span>
-            <span class="sidebar-tag-name" data-tags="Kotlin">
-                <span class="iconfont-archer">&#xe606;</span>
-                Kotlin
-            </span>
             <span class="sidebar-tag-name" data-tags="Compose">
                 <span class="iconfont-archer">&#xe606;</span>
                 Compose
             </span>
-            <span class="sidebar-tag-name" data-tags="Process">
+            <span class="sidebar-tag-name" data-tags="Kotlin">
                 <span class="iconfont-archer">&#xe606;</span>
-                Process
+                Kotlin
             </span>
             <span class="sidebar-tag-name" data-tags="Stutter">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1754,6 +1750,10 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Overdraw">
                 <span class="iconfont-archer">&#xe606;</span>
                 Overdraw
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
             </span>
             <span class="sidebar-tag-name" data-tags="Reading Notes">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1771,29 +1771,29 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Testing
             </span>
-            <span class="sidebar-tag-name" data-tags="Internet">
-                <span class="iconfont-archer">&#xe606;</span>
-                Internet
-            </span>
             <span class="sidebar-tag-name" data-tags="User Experience">
                 <span class="iconfont-archer">&#xe606;</span>
                 User Experience
             </span>
-            <span class="sidebar-tag-name" data-tags="Game Programming">
+            <span class="sidebar-tag-name" data-tags="Internet">
                 <span class="iconfont-archer">&#xe606;</span>
-                Game Programming
+                Internet
             </span>
             <span class="sidebar-tag-name" data-tags="Reading">
                 <span class="iconfont-archer">&#xe606;</span>
                 Reading
             </span>
-            <span class="sidebar-tag-name" data-tags="Community">
+            <span class="sidebar-tag-name" data-tags="Game Programming">
                 <span class="iconfont-archer">&#xe606;</span>
-                Community
+                Game Programming
             </span>
             <span class="sidebar-tag-name" data-tags="Liqi">
                 <span class="iconfont-archer">&#xe606;</span>
                 Liqi
+            </span>
+            <span class="sidebar-tag-name" data-tags="Community">
+                <span class="iconfont-archer">&#xe606;</span>
+                Community
             </span>
             <span class="sidebar-tag-name" data-tags="Smooth">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1813,6 +1813,10 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-categories">
     <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="Reading Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Reading Notes
+        </span>
         <span class="sidebar-category-name" data-categories="Casual Notes">
             <span class="iconfont-archer">&#xe60a;</span>
             Casual Notes
@@ -1824,10 +1828,6 @@ loading="lazy"             decoding="async"
         <span class="sidebar-category-name" data-categories="Android">
             <span class="iconfont-archer">&#xe60a;</span>
             Android
-        </span>
-        <span class="sidebar-category-name" data-categories="Reading Notes">
-            <span class="iconfont-archer">&#xe60a;</span>
-            Reading Notes
         </span>
         <span class="sidebar-category-name" data-categories="Java">
             <span class="iconfont-archer">&#xe60a;</span>

@@ -8,7 +8,7 @@
       <link href="/en/2025/11/16/Android-Perfetto-10-Binder/"/>
       <url>/en/2025/11/16/Android-Perfetto-10-Binder/</url>
       
-        <content type="html"><![CDATA[<p>The tenth article in the Perfetto series focuses on <strong>Binder</strong>, Android’s core Inter-Process Communication (IPC) mechanism. Binder carries most interactions between system services and apps, and is often where latency and jank originate. This article uses signals from <code>linux.ftrace</code> (binder tracepoints + sched), <code>thread_state</code>, and ART Java monitor contention (via atrace <code>dalvik</code>) to provide a practical workflow for diagnosing transaction latency, thread-pool pressure, and lock contention.</p><span id="more"></span><h2 id="Table-of-Contents"><a href="#Table-of-Contents" class="headerlink" title="Table of Contents"></a>Table of Contents</h2><ul><li><a href="#series">Perfetto Series Catalog</a></li><li><a href="#basics">Binder Basics</a></li><li><a href="#setup">Perfetto Setup and Data Sources</a><ul><li><a href="#other-tools">Other Binder Analysis Tools</a></li></ul></li><li><a href="#workflow">Binder Analysis Workflow</a><ul><li><a href="#workflow-latency">Step 1: Identify Transaction Latency</a></li><li><a href="#workflow-threadpool">Step 2: Evaluate Thread Pool and Oneway Queue</a></li><li><a href="#workflow-lock">Step 3: Investigate Lock Contention</a></li></ul></li><li><a href="#case">Case Studies</a><ul><li><a href="#case-wm">Case 1: Window Management Delay</a></li><li><a href="#case-threadpool">Case 2: Binder Thread Pool Saturation</a></li></ul></li><li><a href="#platform-features">Platform Features and Best Practices</a></li><li><a href="#summary">Summary</a></li><li><a href="#refs">References</a></li><li><a href="#attachments">Attachments</a></li><li><a href="#about">About the Author &amp; Blog</a></li></ul><p><a id="series"></a></p><h2 id="Perfetto-Series-Catalog"><a href="#Perfetto-Series-Catalog" class="headerlink" title="Perfetto Series Catalog"></a>Perfetto Series Catalog</h2><ol><li><a href="https://www.androidperformance.com/en/2024/03/27/Android-Perfetto-101/">Android Perfetto Series Catalog</a></li><li><a href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto Series 1: Introduction to Perfetto</a></li><li><a href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a></li><li><a href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a></li><li><a href="https://www.androidperformance.com/en/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto Series 4: Opening Large Traces via Command Line</a></li><li><a href="https://www.androidperformance.com/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Choreographer-based Rendering Flow</a></li><li><a href="https://www.androidperformance.com/en/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto Series 6: Why 120Hz? Advantages and Challenges</a></li><li><a href="https://www.androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto Series 7: MainThread and RenderThread Deep Dive</a></li><li><a href="https://www.androidperformance.com/en/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto Series 8: Understanding Vsync and Performance Analysis</a></li><li><a href="https://www.androidperformance.com/en/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto Series 9: Interpreting CPU Information</a></li><li><a href="https://www.androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto Series 10: Binder Scheduling and Lock Contention (this article)</a></li><li><a href="https://www.bilibili.com/video/BV1oi82efE4D/?vd_source=0c6d2191e785de0a36dc21a9da7e664e">Video (Bilibili) - Android Perfetto Basics and Case Studies</a></li><li><a href="https://www.bilibili.com/video/BV17A6bBLECu/">Video (Bilibili) - Android Perfetto: Trace Graph Types - AOSP, WebView, Flutter + OEM System Optimization</a></li></ol><p><a id="basics"></a></p><h2 id="Binder-Basics"><a href="#Binder-Basics" class="headerlink" title="Binder Basics"></a>Binder Basics</h2><p>For readers encountering Binder for the first time, understanding its role and participants is crucial. You can roughly understand Binder as “cross-process function calls”: you write code in one process that looks like calling a local interface, while Binder handles the actual call and data transfer. Overall, it is Android’s primary Inter-Process Communication (IPC) mechanism, consisting of four core components:</p><ol><li><strong>Client</strong>: Application threads initiate calls through <code>IBinder.transact()</code>, writing <code>Parcel</code>-serialized data to the kernel.</li><li><strong>Service (Server)</strong>: Usually runs in SystemServer or other processes, reading <code>Parcel</code> and executing business logic through <code>Binder.onTransact()</code>.</li><li><strong>Binder Driver</strong>: The kernel module <code>/dev/binder</code> responsible for thread pool scheduling, buffer management, priority inheritance, etc., serving as the “messenger” connecting both parties.</li><li><strong>Thread Pool</strong>: The server typically maintains a set of Binder threads. Note that <strong>the thread pool is not created full from the start</strong>, but is created on demand. The Java layer defaults to approximately 15 Binder worker threads (excluding the main thread), and the Native layer can also configure the maximum thread count via <code>ProcessState</code> (default value is usually also 15). When all Binder threads are busy, new requests will queue in the driver layer waiting for idle threads.</li></ol><p><strong>Why is Binder needed?</strong></p><p>Android adopts a multi-process architecture to isolate applications, improve security, and stability. Each APK runs in an independent user space. When it needs to access system capabilities (camera, location, notifications, etc.), it must cross-process call the Framework or SystemServer.</p><p>Limitations of traditional IPC solutions:</p><table><thead><tr><th>IPC Method</th><th>Problem</th></tr></thead><tbody><tr><td>Socket</td><td>High overhead, lacks identity verification</td></tr><tr><td>Pipe</td><td>Only supports parent-child processes, one-way communication</td></tr><tr><td>Shared Memory</td><td>Needs additional synchronization mechanisms, lacks access control</td></tr></tbody></table><p>Binder solves these problems at the kernel layer, providing three key capabilities: first, <strong>identity and permission</strong> (based on UID&#x2F;PID verification to ensure the caller is legitimate); second, <strong>synchronous and asynchronous calls</strong> (in synchronous mode, the Client waits for the Server to return, which is the most common mode, while in asynchronous mode, the Client returns immediately after sending, suitable for scenarios like notifications and status reporting); third, <strong>priority inheritance</strong> (when a high-priority Client calls a low-priority Server, the Server temporarily elevates its priority to avoid priority inversion problems).</p><p>Therefore, when an app process calls <code>IActivityManager#attachApplication()</code> during startup, Binder is the channel that safely and reliably delivers that request to <code>system_server</code>.</p><h3 id="Case-from-App-Developer’s-Perspective"><a href="#Case-from-App-Developer’s-Perspective" class="headerlink" title="Case from App Developer’s Perspective"></a>Case from App Developer’s Perspective</h3><p>Suppose the trace contains <code>AIDL::java::IActivityManager::attachApplication::server</code>. This corresponds to a <strong>synchronous</strong> Binder call to <code>IActivityManager#attachApplication(...)</code>, handled by <code>ActivityManagerService</code> in <code>system_server</code>. The path is: on the <strong>Proxy side</strong>, app code gets <code>IActivityManager</code> via <code>ActivityManager.getService()</code>; the proxy <strong>serializes</strong> arguments into a <code>Parcel</code> and calls <code>transact()</code>; the Binder driver queues the transaction and wakes an idle <code>system_server</code> Binder thread (for example <code>Binder:1460_5</code>); on the <strong>Stub side</strong>, <code>ActivityManagerService</code> processes <code>attachApplication</code>; finally, the reply is marshaled back and the app thread resumes from <code>waitForResponse()</code>.</p><p>In Perfetto, this appears as one transaction on <strong>Android Binder &#x2F; Transactions</strong> (if AIDL info is decoded, the slice name is often <code>AIDL::java::IActivityManager::attachApplication::client/server</code>, or SQL shows <code>aidl_name=IActivityManager</code>, <code>method_name=attachApplication</code>); the app thread stays in <code>S</code> (Sleeping) with <code>blocked_function</code> often at <code>binder_thread_read</code> &#x2F; <code>epoll_wait</code> &#x2F; <code>ioctl(BINDER_WRITE_READ)</code>; a <code>system_server</code> Binder thread runs; and <strong>Flow arrows</strong> connect client and server work.</p><p><img src="/en/images/image-20260207113358540.png" alt="image-20260207113358540"></p><p><a id="setup"></a></p><h2 id="Perfetto-Setup-and-Data-Sources"><a href="#Perfetto-Setup-and-Data-Sources" class="headerlink" title="Perfetto Setup and Data Sources"></a>Perfetto Setup and Data Sources</h2><p>To diagnose Binder in Perfetto, you need to prepare the data sources and Trace configuration in advance.</p><h3 id="Data-Sources-and-Track-Overview"><a href="#Data-Sources-and-Track-Overview" class="headerlink" title="Data Sources and Track Overview"></a>Data Sources and Track Overview</h3><p>Binder analysis needs to connect transaction events with scheduling, blocking, and lock signals. In practice, recording is mainly based on <code>linux.ftrace</code> (binder tracepoints + sched + optional atrace categories), plus lightweight process&#x2F;thread metadata.</p><p><strong><code>linux.ftrace</code> (kernel + atrace)</strong> is the baseline and works across Android versions. It captures kernel events like <code>binder_transaction</code> (transaction start), <code>binder_transaction_received</code> (server receives transaction), and <code>binder_transaction_alloc_buf</code> (buffer allocation, useful for TransactionTooLarge diagnostics). Combined with <code>sched_switch</code> &#x2F; <code>sched_waking</code>, it reconstructs the full chain: client call → server wakeup → server handling → reply.<br>You can also enable atrace categories inside <code>linux.ftrace</code>: <code>binder_driver</code> &#x2F; <code>am</code> &#x2F; <code>wm</code> for framework context, and <code>dalvik</code> for ART monitor contention (<code>synchronized</code> lock waits), which powers <strong>Thread &#x2F; Lock contention</strong> tracks in UI.</p><p><strong><code>linux.process_stats</code> (metadata)</strong> maps PID&#x2F;TID to process&#x2F;thread names for easier filtering in UI&#x2F;SQL, with negligible overhead.</p><blockquote><p><strong>Note</strong>: Perfetto UI tracks such as <strong>Android Binder &#x2F; Transactions</strong>, <strong>Android Binder &#x2F; Oneway Calls</strong>, and SQL stdlib modules like <code>android.binder</code> &#x2F; <code>android.monitor_contention</code> are parser-side derived views over raw trace events; they are not separate recording data sources.</p></blockquote><h3 id="Recommended-Trace-Config"><a href="#Recommended-Trace-Config" class="headerlink" title="Recommended Trace Config"></a>Recommended Trace Config</h3><p>The following configuration balances compatibility with new features and is recommended as a standard Binder analysis template. Save the configuration as <code>binder_config.pbtx</code> for use:</p><figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br></pre></td><td class="code"><pre><span class="line"># ============================================================</span><br><span class="line"># Perfetto configuration dedicated to Binder analysis</span><br><span class="line"># Applicable scope: Android <span class="number">10</span>+ (Android <span class="number">12</span>+ is generally easier operationally)</span><br><span class="line"># ============================================================</span><br><span class="line"></span><br><span class="line"># --- Buffer and duration settings ---</span><br><span class="line">buffers &#123;</span><br><span class="line">  size_kb: <span class="number">65536</span>          # <span class="number">64</span>MB buffer, suitable for medium complexity scenarios</span><br><span class="line">  fill_policy: RING_BUFFER</span><br><span class="line">&#125;</span><br><span class="line">duration_ms: <span class="number">15000</span>        # <span class="number">15</span> second capture duration, adjustable as needed</span><br><span class="line"></span><br><span class="line"># --- Data source <span class="number">1</span>: linux.ftrace (kernel + atrace) ---</span><br><span class="line"># Baseline source: Binder tracepoints + sched events + <span class="keyword">optional</span> atrace categories</span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      # Binder core events</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_transaction&quot;</span>           # Transaction start</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_transaction_received&quot;</span>  # Server received transaction</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_transaction_alloc_buf&quot;</span> # Buffer allocation (diagnose TransactionTooLarge)</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_set_priority&quot;</span>          # Priority inheritance</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_lock&quot;</span>                  # Kernel lock (usually can be omitted)</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_locked&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_unlock&quot;</span></span><br><span class="line"></span><br><span class="line">      # Scheduling events (connect Client/Server threads)</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_wakeup&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_blocked_reason&quot;</span>          # Blocking reason</span><br><span class="line"></span><br><span class="line">      # Optional: Application layer trace points (need atrace)</span><br><span class="line">      atrace_categories: <span class="string">&quot;binder_driver&quot;</span>   # Binder driver layer</span><br><span class="line">      atrace_categories: <span class="string">&quot;sched&quot;</span>           # Scheduling</span><br><span class="line">      atrace_categories: <span class="string">&quot;am&quot;</span>              # ActivityManager</span><br><span class="line">      atrace_categories: <span class="string">&quot;wm&quot;</span>              # WindowManager</span><br><span class="line">      atrace_categories: <span class="string">&quot;dalvik&quot;</span>          # Java Monitor Contention</span><br><span class="line">      # atrace_categories: <span class="string">&quot;view&quot;</span>          # Enable if analyzing UI</span><br><span class="line"></span><br><span class="line">      # To capture app-side atrace slices (e.g. doFrame / custom trace), you can set:</span><br><span class="line">      # atrace_apps: <span class="string">&quot;your.app.package&quot;</span></span><br><span class="line">      # Or capture all apps (larger trace):</span><br><span class="line">      # atrace_apps: <span class="string">&quot;*&quot;</span></span><br><span class="line"></span><br><span class="line">      # Symbolize kernel call stack</span><br><span class="line">      symbolize_ksyms: <span class="literal">true</span></span><br><span class="line"></span><br><span class="line">      # Optimize scheduling event storage, reduce Trace size</span><br><span class="line">      compact_sched &#123;</span><br><span class="line">        enabled: <span class="literal">true</span></span><br><span class="line">      &#125;</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"># --- Data source <span class="number">2</span>: linux.process_stats (process information) ---</span><br><span class="line"># Provide basic information like process name, PID</span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    process_stats_config &#123;</span><br><span class="line">      scan_all_processes_on_start: <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure><h4 id="Configuration-Item-Description"><a href="#Configuration-Item-Description" class="headerlink" title="Configuration Item Description"></a>Configuration Item Description</h4><table><thead><tr><th>Data Source</th><th>Purpose</th><th>Android Version Requirement</th><th>Overhead</th></tr></thead><tbody><tr><td><code>linux.ftrace</code> (binder&#x2F;*)</td><td>Kernel-layer Binder events</td><td>All versions</td><td>Low</td></tr><tr><td><code>linux.ftrace</code> (sched&#x2F;*)</td><td>Scheduling events, connecting thread wakeups</td><td>All versions</td><td>Medium</td></tr><tr><td><code>linux.ftrace</code> (atrace: dalvik&#x2F;…)</td><td>Framework slices + Java Monitor Contention</td><td>All versions (fields evolve by release)</td><td>Low-Medium</td></tr><tr><td><code>linux.process_stats</code></td><td>Process name and PID mapping</td><td>All versions</td><td>Very low</td></tr></tbody></table><blockquote><p><strong>Tip</strong>: This workflow only depends on <code>linux.ftrace</code> (binder tracepoints + sched + dalvik), so the approach is largely consistent on Android 12&#x2F;13&#x2F;14+. UI field names can vary by version; use SQL stdlib for normalization when needed.</p></blockquote><h3 id="Quick-Start-3-Steps-to-Capture-and-View-Binder-Trace"><a href="#Quick-Start-3-Steps-to-Capture-and-View-Binder-Trace" class="headerlink" title="Quick Start: 3 Steps to Capture and View Binder Trace"></a>Quick Start: 3 Steps to Capture and View Binder Trace</h3><ol><li><p><strong>Capture Trace</strong>:</p><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># Push configuration</span></span><br><span class="line">adb push binder_config.pbtx /data/local/tmp/</span><br><span class="line"></span><br><span class="line"><span class="comment"># Start capture</span></span><br><span class="line">adb shell perfetto --txt -c /data/local/tmp/binder_config.pbtx \</span><br><span class="line">    -o /data/misc/perfetto-traces/trace.pftrace</span><br><span class="line"></span><br><span class="line"><span class="comment"># ... operate phone to reproduce lag ...</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># Pull file out</span></span><br><span class="line">adb pull /data/misc/perfetto-traces/trace.pftrace .</span><br></pre></td></tr></table></figure></li><li><p><strong>Open Trace</strong>: Visit <a href="https://ui.perfetto.dev/">ui.perfetto.dev</a>, drag in the trace file.</p></li><li><p><strong>Add Key Tracks</strong>:</p><ul><li>Left side click <strong>Tracks</strong> → <strong>Add new track</strong></li><li>Search “Binder”, add <strong>Android Binder &#x2F; Transactions</strong> and <strong>Android Binder &#x2F; Oneway Calls</strong></li><li>Search “Lock”, add <strong>Thread &#x2F; Lock contention</strong> (if data available)</li></ul></li></ol><p><a id="other-tools"></a></p><h3 id="Other-Binder-Analysis-Tools"><a href="#Other-Binder-Analysis-Tools" class="headerlink" title="Other Binder Analysis Tools"></a>Other Binder Analysis Tools</h3><p>Besides Perfetto, two tools are often useful: <code>am trace-ipc</code> (built in) and <code>binder-trace</code> (open source, stronger content inspection but higher setup cost).</p><h4 id="am-trace-ipc-Java-Layer-Binder-Call-Tracking"><a href="#am-trace-ipc-Java-Layer-Binder-Call-Tracking" class="headerlink" title="am trace-ipc: Java Layer Binder Call Tracking"></a>am trace-ipc: Java Layer Binder Call Tracking</h4><p><code>am trace-ipc</code> tracks Java-layer Binder call stacks. It enables Binder stack tracking in target processes (<code>BinderProxy.transact()</code> path) and exports aggregated stacks on stop. It is <strong>zero-config</strong> and does not require root.</p><p>Basic usage is very simple, just three steps: “start → operate → stop and export”:</p><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 1. Start tracking (records Binder calls for eligible processes, usually debuggable ones)</span></span><br><span class="line">adb shell am trace-ipc start</span><br><span class="line"></span><br><span class="line"><span class="comment"># 2. Execute the operation you want to analyze on the phone (like starting an app, triggering lag scenarios, etc.)</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># 3. Stop tracking and export results to file</span></span><br><span class="line">adb shell am trace-ipc stop --dump-file /data/local/tmp/ipc-trace.txt</span><br><span class="line"></span><br><span class="line"><span class="comment"># 4. Pull the result file to computer to view</span></span><br><span class="line">adb pull /data/local/tmp/ipc-trace.txt</span><br></pre></td></tr></table></figure><p>The output is plain text, for example:</p><figure class="highlight stylus"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">Traces <span class="keyword">for</span> process: com<span class="selector-class">.example</span><span class="selector-class">.app</span></span><br><span class="line">Count: <span class="number">15</span></span><br><span class="line">java<span class="selector-class">.lang</span><span class="selector-class">.Throwable</span></span><br><span class="line">    at android<span class="selector-class">.os</span><span class="selector-class">.BinderProxy</span><span class="selector-class">.transact</span>(BinderProxy<span class="selector-class">.java</span>:xxx)</span><br><span class="line">    at android<span class="selector-class">.app</span>.IActivityManager<span class="variable">$Stub</span><span class="variable">$Proxy</span><span class="selector-class">.startActivity</span>(...)</span><br><span class="line">    at android<span class="selector-class">.app</span><span class="selector-class">.Instrumentation</span><span class="selector-class">.execStartActivity</span>(...)</span><br><span class="line">    ...</span><br></pre></td></tr></table></figure><p>It groups stacks by process and counts occurrences, which quickly answers: “which services were called, and how often”.</p><p><strong>Using with Perfetto</strong>: Perfetto provides timing, scheduling, and flow context; <code>trace-ipc</code> tells you exactly which Java call sites initiated Binder traffic.</p><p>Best for: validating frequent IPC as ANR&#x2F;jank cause, and pinpointing Java-origin call sites.</p><h4 id="binder-trace-Real-time-Binder-Message-Parsing"><a href="#binder-trace-Real-time-Binder-Message-Parsing" class="headerlink" title="binder-trace: Real-time Binder Message Parsing"></a>binder-trace: Real-time Binder Message Parsing</h4><p><a href="https://github.com/foundryzero/binder-trace">binder-trace</a> can intercept and parse Binder messages in real time, often described as “Wireshark for Binder”.</p><p>It relies on Frida dynamic instrumentation, so you typically need root (or emulator), frida-server on device, and Python 3.9+ locally. Example:</p><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># Track Binder communication for a specific app (-d specifies device, -n specifies process name, -a specifies Android version)</span></span><br><span class="line">binder-trace -d emulator-5554 -n com.example.app -a 11</span><br></pre></td></tr></table></figure><p>It supports filtering by interface&#x2F;method&#x2F;transaction type and is best for security and reverse-engineering workflows where payload semantics matter. For routine performance triage, Perfetto + <code>am trace-ipc</code> is usually enough.</p><p><a id="workflow"></a></p><h2 id="Binder-Analysis-Workflow"><a href="#Binder-Analysis-Workflow" class="headerlink" title="Binder Analysis Workflow"></a>Binder Analysis Workflow</h2><p>After getting the Trace, don’t just fish in the ocean. It’s recommended to proceed in the order of “find target → look at latency → check threads → find locks”.</p><p><a id="workflow-latency"></a></p><h3 id="Step-1-Identify-Transaction-Latency"><a href="#Step-1-Identify-Transaction-Latency" class="headerlink" title="Step 1: Identify Transaction Latency"></a>Step 1: Identify Transaction Latency</h3><p>The first step is finding the transaction you care about. In Perfetto, common entry points are: find your app as <code>Client</code> on the <code>Transactions</code> track; search with <code>/</code> by interface&#x2F;method (for example <code>IActivityManager</code> &#x2F; <code>attachApplication</code>) or full slice name (for example <code>AIDL::java::IActivityManager::attachApplication::server</code>); or start from long <code>S</code> segments on UI-thread <code>thread_state</code> when diagnosing jank.</p><p>After selecting a Transaction slice, the Details panel shows client&#x2F;server threads, timestamps, and durations. UI fields vary by version, so use SQL <code>android_binder_txns</code> as the stable baseline:</p><ul><li><code>client_dur</code>: end-to-end client duration (for sync calls, roughly “time waiting for Binder return”)</li><li><code>server_dur</code>: server wall-clock duration from handling start to reply</li><li><code>dispatch_dur = server_ts - client_ts</code>: delay before server actually starts handling (often queueing&#x2F;scheduling pressure)</li></ul><p>Run this in Perfetto SQL to list slow synchronous transactions:</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.binder;</span><br><span class="line"></span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  aidl_name,</span><br><span class="line">  method_name,</span><br><span class="line">  client_process,</span><br><span class="line">  client_thread,</span><br><span class="line">  client_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> client_ms,</span><br><span class="line">  server_process,</span><br><span class="line">  server_thread,</span><br><span class="line">  server_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> server_ms,</span><br><span class="line">  (server_ts <span class="operator">-</span> client_ts) <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> dispatch_ms</span><br><span class="line"><span class="keyword">FROM</span> android_binder_txns</span><br><span class="line"><span class="keyword">WHERE</span> is_sync</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> client_dur <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">20</span>;</span><br></pre></td></tr></table></figure><p><img src="/en/images/image-20260207110047680.png" alt="image-20260207110047680"></p><p>These relationships determine next steps: if <code>client_dur</code> is long but <code>server_dur</code> is short, the bottleneck is likely dispatch&#x2F;queueing; if <code>server_dur</code> itself is long, inspect what the server Binder thread is doing (business logic, lock wait, or I&#x2F;O).</p><p><a id="workflow-threadpool"></a></p><h3 id="Step-2-Evaluate-Thread-Pool-and-Oneway-Queue"><a href="#Step-2-Evaluate-Thread-Pool-and-Oneway-Queue" class="headerlink" title="Step 2: Evaluate Thread Pool and Oneway Queue"></a>Step 2: Evaluate Thread Pool and Oneway Queue</h3><p>If Step 1 analysis finds that latency is mainly not in server-side processing, but in “queuing”, then you need to further check the status of the Binder thread pool. Before deep analysis, first answer a frequently asked question: <strong>“approximately how many Binder threads does each process have? What’s the scale of system_server’s Binder thread pool? Under what circumstances will it be ‘exhausted’?”</strong></p><h4 id="SystemServer’s-Binder-Thread-Pool-Scale"><a href="#SystemServer’s-Binder-Thread-Pool-Scale" class="headerlink" title="SystemServer’s Binder Thread Pool Scale"></a>SystemServer’s Binder Thread Pool Scale</h4><p>In upstream AOSP (Android 14&#x2F;15), the Binder thread pool design philosophy is: <strong>grow on demand, configurable, no single fixed number</strong>.</p><ul><li><strong>Thread pool grows on demand</strong>: Each server process maintains a thread pool in the Binder driver, where the actual number of threads increases or decreases according to load on demand, with the upper limit jointly determined by the <code>max_threads</code> field in the kernel and user-space configurations like <code>ProcessState#setThreadPoolMaxThreadCount()</code>.</li><li><strong>Typical upper limit depends on process role</strong>: app processes are usually around <strong>15</strong> Binder workers (libbinder default), while <code>system_server</code> raises the cap explicitly at boot; current AOSP sets it to <strong>31</strong>.<br>Some vendor ROMs or custom kernels will adjust the upper limit up or down based on their own load models (for example, adjusting to dozens of threads), so when you see specific numbers through <code>ps -T system_server</code>, <code>top -H</code>, or counting <code>Binder:</code> threads in Perfetto on different devices, there may be differences.</li><li><strong>Take actual observation as standard, not memorizing a number</strong>: In Perfetto, a more recommended approach is to directly expand a process and see how many <code>Binder:xxx_y</code> thread tracks there are, and their activity level during the Trace capture, to evaluate the thread pool’s “scale” and “busyness”.</li></ul><h4 id="Binder-Thread-Count-Buffer-and-“Binder-Exhaustion”"><a href="#Binder-Thread-Count-Buffer-and-“Binder-Exhaustion”" class="headerlink" title="Binder Thread Count, Buffer, and “Binder Exhaustion”"></a>Binder Thread Count, Buffer, and “Binder Exhaustion”</h4><p>In performance analysis, when people mention “Binder count”, they often confuse three different types of resource limits:</p><p><strong>Binder thread-pool exhaustion</strong> means all Binder workers in a process are busy (<code>Running</code> &#x2F; <code>D</code> &#x2F; <code>S</code>), with no idle thread available for new transactions. You’ll often see client threads stuck in <code>S</code> at <code>ioctl(BINDER_WRITE_READ)</code> &#x2F; <code>epoll_wait</code>, and many transactions with large <code>dispatch_dur</code> (<code>server_ts - client_ts</code>) in SQL. In <code>system_server</code>, this can quickly amplify into <strong>global jank or ANR</strong>.</p><p><strong>Binder transaction buffer exhaustion</strong> involves a shared buffer of limited size (typical value about <strong>1MB magnitude</strong>) that each process has in the Binder driver, used to carry <code>Parcel</code> data being transmitted. Typical scenarios include one transaction transmitting an object that’s too large (like a large Bitmap, extra long string, large array, etc.), and a large number of concurrent transactions not yet consumed, causing too many unreleased <code>Parcel</code>s to pile up in the buffer. Possible results include kernel logs showing <code>binder_transaction_alloc_buf</code> failures, Java layer throwing <code>TransactionTooLargeException</code>, and subsequent transactions queuing for a long time or even failing in the driver layer (looks like “Binder is used up”). The solution to such problems is <strong>not</strong> to “open more threads”, but to control the data amount per transmission (split packets, paging, streaming protocols), and prioritize using <code>SharedMemory</code> &#x2F; files &#x2F; <code>ParcelFileDescriptor</code> and other mechanisms for large block data.</p><p><strong>Binder reference table &#x2F; object count</strong>: The Binder driver maintains reference tables and node objects for each process, and these also have upper limits, but in most actual scenarios, they rarely hit this first. Common risk is holding a large number of Binder references for a long time without releasing, more manifesting as <strong>memory&#x2F;stability issues</strong>, not UI lag.</p><p>When analyzing in Perfetto, you can carry a judgment framework:<br><strong>“Is the current slowness because the thread pool is full, or because transactions are too large&#x2F;buffer is used up?”</strong><br>The former mainly looks at <strong>Binder thread count and <code>thread_state</code></strong>, plus <code>dispatch_dur</code>; the latter focuses on <strong>transaction size, concurrency, and <code>TransactionTooLargeException</code> &#x2F; <code>binder_transaction_alloc_buf</code> signs</strong>.</p><hr><p>Now return to the analysis scenario:</p><p>Thread-pool pressure directly limits service-side concurrency. For sync transactions, if server Binder threads stay busy (<code>Running</code> &#x2F; <code>D</code>) for long periods, new requests queue and clients block at <code>ioctl(BINDER_WRITE_READ)</code> &#x2F; <code>epoll_wait</code>; on UI, this is often visible as long <code>S</code> segments.</p><p>In Perfetto, prioritize two signals: <strong>whether Binder threads are persistently saturated</strong>, and whether <strong><code>dispatch_dur</code> is consistently larger than <code>server_dur</code></strong> (same criterion as Step 1).</p><p><strong>Identifying Oneway calls in Perfetto</strong>: sync calls block client threads (<code>thread_state</code> shows <code>S</code>) and typically show transaction → reply flow; oneway calls return immediately, have one-way flow only, and can be filtered with <code>android_binder_txns.is_sync = 0</code> in SQL.</p><p>When analyzing Oneway-related issues, focus on two things: first, the server-side queue depth (if Oneway requests on the same <code>IBinder</code> object pile up, the actual execution timing of subsequent requests will be continuously delayed); second, whether there’s a batch sending pattern (a large number of Oneway calls in a short time will form “spikes”, appearing as densely arranged short Slices on server-side Binder threads in Perfetto).</p><!-- TODO: Insert screenshot - Oneway call in Perfetto (one-way arrow, no reply) --><p>It’s worth mentioning that SystemServer’s Binder threads not only need to handle requests from various Apps, but also handle system internal calls (like AMS calling WMS, WMS calling SurfaceFlinger, etc.). If a “misbehaving” App frantically sends Oneway requests in a short time, it might fill up a certain system service’s Oneway queue, further affecting other Apps’ asynchronous callback latency, causing a global lag feeling.</p><p><a id="workflow-lock"></a></p><h3 id="Step-3-Investigate-Lock-Contention"><a href="#Step-3-Investigate-Lock-Contention" class="headerlink" title="Step 3: Investigate Lock Contention"></a>Step 3: Investigate Lock Contention</h3><p>If you jump to the server-side Binder thread and find it stays in <code>S</code> (Sleeping) or <code>D</code> (Disk Sleep &#x2F; Uninterruptible Sleep) state for a long time while processing your request, it usually means it’s waiting for some resource – either waiting for a lock or waiting for IO. Lock contention is a very common source of performance bottlenecks in SystemServer, because SystemServer runs a large number of services that share a lot of global state, and this state is often protected by <code>synchronized</code> locks.</p><p><strong>Java locks (Monitor Contention)</strong> is the most common situation. There are quite a few global locks in SystemServer, like WindowManagerService’s <code>mGlobalLock</code>, some internal locks of ActivityManagerService, etc. When multiple threads simultaneously need to access resources protected by these locks, contention occurs. In Perfetto, if you see a Binder thread state as <code>S</code>, and the <code>blocked_function</code> field contains symbols related to <code>futex</code> (like <code>futex_wait</code>), you can basically be sure it’s waiting for a Java lock. To further confirm which lock it’s waiting for and who’s holding it, you can check the <code>Lock contention</code> track. Perfetto will visualize the lock contention relationship: marking the Owner (thread holding the lock, like the <code>android.display</code> thread) and Waiter (thread waiting for the lock, like the <code>Binder:123_1</code> processing your request) with connection lines. Clicking the Contention Slice, you can also see the lock object’s class name (like <code>com.android.server.wm.WindowManagerGlobalLock</code>) in the Details panel, which is very helpful for understanding the root cause of the problem.</p><!-- TODO: Insert screenshot - Lock contention track, showing Owner and Waiter connection lines --><p><strong>Native locks (Mutex &#x2F; RwLock)</strong> situations are relatively rarer, but can be encountered in some scenarios. Manifestations are similar: thread state is <code>D</code> or <code>S</code>, but the call stack shows symbols from the Native layer like <code>__mutex_lock</code>, <code>pthread_mutex_lock</code>, <code>rwsem</code>, not Java’s <code>futex_wait</code>. Analyzing such problems usually needs to combine <code>sched_blocked_reason</code> events to see what the thread is specifically waiting for, belonging to relatively advanced content, so we won’t expand on it here.</p><h4 id="SQL-for-Java-Monitor-Contention-in-system-server-Optional"><a href="#SQL-for-Java-Monitor-Contention-in-system-server-Optional" class="headerlink" title="SQL for Java Monitor Contention in system_server (Optional)"></a>SQL for Java Monitor Contention in <code>system_server</code> (Optional)</h4><p>Perfetto stdlib provides parsed <code>android_monitor_contention</code>; use it directly instead of manually parsing slice names:</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.monitor_contention;</span><br><span class="line"></span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  process_name,</span><br><span class="line">  blocked_thread_name <span class="keyword">AS</span> waiter_thread,</span><br><span class="line">  blocking_thread_name <span class="keyword">AS</span> owner_thread,</span><br><span class="line">  (dur <span class="operator">/</span> <span class="number">1e6</span>) <span class="keyword">AS</span> dur_ms,</span><br><span class="line">  (waiter_count <span class="operator">+</span> <span class="number">1</span>) <span class="keyword">AS</span> waiter_threads,</span><br><span class="line">  short_blocked_method,</span><br><span class="line">  short_blocking_method,</span><br><span class="line">  blocked_src,</span><br><span class="line">  blocking_src</span><br><span class="line"><span class="keyword">FROM</span> android_monitor_contention</span><br><span class="line"><span class="keyword">WHERE</span> process_name <span class="operator">=</span> <span class="string">&#x27;system_server&#x27;</span></span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> dur <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">50</span>;</span><br></pre></td></tr></table></figure><blockquote><p><strong>Tip</strong>: if this returns nothing, make sure <code>atrace_categories</code> includes <code>dalvik</code> and contention actually occurred during capture.</p></blockquote><p><img src="/en/images/image-20260207105941270.png" alt="image-20260207105941270"></p><p><a id="case"></a><br><a id="case-wm"></a></p><h2 id="Case-Study-Window-Management-Delay"><a href="#Case-Study-Window-Management-Delay" class="headerlink" title="Case Study: Window Management Delay"></a>Case Study: Window Management Delay</h2><p>A real case to demonstrate the workflow: <strong>startup animation stutter</strong>.</p><p><strong>1. Discover Anomaly</strong></p><p>On the app <code>UI Thread</code>, one <code>doFrame</code> takes 30ms (vs. 16.6ms budget at 60Hz). The corresponding <code>thread_state</code> shows the main thread in <code>S</code> for 18ms, meaning it is mostly waiting.</p><!-- TODO: Insert screenshot - UI Thread's doFrame duration anomaly, thread_state shows S state --><p><strong>2. Track Binder Call</strong></p><p>The 18ms <code>S</code> segment shows a call to <code>IActivityTaskManager.startActivity</code>. Flow points to <code>system_server</code> thread <code>Binder:1605_2</code>, which handles the request.</p><!-- TODO: Insert screenshot - Flow arrow from App main thread pointing to system_server's Binder thread --><p><strong>3. Server-side Analysis</strong></p><p>On <code>Binder:1605_2</code>, execution lasts about 15ms and <code>Lock contention</code> shows a clear wait segment.</p><p><strong>4. Pin Down the Culprit</strong></p><p>Details show the thread waits on <code>com.android.server.wm.WindowManagerGlobalLock</code>, owned by <code>android.anim</code>, for about 12ms.</p><!-- TODO: Insert screenshot - Lock contention's Details panel, showing lock object and holder --><p><strong>Conclusion</strong>: <code>startActivity</code> is blocked by <code>WindowManagerGlobalLock</code> on the server side, which expands into a user-visible jank frame.</p><p><strong>Optimization direction</strong>: hard to fully fix from app side, but you can reduce startup IPC and avoid complex window operations during animation-heavy windows.</p><hr><p><a id="case-threadpool"></a></p><h2 id="Case-Study-Binder-Thread-Pool-Saturation"><a href="#Case-Study-Binder-Thread-Pool-Saturation" class="headerlink" title="Case Study: Binder Thread Pool Saturation"></a>Case Study: Binder Thread Pool Saturation</h2><p>Another case: <strong>multiple apps start simultaneously and the whole system feels sluggish</strong>.</p><p><strong>1. Discover Anomaly</strong></p><p>Multiple app main threads stay in <code>S</code> during the same interval and are all waiting for Binder returns, matching user-reported global responsiveness drops.</p><p><strong>2. Check SystemServer’s Thread Pool Status</strong></p><p>In <code>system_server</code>, almost all <code>Binder:</code> threads remain busy with little idle gap, indicating thread-pool saturation.</p><!-- TODO: Insert screenshot - system_server's Binder threads all in busy state --><p><strong>3. Analyze Queuing</strong></p><p>Reuse the Step-1 criterion: if many transactions show <code>dispatch_dur</code> much larger than <code>server_dur</code>, latency is mainly queueing, not per-call server work.</p><p><strong>4. Locate Root Cause</strong></p><p>Transaction breakdown shows one background app issuing hundreds of <code>IPackageManager</code> queries in a short burst. Each call is short (~5ms), but the volume is enough to saturate the pool.</p><p><strong>Conclusion</strong>: bursty batch Binder calls can crowd out <code>system_server</code> capacity and amplify into system-wide lag.</p><p><strong>Optimization direction</strong>: avoid looped IPC; prefer batch APIs (for example <code>getPackagesForUid</code>) plus throttling&#x2F;batching. System-side options include service rate-limits and hotspot optimization.</p><p><a id="platform-features"></a></p><h2 id="Platform-Features-and-Best-Practices"><a href="#Platform-Features-and-Best-Practices" class="headerlink" title="Platform Features and Best Practices"></a>Platform Features and Best Practices</h2><p>As Android evolves, Binder keeps improving in performance and stability. These features help explain Perfetto behavior and guide practical tuning.</p><p><strong>Binder Freeze (Android 12+)</strong>: a frozen cached process gets almost no CPU. Synchronous (non-<code>oneway</code>) Binder calls to it are rejected and may lead to target-process kill; asynchronous (<code>oneway</code>) transactions are typically buffered until thaw.</p><p><strong>Frozen-callee callback policy (common on Android 14+)</strong>: use <code>RemoteCallbackList</code> frozen-callee policies (<code>DROP</code>, <code>ENQUEUE_MOST_RECENT</code>, <code>ENQUEUE_ALL</code>) to control callback buildup while the target process is frozen.</p><p><strong>Binder Heavy Hitter Watcher</strong>: identifies Binder hotspots with unusually high short-window call share. Enablement, thresholds, and outputs depend on build&#x2F;version&#x2F;device configuration.</p><p><strong>Some suggestions for developers</strong>:</p><p>About <strong>Oneway</strong>: use it only when no return value or completion timing is required (for example logging, fire-and-forget signals). Replacing sync calls with oneway just to “unblock UI” often shifts backlog to server queues and introduces ordering issues.</p><p>About <strong>large payloads</strong>: avoid sending large objects (especially Bitmaps) over Binder. Per-process Binder buffer is ~1MB and can trigger <code>TransactionTooLargeException</code>; use <code>SharedMemory</code>, files, or <code>ParcelFileDescriptor</code> instead.</p><p>About <strong>main-thread Binder calls</strong>: avoid calling services with unpredictable latency on UI thread; if unavoidable, offload to background threads and post results back.</p><p><a id="summary"></a></p><h2 id="Summary"><a href="#Summary" class="headerlink" title="Summary"></a>Summary</h2><p>Perfetto is one of the most effective tools for Binder diagnostics. The practical method is: capture binder&#x2F;sched&#x2F;dalvik signals with <code>linux.ftrace</code>, follow Flow links from client to server, and use <code>client_dur</code> &#x2F; <code>server_dur</code> &#x2F; <code>dispatch_dur</code> + thread states + lock contention to separate “queueing slow”, “server processing slow”, and “lock wait”.</p><p>For unexplained jank&#x2F;ANR, use the sequence: “is UI waiting on Binder?” → “is server queued, slow, or lock-blocked?”. Combined with CPU&#x2F;scheduling&#x2F;rendering signals, this usually leads to root cause quickly.</p><p><a id="refs"></a></p><h2 id="References"><a href="#References" class="headerlink" title="References"></a>References</h2><ol><li><a href="https://paul.pub/android-binder-driver/">Understanding Android Binder Mechanism 1&#x2F;3: Driver Part</a></li><li><a href="https://perfetto.dev/docs/analysis/stdlib-docs#android-binder">PerfettoSQL stdlib - android.binder</a></li><li><a href="https://perfetto.dev/docs/data-sources/cpu-scheduling">Perfetto Documentation - Ftrace</a></li><li><a href="https://cs.android.com/android/platform/superproject/+/main:frameworks/native/libs/binder/">Android Source - Binder</a></li><li><a href="https://developer.android.com/reference/android/os/Parcel">Android Developers - Parcel and Bundle</a></li><li><a href="https://github.com/foundryzero/binder-trace">binder-trace - Wireshark for Binder</a></li><li><a href="https://www.cnblogs.com/wanghongzhu/p/15069884.html">am trace-ipc Source Analysis</a></li></ol><p><a id="attachments"></a></p><h2 id="Attachments"><a href="#Attachments" class="headerlink" title="Attachments"></a>Attachments</h2><ul><li><a href="https://github.com/Gracker/SystraceForBlog/tree/master/Perfetto/Android_Perfetto_Binder">Download Perfetto Trace (SystemServer Binder Case)</a><br>(Trace data contains sensitive information, please keep it confidential after downloading.)</li></ul><p><a id="about"></a></p><h2 id="About-the-Author-amp-Blog"><a href="#About-the-Author-amp-Blog" class="headerlink" title="About the Author &amp; Blog"></a>About the Author &amp; Blog</h2><ol><li><a href="https://www.androidperformance.com/about/">Blogger Introduction</a></li><li><a href="https://androidperformance.com/2019/12/01/BlogMap/">Blog Content Navigation</a></li><li><a href="https://www.androidperformance.com/2023/12/30/the-performance/">Android Performance Optimization Knowledge Planet</a></li></ol><blockquote><p><strong>“If you want to go fast, go alone. If you want to go far, go together.”</strong></p></blockquote><p><img src="/en/images/WechatIMG581.webp" alt="Wechat QR"></p>]]></content>
+        <content type="html"><![CDATA[<p>The tenth article in the Perfetto series focuses on <strong>Binder</strong>, Android’s core Inter-Process Communication (IPC) mechanism. Binder carries most interactions between system services and apps, and is often where latency and jank originate. This article uses signals from <code>linux.ftrace</code> (binder tracepoints + sched), <code>thread_state</code>, and ART Java monitor contention (via atrace <code>dalvik</code>) to provide a practical workflow for diagnosing transaction latency, thread-pool pressure, and lock contention.</p><span id="more"></span><h2 id="Table-of-Contents"><a href="#Table-of-Contents" class="headerlink" title="Table of Contents"></a>Table of Contents</h2><ul><li><a href="#series">Perfetto Series Catalog</a></li><li><a href="#basics">Binder Basics</a></li><li><a href="#setup">Perfetto Setup and Data Sources</a><ul><li><a href="#other-tools">Other Binder Analysis Tools</a></li></ul></li><li><a href="#workflow">Binder Analysis Workflow</a><ul><li><a href="#workflow-latency">Step 1: Identify Transaction Latency</a></li><li><a href="#workflow-threadpool">Step 2: Evaluate Thread Pool and Oneway Queue</a></li><li><a href="#workflow-lock">Step 3: Investigate Lock Contention</a></li></ul></li><li><a href="#case">Case Studies</a><ul><li><a href="#case-wm">Case 1: Window Management Delay</a></li><li><a href="#case-threadpool">Case 2: Binder Thread Pool Saturation</a></li></ul></li><li><a href="#platform-features">Platform Features and Best Practices</a></li><li><a href="#summary">Summary</a></li><li><a href="#refs">References</a></li><li><a href="#attachments">Attachments</a></li><li><a href="#about">About the Author &amp; Blog</a></li></ul><p><a id="series"></a></p><h2 id="Perfetto-Series-Catalog"><a href="#Perfetto-Series-Catalog" class="headerlink" title="Perfetto Series Catalog"></a>Perfetto Series Catalog</h2><ol><li><a href="https://www.androidperformance.com/en/2024/03/27/Android-Perfetto-101/">Android Perfetto Series Catalog</a></li><li><a href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto Series 1: Introduction to Perfetto</a></li><li><a href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a></li><li><a href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a></li><li><a href="https://www.androidperformance.com/en/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto Series 4: Opening Large Traces via Command Line</a></li><li><a href="https://www.androidperformance.com/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Choreographer-based Rendering Flow</a></li><li><a href="https://www.androidperformance.com/en/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto Series 6: Why 120Hz? Advantages and Challenges</a></li><li><a href="https://www.androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto Series 7: MainThread and RenderThread Deep Dive</a></li><li><a href="https://www.androidperformance.com/en/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto Series 8: Understanding Vsync and Performance Analysis</a></li><li><a href="https://www.androidperformance.com/en/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto Series 9: Interpreting CPU Information</a></li><li><a href="https://www.androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto Series 10: Binder Scheduling and Lock Contention (this article)</a></li><li><a href="https://www.bilibili.com/video/BV1oi82efE4D/?vd_source=0c6d2191e785de0a36dc21a9da7e664e">Video (Bilibili) - Android Perfetto Basics and Case Studies</a></li><li><a href="https://www.bilibili.com/video/BV17A6bBLECu/">Video (Bilibili) - Android Perfetto: Trace Graph Types - AOSP, WebView, Flutter + OEM System Optimization</a></li></ol><p><a id="basics"></a></p><h2 id="Binder-Basics"><a href="#Binder-Basics" class="headerlink" title="Binder Basics"></a>Binder Basics</h2><p>For readers encountering Binder for the first time, understanding its role and participants is crucial. You can roughly understand Binder as “cross-process function calls”: you write code in one process that looks like calling a local interface, while Binder handles the actual call and data transfer. Overall, it is Android’s primary Inter-Process Communication (IPC) mechanism, consisting of four core components:</p><ol><li><strong>Client</strong>: Application threads initiate calls through <code>IBinder.transact()</code>, writing <code>Parcel</code>-serialized data to the kernel.</li><li><strong>Service (Server)</strong>: Usually runs in SystemServer or other processes, reading <code>Parcel</code> and executing business logic through <code>Binder.onTransact()</code>.</li><li><strong>Binder Driver</strong>: The kernel module <code>/dev/binder</code> responsible for thread pool scheduling, buffer management, priority inheritance, etc., serving as the “messenger” connecting both parties.</li><li><strong>Thread Pool</strong>: The server typically maintains a set of Binder threads. Note that <strong>the thread pool is not created full from the start</strong>, but is created on demand. The Java layer defaults to approximately 15 Binder worker threads (excluding the main thread), and the Native layer can also configure the maximum thread count via <code>ProcessState</code> (default value is usually also 15). When all Binder threads are busy, new requests will queue in the driver layer waiting for idle threads.</li></ol><p><strong>Why is Binder needed?</strong></p><p>Android adopts a multi-process architecture to isolate applications, improve security, and stability. Each APK runs in an independent user space. When it needs to access system capabilities (camera, location, notifications, etc.), it must cross-process call the Framework or SystemServer.</p><p>Limitations of traditional IPC solutions:</p><table><thead><tr><th>IPC Method</th><th>Problem</th></tr></thead><tbody><tr><td>Socket</td><td>High overhead, lacks identity verification</td></tr><tr><td>Pipe</td><td>Only supports parent-child processes, one-way communication</td></tr><tr><td>Shared Memory</td><td>Needs additional synchronization mechanisms, lacks access control</td></tr></tbody></table><p>Binder solves these problems at the kernel layer, providing three key capabilities: first, <strong>identity and permission</strong> (based on UID&#x2F;PID verification to ensure the caller is legitimate); second, <strong>synchronous and asynchronous calls</strong> (in synchronous mode, the Client waits for the Server to return, which is the most common mode, while in asynchronous mode, the Client returns immediately after sending, suitable for scenarios like notifications and status reporting); third, <strong>priority inheritance</strong> (when a high-priority Client calls a low-priority Server, the Server temporarily elevates its priority to avoid priority inversion problems).</p><p>Therefore, when an app process calls <code>IActivityManager#attachApplication()</code> during startup, Binder is the channel that safely and reliably delivers that request to <code>system_server</code>.</p><h3 id="Case-from-App-Developer’s-Perspective"><a href="#Case-from-App-Developer’s-Perspective" class="headerlink" title="Case from App Developer’s Perspective"></a>Case from App Developer’s Perspective</h3><p>Suppose the trace contains <code>AIDL::java::IActivityManager::attachApplication::server</code>. This corresponds to a <strong>synchronous</strong> Binder call to <code>IActivityManager#attachApplication(...)</code>, handled by <code>ActivityManagerService</code> in <code>system_server</code>. The path is: on the <strong>Proxy side</strong>, app code gets <code>IActivityManager</code> via <code>ActivityManager.getService()</code>; the proxy <strong>serializes</strong> arguments into a <code>Parcel</code> and calls <code>transact()</code>; the Binder driver queues the transaction and wakes an idle <code>system_server</code> Binder thread (for example <code>Binder:1460_5</code>); on the <strong>Stub side</strong>, <code>ActivityManagerService</code> processes <code>attachApplication</code>; finally, the reply is marshaled back and the app thread resumes from <code>waitForResponse()</code>.</p><p>In Perfetto, this appears as one transaction on <strong>Android Binder &#x2F; Transactions</strong> (if AIDL info is decoded, the slice name is often <code>AIDL::java::IActivityManager::attachApplication::client/server</code>, or SQL shows <code>aidl_name=IActivityManager</code>, <code>method_name=attachApplication</code>); the app thread stays in <code>S</code> (Sleeping) with <code>blocked_function</code> often at <code>binder_thread_read</code> &#x2F; <code>epoll_wait</code> &#x2F; <code>ioctl(BINDER_WRITE_READ)</code>; a <code>system_server</code> Binder thread runs; and <strong>Flow arrows</strong> connect client and server work.</p><p><img src="/en/images/image-20260207113358540.webp" alt="image-20260207113358540"></p><p><a id="setup"></a></p><h2 id="Perfetto-Setup-and-Data-Sources"><a href="#Perfetto-Setup-and-Data-Sources" class="headerlink" title="Perfetto Setup and Data Sources"></a>Perfetto Setup and Data Sources</h2><p>To diagnose Binder in Perfetto, you need to prepare the data sources and Trace configuration in advance.</p><h3 id="Data-Sources-and-Track-Overview"><a href="#Data-Sources-and-Track-Overview" class="headerlink" title="Data Sources and Track Overview"></a>Data Sources and Track Overview</h3><p>Binder analysis needs to connect transaction events with scheduling, blocking, and lock signals. In practice, recording is mainly based on <code>linux.ftrace</code> (binder tracepoints + sched + optional atrace categories), plus lightweight process&#x2F;thread metadata.</p><p><strong><code>linux.ftrace</code> (kernel + atrace)</strong> is the baseline and works across Android versions. It captures kernel events like <code>binder_transaction</code> (transaction start), <code>binder_transaction_received</code> (server receives transaction), and <code>binder_transaction_alloc_buf</code> (buffer allocation, useful for TransactionTooLarge diagnostics). Combined with <code>sched_switch</code> &#x2F; <code>sched_waking</code>, it reconstructs the full chain: client call → server wakeup → server handling → reply.<br>You can also enable atrace categories inside <code>linux.ftrace</code>: <code>binder_driver</code> &#x2F; <code>am</code> &#x2F; <code>wm</code> for framework context, and <code>dalvik</code> for ART monitor contention (<code>synchronized</code> lock waits), which powers <strong>Thread &#x2F; Lock contention</strong> tracks in UI.</p><p><strong><code>linux.process_stats</code> (metadata)</strong> maps PID&#x2F;TID to process&#x2F;thread names for easier filtering in UI&#x2F;SQL, with negligible overhead.</p><blockquote><p><strong>Note</strong>: Perfetto UI tracks such as <strong>Android Binder &#x2F; Transactions</strong>, <strong>Android Binder &#x2F; Oneway Calls</strong>, and SQL stdlib modules like <code>android.binder</code> &#x2F; <code>android.monitor_contention</code> are parser-side derived views over raw trace events; they are not separate recording data sources.</p></blockquote><h3 id="Recommended-Trace-Config"><a href="#Recommended-Trace-Config" class="headerlink" title="Recommended Trace Config"></a>Recommended Trace Config</h3><p>The following configuration balances compatibility with new features and is recommended as a standard Binder analysis template. Save the configuration as <code>binder_config.pbtx</code> for use:</p><figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br></pre></td><td class="code"><pre><span class="line"># ============================================================</span><br><span class="line"># Perfetto configuration dedicated to Binder analysis</span><br><span class="line"># Applicable scope: Android <span class="number">10</span>+ (Android <span class="number">12</span>+ is generally easier operationally)</span><br><span class="line"># ============================================================</span><br><span class="line"></span><br><span class="line"># --- Buffer and duration settings ---</span><br><span class="line">buffers &#123;</span><br><span class="line">  size_kb: <span class="number">65536</span>          # <span class="number">64</span>MB buffer, suitable for medium complexity scenarios</span><br><span class="line">  fill_policy: RING_BUFFER</span><br><span class="line">&#125;</span><br><span class="line">duration_ms: <span class="number">15000</span>        # <span class="number">15</span> second capture duration, adjustable as needed</span><br><span class="line"></span><br><span class="line"># --- Data source <span class="number">1</span>: linux.ftrace (kernel + atrace) ---</span><br><span class="line"># Baseline source: Binder tracepoints + sched events + <span class="keyword">optional</span> atrace categories</span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      # Binder core events</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_transaction&quot;</span>           # Transaction start</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_transaction_received&quot;</span>  # Server received transaction</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_transaction_alloc_buf&quot;</span> # Buffer allocation (diagnose TransactionTooLarge)</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_set_priority&quot;</span>          # Priority inheritance</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_lock&quot;</span>                  # Kernel lock (usually can be omitted)</span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_locked&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;binder/binder_unlock&quot;</span></span><br><span class="line"></span><br><span class="line">      # Scheduling events (connect Client/Server threads)</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_wakeup&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_blocked_reason&quot;</span>          # Blocking reason</span><br><span class="line"></span><br><span class="line">      # Optional: Application layer trace points (need atrace)</span><br><span class="line">      atrace_categories: <span class="string">&quot;binder_driver&quot;</span>   # Binder driver layer</span><br><span class="line">      atrace_categories: <span class="string">&quot;sched&quot;</span>           # Scheduling</span><br><span class="line">      atrace_categories: <span class="string">&quot;am&quot;</span>              # ActivityManager</span><br><span class="line">      atrace_categories: <span class="string">&quot;wm&quot;</span>              # WindowManager</span><br><span class="line">      atrace_categories: <span class="string">&quot;dalvik&quot;</span>          # Java Monitor Contention</span><br><span class="line">      # atrace_categories: <span class="string">&quot;view&quot;</span>          # Enable if analyzing UI</span><br><span class="line"></span><br><span class="line">      # To capture app-side atrace slices (e.g. doFrame / custom trace), you can set:</span><br><span class="line">      # atrace_apps: <span class="string">&quot;your.app.package&quot;</span></span><br><span class="line">      # Or capture all apps (larger trace):</span><br><span class="line">      # atrace_apps: <span class="string">&quot;*&quot;</span></span><br><span class="line"></span><br><span class="line">      # Symbolize kernel call stack</span><br><span class="line">      symbolize_ksyms: <span class="literal">true</span></span><br><span class="line"></span><br><span class="line">      # Optimize scheduling event storage, reduce Trace size</span><br><span class="line">      compact_sched &#123;</span><br><span class="line">        enabled: <span class="literal">true</span></span><br><span class="line">      &#125;</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"># --- Data source <span class="number">2</span>: linux.process_stats (process information) ---</span><br><span class="line"># Provide basic information like process name, PID</span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    process_stats_config &#123;</span><br><span class="line">      scan_all_processes_on_start: <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure><h4 id="Configuration-Item-Description"><a href="#Configuration-Item-Description" class="headerlink" title="Configuration Item Description"></a>Configuration Item Description</h4><table><thead><tr><th>Data Source</th><th>Purpose</th><th>Android Version Requirement</th><th>Overhead</th></tr></thead><tbody><tr><td><code>linux.ftrace</code> (binder&#x2F;*)</td><td>Kernel-layer Binder events</td><td>All versions</td><td>Low</td></tr><tr><td><code>linux.ftrace</code> (sched&#x2F;*)</td><td>Scheduling events, connecting thread wakeups</td><td>All versions</td><td>Medium</td></tr><tr><td><code>linux.ftrace</code> (atrace: dalvik&#x2F;…)</td><td>Framework slices + Java Monitor Contention</td><td>All versions (fields evolve by release)</td><td>Low-Medium</td></tr><tr><td><code>linux.process_stats</code></td><td>Process name and PID mapping</td><td>All versions</td><td>Very low</td></tr></tbody></table><blockquote><p><strong>Tip</strong>: This workflow only depends on <code>linux.ftrace</code> (binder tracepoints + sched + dalvik), so the approach is largely consistent on Android 12&#x2F;13&#x2F;14+. UI field names can vary by version; use SQL stdlib for normalization when needed.</p></blockquote><h3 id="Quick-Start-3-Steps-to-Capture-and-View-Binder-Trace"><a href="#Quick-Start-3-Steps-to-Capture-and-View-Binder-Trace" class="headerlink" title="Quick Start: 3 Steps to Capture and View Binder Trace"></a>Quick Start: 3 Steps to Capture and View Binder Trace</h3><ol><li><p><strong>Capture Trace</strong>:</p><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># Push configuration</span></span><br><span class="line">adb push binder_config.pbtx /data/local/tmp/</span><br><span class="line"></span><br><span class="line"><span class="comment"># Start capture</span></span><br><span class="line">adb shell perfetto --txt -c /data/local/tmp/binder_config.pbtx \</span><br><span class="line">    -o /data/misc/perfetto-traces/trace.pftrace</span><br><span class="line"></span><br><span class="line"><span class="comment"># ... operate phone to reproduce lag ...</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># Pull file out</span></span><br><span class="line">adb pull /data/misc/perfetto-traces/trace.pftrace .</span><br></pre></td></tr></table></figure></li><li><p><strong>Open Trace</strong>: Visit <a href="https://ui.perfetto.dev/">ui.perfetto.dev</a>, drag in the trace file.</p></li><li><p><strong>Add Key Tracks</strong>:</p><ul><li>Left side click <strong>Tracks</strong> → <strong>Add new track</strong></li><li>Search “Binder”, add <strong>Android Binder &#x2F; Transactions</strong> and <strong>Android Binder &#x2F; Oneway Calls</strong></li><li>Search “Lock”, add <strong>Thread &#x2F; Lock contention</strong> (if data available)</li></ul></li></ol><p><a id="other-tools"></a></p><h3 id="Other-Binder-Analysis-Tools"><a href="#Other-Binder-Analysis-Tools" class="headerlink" title="Other Binder Analysis Tools"></a>Other Binder Analysis Tools</h3><p>Besides Perfetto, two tools are often useful: <code>am trace-ipc</code> (built in) and <code>binder-trace</code> (open source, stronger content inspection but higher setup cost).</p><h4 id="am-trace-ipc-Java-Layer-Binder-Call-Tracking"><a href="#am-trace-ipc-Java-Layer-Binder-Call-Tracking" class="headerlink" title="am trace-ipc: Java Layer Binder Call Tracking"></a>am trace-ipc: Java Layer Binder Call Tracking</h4><p><code>am trace-ipc</code> tracks Java-layer Binder call stacks. It enables Binder stack tracking in target processes (<code>BinderProxy.transact()</code> path) and exports aggregated stacks on stop. It is <strong>zero-config</strong> and does not require root.</p><p>Basic usage is very simple, just three steps: “start → operate → stop and export”:</p><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 1. Start tracking (records Binder calls for eligible processes, usually debuggable ones)</span></span><br><span class="line">adb shell am trace-ipc start</span><br><span class="line"></span><br><span class="line"><span class="comment"># 2. Execute the operation you want to analyze on the phone (like starting an app, triggering lag scenarios, etc.)</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># 3. Stop tracking and export results to file</span></span><br><span class="line">adb shell am trace-ipc stop --dump-file /data/local/tmp/ipc-trace.txt</span><br><span class="line"></span><br><span class="line"><span class="comment"># 4. Pull the result file to computer to view</span></span><br><span class="line">adb pull /data/local/tmp/ipc-trace.txt</span><br></pre></td></tr></table></figure><p>The output is plain text, for example:</p><figure class="highlight stylus"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">Traces <span class="keyword">for</span> process: com<span class="selector-class">.example</span><span class="selector-class">.app</span></span><br><span class="line">Count: <span class="number">15</span></span><br><span class="line">java<span class="selector-class">.lang</span><span class="selector-class">.Throwable</span></span><br><span class="line">    at android<span class="selector-class">.os</span><span class="selector-class">.BinderProxy</span><span class="selector-class">.transact</span>(BinderProxy<span class="selector-class">.java</span>:xxx)</span><br><span class="line">    at android<span class="selector-class">.app</span>.IActivityManager<span class="variable">$Stub</span><span class="variable">$Proxy</span><span class="selector-class">.startActivity</span>(...)</span><br><span class="line">    at android<span class="selector-class">.app</span><span class="selector-class">.Instrumentation</span><span class="selector-class">.execStartActivity</span>(...)</span><br><span class="line">    ...</span><br></pre></td></tr></table></figure><p>It groups stacks by process and counts occurrences, which quickly answers: “which services were called, and how often”.</p><p><strong>Using with Perfetto</strong>: Perfetto provides timing, scheduling, and flow context; <code>trace-ipc</code> tells you exactly which Java call sites initiated Binder traffic.</p><p>Best for: validating frequent IPC as ANR&#x2F;jank cause, and pinpointing Java-origin call sites.</p><h4 id="binder-trace-Real-time-Binder-Message-Parsing"><a href="#binder-trace-Real-time-Binder-Message-Parsing" class="headerlink" title="binder-trace: Real-time Binder Message Parsing"></a>binder-trace: Real-time Binder Message Parsing</h4><p><a href="https://github.com/foundryzero/binder-trace">binder-trace</a> can intercept and parse Binder messages in real time, often described as “Wireshark for Binder”.</p><p>It relies on Frida dynamic instrumentation, so you typically need root (or emulator), frida-server on device, and Python 3.9+ locally. Example:</p><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># Track Binder communication for a specific app (-d specifies device, -n specifies process name, -a specifies Android version)</span></span><br><span class="line">binder-trace -d emulator-5554 -n com.example.app -a 11</span><br></pre></td></tr></table></figure><p>It supports filtering by interface&#x2F;method&#x2F;transaction type and is best for security and reverse-engineering workflows where payload semantics matter. For routine performance triage, Perfetto + <code>am trace-ipc</code> is usually enough.</p><p><a id="workflow"></a></p><h2 id="Binder-Analysis-Workflow"><a href="#Binder-Analysis-Workflow" class="headerlink" title="Binder Analysis Workflow"></a>Binder Analysis Workflow</h2><p>After getting the Trace, don’t just fish in the ocean. It’s recommended to proceed in the order of “find target → look at latency → check threads → find locks”.</p><p><a id="workflow-latency"></a></p><h3 id="Step-1-Identify-Transaction-Latency"><a href="#Step-1-Identify-Transaction-Latency" class="headerlink" title="Step 1: Identify Transaction Latency"></a>Step 1: Identify Transaction Latency</h3><p>The first step is finding the transaction you care about. In Perfetto, common entry points are: find your app as <code>Client</code> on the <code>Transactions</code> track; search with <code>/</code> by interface&#x2F;method (for example <code>IActivityManager</code> &#x2F; <code>attachApplication</code>) or full slice name (for example <code>AIDL::java::IActivityManager::attachApplication::server</code>); or start from long <code>S</code> segments on UI-thread <code>thread_state</code> when diagnosing jank.</p><p>After selecting a Transaction slice, the Details panel shows client&#x2F;server threads, timestamps, and durations. UI fields vary by version, so use SQL <code>android_binder_txns</code> as the stable baseline:</p><ul><li><code>client_dur</code>: end-to-end client duration (for sync calls, roughly “time waiting for Binder return”)</li><li><code>server_dur</code>: server wall-clock duration from handling start to reply</li><li><code>dispatch_dur = server_ts - client_ts</code>: delay before server actually starts handling (often queueing&#x2F;scheduling pressure)</li></ul><p>Run this in Perfetto SQL to list slow synchronous transactions:</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.binder;</span><br><span class="line"></span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  aidl_name,</span><br><span class="line">  method_name,</span><br><span class="line">  client_process,</span><br><span class="line">  client_thread,</span><br><span class="line">  client_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> client_ms,</span><br><span class="line">  server_process,</span><br><span class="line">  server_thread,</span><br><span class="line">  server_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> server_ms,</span><br><span class="line">  (server_ts <span class="operator">-</span> client_ts) <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> dispatch_ms</span><br><span class="line"><span class="keyword">FROM</span> android_binder_txns</span><br><span class="line"><span class="keyword">WHERE</span> is_sync</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> client_dur <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">20</span>;</span><br></pre></td></tr></table></figure><p><img src="/en/images/image-20260207110047680.webp" alt="image-20260207110047680"></p><p>These relationships determine next steps: if <code>client_dur</code> is long but <code>server_dur</code> is short, the bottleneck is likely dispatch&#x2F;queueing; if <code>server_dur</code> itself is long, inspect what the server Binder thread is doing (business logic, lock wait, or I&#x2F;O).</p><p><a id="workflow-threadpool"></a></p><h3 id="Step-2-Evaluate-Thread-Pool-and-Oneway-Queue"><a href="#Step-2-Evaluate-Thread-Pool-and-Oneway-Queue" class="headerlink" title="Step 2: Evaluate Thread Pool and Oneway Queue"></a>Step 2: Evaluate Thread Pool and Oneway Queue</h3><p>If Step 1 analysis finds that latency is mainly not in server-side processing, but in “queuing”, then you need to further check the status of the Binder thread pool. Before deep analysis, first answer a frequently asked question: <strong>“approximately how many Binder threads does each process have? What’s the scale of system_server’s Binder thread pool? Under what circumstances will it be ‘exhausted’?”</strong></p><h4 id="SystemServer’s-Binder-Thread-Pool-Scale"><a href="#SystemServer’s-Binder-Thread-Pool-Scale" class="headerlink" title="SystemServer’s Binder Thread Pool Scale"></a>SystemServer’s Binder Thread Pool Scale</h4><p>In upstream AOSP (Android 14&#x2F;15), the Binder thread pool design philosophy is: <strong>grow on demand, configurable, no single fixed number</strong>.</p><ul><li><strong>Thread pool grows on demand</strong>: Each server process maintains a thread pool in the Binder driver, where the actual number of threads increases or decreases according to load on demand, with the upper limit jointly determined by the <code>max_threads</code> field in the kernel and user-space configurations like <code>ProcessState#setThreadPoolMaxThreadCount()</code>.</li><li><strong>Typical upper limit depends on process role</strong>: app processes are usually around <strong>15</strong> Binder workers (libbinder default), while <code>system_server</code> raises the cap explicitly at boot; current AOSP sets it to <strong>31</strong>.<br>Some vendor ROMs or custom kernels will adjust the upper limit up or down based on their own load models (for example, adjusting to dozens of threads), so when you see specific numbers through <code>ps -T system_server</code>, <code>top -H</code>, or counting <code>Binder:</code> threads in Perfetto on different devices, there may be differences.</li><li><strong>Take actual observation as standard, not memorizing a number</strong>: In Perfetto, a more recommended approach is to directly expand a process and see how many <code>Binder:xxx_y</code> thread tracks there are, and their activity level during the Trace capture, to evaluate the thread pool’s “scale” and “busyness”.</li></ul><h4 id="Binder-Thread-Count-Buffer-and-“Binder-Exhaustion”"><a href="#Binder-Thread-Count-Buffer-and-“Binder-Exhaustion”" class="headerlink" title="Binder Thread Count, Buffer, and “Binder Exhaustion”"></a>Binder Thread Count, Buffer, and “Binder Exhaustion”</h4><p>In performance analysis, when people mention “Binder count”, they often confuse three different types of resource limits:</p><p><strong>Binder thread-pool exhaustion</strong> means all Binder workers in a process are busy (<code>Running</code> &#x2F; <code>D</code> &#x2F; <code>S</code>), with no idle thread available for new transactions. You’ll often see client threads stuck in <code>S</code> at <code>ioctl(BINDER_WRITE_READ)</code> &#x2F; <code>epoll_wait</code>, and many transactions with large <code>dispatch_dur</code> (<code>server_ts - client_ts</code>) in SQL. In <code>system_server</code>, this can quickly amplify into <strong>global jank or ANR</strong>.</p><p><strong>Binder transaction buffer exhaustion</strong> involves a shared buffer of limited size (typical value about <strong>1MB magnitude</strong>) that each process has in the Binder driver, used to carry <code>Parcel</code> data being transmitted. Typical scenarios include one transaction transmitting an object that’s too large (like a large Bitmap, extra long string, large array, etc.), and a large number of concurrent transactions not yet consumed, causing too many unreleased <code>Parcel</code>s to pile up in the buffer. Possible results include kernel logs showing <code>binder_transaction_alloc_buf</code> failures, Java layer throwing <code>TransactionTooLargeException</code>, and subsequent transactions queuing for a long time or even failing in the driver layer (looks like “Binder is used up”). The solution to such problems is <strong>not</strong> to “open more threads”, but to control the data amount per transmission (split packets, paging, streaming protocols), and prioritize using <code>SharedMemory</code> &#x2F; files &#x2F; <code>ParcelFileDescriptor</code> and other mechanisms for large block data.</p><p><strong>Binder reference table &#x2F; object count</strong>: The Binder driver maintains reference tables and node objects for each process, and these also have upper limits, but in most actual scenarios, they rarely hit this first. Common risk is holding a large number of Binder references for a long time without releasing, more manifesting as <strong>memory&#x2F;stability issues</strong>, not UI lag.</p><p>When analyzing in Perfetto, you can carry a judgment framework:<br><strong>“Is the current slowness because the thread pool is full, or because transactions are too large&#x2F;buffer is used up?”</strong><br>The former mainly looks at <strong>Binder thread count and <code>thread_state</code></strong>, plus <code>dispatch_dur</code>; the latter focuses on <strong>transaction size, concurrency, and <code>TransactionTooLargeException</code> &#x2F; <code>binder_transaction_alloc_buf</code> signs</strong>.</p><hr><p>Now return to the analysis scenario:</p><p>Thread-pool pressure directly limits service-side concurrency. For sync transactions, if server Binder threads stay busy (<code>Running</code> &#x2F; <code>D</code>) for long periods, new requests queue and clients block at <code>ioctl(BINDER_WRITE_READ)</code> &#x2F; <code>epoll_wait</code>; on UI, this is often visible as long <code>S</code> segments.</p><p>In Perfetto, prioritize two signals: <strong>whether Binder threads are persistently saturated</strong>, and whether <strong><code>dispatch_dur</code> is consistently larger than <code>server_dur</code></strong> (same criterion as Step 1).</p><p><strong>Identifying Oneway calls in Perfetto</strong>: sync calls block client threads (<code>thread_state</code> shows <code>S</code>) and typically show transaction → reply flow; oneway calls return immediately, have one-way flow only, and can be filtered with <code>android_binder_txns.is_sync = 0</code> in SQL.</p><p>When analyzing Oneway-related issues, focus on two things: first, the server-side queue depth (if Oneway requests on the same <code>IBinder</code> object pile up, the actual execution timing of subsequent requests will be continuously delayed); second, whether there’s a batch sending pattern (a large number of Oneway calls in a short time will form “spikes”, appearing as densely arranged short Slices on server-side Binder threads in Perfetto).</p><!-- TODO: Insert screenshot - Oneway call in Perfetto (one-way arrow, no reply) --><p>It’s worth mentioning that SystemServer’s Binder threads not only need to handle requests from various Apps, but also handle system internal calls (like AMS calling WMS, WMS calling SurfaceFlinger, etc.). If a “misbehaving” App frantically sends Oneway requests in a short time, it might fill up a certain system service’s Oneway queue, further affecting other Apps’ asynchronous callback latency, causing a global lag feeling.</p><p><a id="workflow-lock"></a></p><h3 id="Step-3-Investigate-Lock-Contention"><a href="#Step-3-Investigate-Lock-Contention" class="headerlink" title="Step 3: Investigate Lock Contention"></a>Step 3: Investigate Lock Contention</h3><p>If you jump to the server-side Binder thread and find it stays in <code>S</code> (Sleeping) or <code>D</code> (Disk Sleep &#x2F; Uninterruptible Sleep) state for a long time while processing your request, it usually means it’s waiting for some resource – either waiting for a lock or waiting for IO. Lock contention is a very common source of performance bottlenecks in SystemServer, because SystemServer runs a large number of services that share a lot of global state, and this state is often protected by <code>synchronized</code> locks.</p><p><strong>Java locks (Monitor Contention)</strong> is the most common situation. There are quite a few global locks in SystemServer, like WindowManagerService’s <code>mGlobalLock</code>, some internal locks of ActivityManagerService, etc. When multiple threads simultaneously need to access resources protected by these locks, contention occurs. In Perfetto, if you see a Binder thread state as <code>S</code>, and the <code>blocked_function</code> field contains symbols related to <code>futex</code> (like <code>futex_wait</code>), you can basically be sure it’s waiting for a Java lock. To further confirm which lock it’s waiting for and who’s holding it, you can check the <code>Lock contention</code> track. Perfetto will visualize the lock contention relationship: marking the Owner (thread holding the lock, like the <code>android.display</code> thread) and Waiter (thread waiting for the lock, like the <code>Binder:123_1</code> processing your request) with connection lines. Clicking the Contention Slice, you can also see the lock object’s class name (like <code>com.android.server.wm.WindowManagerGlobalLock</code>) in the Details panel, which is very helpful for understanding the root cause of the problem.</p><!-- TODO: Insert screenshot - Lock contention track, showing Owner and Waiter connection lines --><p><strong>Native locks (Mutex &#x2F; RwLock)</strong> situations are relatively rarer, but can be encountered in some scenarios. Manifestations are similar: thread state is <code>D</code> or <code>S</code>, but the call stack shows symbols from the Native layer like <code>__mutex_lock</code>, <code>pthread_mutex_lock</code>, <code>rwsem</code>, not Java’s <code>futex_wait</code>. Analyzing such problems usually needs to combine <code>sched_blocked_reason</code> events to see what the thread is specifically waiting for, belonging to relatively advanced content, so we won’t expand on it here.</p><h4 id="SQL-for-Java-Monitor-Contention-in-system-server-Optional"><a href="#SQL-for-Java-Monitor-Contention-in-system-server-Optional" class="headerlink" title="SQL for Java Monitor Contention in system_server (Optional)"></a>SQL for Java Monitor Contention in <code>system_server</code> (Optional)</h4><p>Perfetto stdlib provides parsed <code>android_monitor_contention</code>; use it directly instead of manually parsing slice names:</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.monitor_contention;</span><br><span class="line"></span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  process_name,</span><br><span class="line">  blocked_thread_name <span class="keyword">AS</span> waiter_thread,</span><br><span class="line">  blocking_thread_name <span class="keyword">AS</span> owner_thread,</span><br><span class="line">  (dur <span class="operator">/</span> <span class="number">1e6</span>) <span class="keyword">AS</span> dur_ms,</span><br><span class="line">  (waiter_count <span class="operator">+</span> <span class="number">1</span>) <span class="keyword">AS</span> waiter_threads,</span><br><span class="line">  short_blocked_method,</span><br><span class="line">  short_blocking_method,</span><br><span class="line">  blocked_src,</span><br><span class="line">  blocking_src</span><br><span class="line"><span class="keyword">FROM</span> android_monitor_contention</span><br><span class="line"><span class="keyword">WHERE</span> process_name <span class="operator">=</span> <span class="string">&#x27;system_server&#x27;</span></span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> dur <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">50</span>;</span><br></pre></td></tr></table></figure><blockquote><p><strong>Tip</strong>: if this returns nothing, make sure <code>atrace_categories</code> includes <code>dalvik</code> and contention actually occurred during capture.</p></blockquote><p><img src="/en/images/image-20260207105941270.webp" alt="image-20260207105941270"></p><p><a id="case"></a><br><a id="case-wm"></a></p><h2 id="Case-Study-Window-Management-Delay"><a href="#Case-Study-Window-Management-Delay" class="headerlink" title="Case Study: Window Management Delay"></a>Case Study: Window Management Delay</h2><p>A real case to demonstrate the workflow: <strong>startup animation stutter</strong>.</p><p><strong>1. Discover Anomaly</strong></p><p>On the app <code>UI Thread</code>, one <code>doFrame</code> takes 30ms (vs. 16.6ms budget at 60Hz). The corresponding <code>thread_state</code> shows the main thread in <code>S</code> for 18ms, meaning it is mostly waiting.</p><!-- TODO: Insert screenshot - UI Thread's doFrame duration anomaly, thread_state shows S state --><p><strong>2. Track Binder Call</strong></p><p>The 18ms <code>S</code> segment shows a call to <code>IActivityTaskManager.startActivity</code>. Flow points to <code>system_server</code> thread <code>Binder:1605_2</code>, which handles the request.</p><!-- TODO: Insert screenshot - Flow arrow from App main thread pointing to system_server's Binder thread --><p><strong>3. Server-side Analysis</strong></p><p>On <code>Binder:1605_2</code>, execution lasts about 15ms and <code>Lock contention</code> shows a clear wait segment.</p><p><strong>4. Pin Down the Culprit</strong></p><p>Details show the thread waits on <code>com.android.server.wm.WindowManagerGlobalLock</code>, owned by <code>android.anim</code>, for about 12ms.</p><!-- TODO: Insert screenshot - Lock contention's Details panel, showing lock object and holder --><p><strong>Conclusion</strong>: <code>startActivity</code> is blocked by <code>WindowManagerGlobalLock</code> on the server side, which expands into a user-visible jank frame.</p><p><strong>Optimization direction</strong>: hard to fully fix from app side, but you can reduce startup IPC and avoid complex window operations during animation-heavy windows.</p><hr><p><a id="case-threadpool"></a></p><h2 id="Case-Study-Binder-Thread-Pool-Saturation"><a href="#Case-Study-Binder-Thread-Pool-Saturation" class="headerlink" title="Case Study: Binder Thread Pool Saturation"></a>Case Study: Binder Thread Pool Saturation</h2><p>Another case: <strong>multiple apps start simultaneously and the whole system feels sluggish</strong>.</p><p><strong>1. Discover Anomaly</strong></p><p>Multiple app main threads stay in <code>S</code> during the same interval and are all waiting for Binder returns, matching user-reported global responsiveness drops.</p><p><strong>2. Check SystemServer’s Thread Pool Status</strong></p><p>In <code>system_server</code>, almost all <code>Binder:</code> threads remain busy with little idle gap, indicating thread-pool saturation.</p><!-- TODO: Insert screenshot - system_server's Binder threads all in busy state --><p><strong>3. Analyze Queuing</strong></p><p>Reuse the Step-1 criterion: if many transactions show <code>dispatch_dur</code> much larger than <code>server_dur</code>, latency is mainly queueing, not per-call server work.</p><p><strong>4. Locate Root Cause</strong></p><p>Transaction breakdown shows one background app issuing hundreds of <code>IPackageManager</code> queries in a short burst. Each call is short (~5ms), but the volume is enough to saturate the pool.</p><p><strong>Conclusion</strong>: bursty batch Binder calls can crowd out <code>system_server</code> capacity and amplify into system-wide lag.</p><p><strong>Optimization direction</strong>: avoid looped IPC; prefer batch APIs (for example <code>getPackagesForUid</code>) plus throttling&#x2F;batching. System-side options include service rate-limits and hotspot optimization.</p><p><a id="platform-features"></a></p><h2 id="Platform-Features-and-Best-Practices"><a href="#Platform-Features-and-Best-Practices" class="headerlink" title="Platform Features and Best Practices"></a>Platform Features and Best Practices</h2><p>As Android evolves, Binder keeps improving in performance and stability. These features help explain Perfetto behavior and guide practical tuning.</p><p><strong>Binder Freeze (Android 12+)</strong>: a frozen cached process gets almost no CPU. Synchronous (non-<code>oneway</code>) Binder calls to it are rejected and may lead to target-process kill; asynchronous (<code>oneway</code>) transactions are typically buffered until thaw.</p><p><strong>Frozen-callee callback policy (common on Android 14+)</strong>: use <code>RemoteCallbackList</code> frozen-callee policies (<code>DROP</code>, <code>ENQUEUE_MOST_RECENT</code>, <code>ENQUEUE_ALL</code>) to control callback buildup while the target process is frozen.</p><p><strong>Binder Heavy Hitter Watcher</strong>: identifies Binder hotspots with unusually high short-window call share. Enablement, thresholds, and outputs depend on build&#x2F;version&#x2F;device configuration.</p><p><strong>Some suggestions for developers</strong>:</p><p>About <strong>Oneway</strong>: use it only when no return value or completion timing is required (for example logging, fire-and-forget signals). Replacing sync calls with oneway just to “unblock UI” often shifts backlog to server queues and introduces ordering issues.</p><p>About <strong>large payloads</strong>: avoid sending large objects (especially Bitmaps) over Binder. Per-process Binder buffer is ~1MB and can trigger <code>TransactionTooLargeException</code>; use <code>SharedMemory</code>, files, or <code>ParcelFileDescriptor</code> instead.</p><p>About <strong>main-thread Binder calls</strong>: avoid calling services with unpredictable latency on UI thread; if unavoidable, offload to background threads and post results back.</p><p><a id="summary"></a></p><h2 id="Summary"><a href="#Summary" class="headerlink" title="Summary"></a>Summary</h2><p>Perfetto is one of the most effective tools for Binder diagnostics. The practical method is: capture binder&#x2F;sched&#x2F;dalvik signals with <code>linux.ftrace</code>, follow Flow links from client to server, and use <code>client_dur</code> &#x2F; <code>server_dur</code> &#x2F; <code>dispatch_dur</code> + thread states + lock contention to separate “queueing slow”, “server processing slow”, and “lock wait”.</p><p>For unexplained jank&#x2F;ANR, use the sequence: “is UI waiting on Binder?” → “is server queued, slow, or lock-blocked?”. Combined with CPU&#x2F;scheduling&#x2F;rendering signals, this usually leads to root cause quickly.</p><p><a id="refs"></a></p><h2 id="References"><a href="#References" class="headerlink" title="References"></a>References</h2><ol><li><a href="https://paul.pub/android-binder-driver/">Understanding Android Binder Mechanism 1&#x2F;3: Driver Part</a></li><li><a href="https://perfetto.dev/docs/analysis/stdlib-docs#android-binder">PerfettoSQL stdlib - android.binder</a></li><li><a href="https://perfetto.dev/docs/data-sources/cpu-scheduling">Perfetto Documentation - Ftrace</a></li><li><a href="https://cs.android.com/android/platform/superproject/+/main:frameworks/native/libs/binder/">Android Source - Binder</a></li><li><a href="https://developer.android.com/reference/android/os/Parcel">Android Developers - Parcel and Bundle</a></li><li><a href="https://github.com/foundryzero/binder-trace">binder-trace - Wireshark for Binder</a></li><li><a href="https://www.cnblogs.com/wanghongzhu/p/15069884.html">am trace-ipc Source Analysis</a></li></ol><p><a id="attachments"></a></p><h2 id="Attachments"><a href="#Attachments" class="headerlink" title="Attachments"></a>Attachments</h2><ul><li><a href="https://github.com/Gracker/SystraceForBlog/tree/master/Perfetto/Android_Perfetto_Binder">Download Perfetto Trace (SystemServer Binder Case)</a><br>(Trace data contains sensitive information, please keep it confidential after downloading.)</li></ul><p><a id="about"></a></p><h2 id="About-the-Author-amp-Blog"><a href="#About-the-Author-amp-Blog" class="headerlink" title="About the Author &amp; Blog"></a>About the Author &amp; Blog</h2><ol><li><a href="https://www.androidperformance.com/about/">Blogger Introduction</a></li><li><a href="https://androidperformance.com/2019/12/01/BlogMap/">Blog Content Navigation</a></li><li><a href="https://www.androidperformance.com/2023/12/30/the-performance/">Android Performance Optimization Knowledge Planet</a></li></ol><blockquote><p><strong>“If you want to go fast, go alone. If you want to go far, go together.”</strong></p></blockquote><p><img src="/en/images/WechatIMG581.webp" alt="Wechat QR"></p>]]></content>
       
       
       <categories>
@@ -102,9 +102,9 @@
             
             <tag> Systrace </tag>
             
-            <tag> RenderThread </tag>
-            
             <tag> Performance </tag>
+            
+            <tag> RenderThread </tag>
             
         </tags>
       
@@ -129,13 +129,13 @@
       
         <tags>
             
+            <tag> Jank </tag>
+            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
-            
-            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -162,13 +162,13 @@
       
         <tags>
             
+            <tag> Jank </tag>
+            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
-            
-            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -195,13 +195,13 @@
       
         <tags>
             
+            <tag> Jank </tag>
+            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
-            
-            <tag> Jank </tag>
             
             <tag> RenderThread </tag>
             
@@ -228,9 +228,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Perfetto </tag>
             
@@ -261,11 +261,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> ANR </tag>
             
@@ -294,11 +294,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Systrace </tag>
             
@@ -327,11 +327,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -360,9 +360,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Perfetto </tag>
             
@@ -393,9 +393,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Perfetto </tag>
             
@@ -426,9 +426,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Perfetto </tag>
             
@@ -465,9 +465,9 @@
             
             <tag> Systrace </tag>
             
-            <tag> RenderThread </tag>
-            
             <tag> Performance </tag>
+            
+            <tag> RenderThread </tag>
             
         </tags>
       
@@ -552,13 +552,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
-            <tag> RenderThread </tag>
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
+            
+            <tag> RenderThread </tag>
             
             <tag> Java </tag>
             
@@ -585,11 +585,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Systrace </tag>
             
@@ -651,9 +651,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Perfetto </tag>
             
@@ -684,13 +684,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Memory </tag>
             
-            <tag> Jank </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -717,13 +717,13 @@
       
         <tags>
             
+            <tag> Jank </tag>
+            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
-            
-            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -777,9 +777,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Framework </tag>
             
@@ -806,15 +806,15 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
-            
-            <tag> Jank </tag>
             
         </tags>
       
@@ -839,9 +839,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Perfetto </tag>
             
@@ -872,9 +872,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Linux </tag>
             
@@ -901,9 +901,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Perfetto </tag>
             
@@ -934,9 +934,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Perfetto </tag>
             
@@ -967,9 +967,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Perfetto </tag>
             
@@ -1000,9 +1000,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Perfetto </tag>
             
@@ -1033,9 +1033,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Perfetto </tag>
             
@@ -1066,9 +1066,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Perfetto </tag>
             
@@ -1099,9 +1099,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Jank </tag>
+            
+            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -1159,11 +1159,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
         </tags>
       
@@ -1188,13 +1188,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Startup </tag>
             
-            <tag> Jank </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1221,9 +1221,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Java </tag>
             
@@ -1252,9 +1252,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Jank </tag>
+            
+            <tag> Android </tag>
             
         </tags>
       
@@ -1279,13 +1279,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Startup </tag>
             
-            <tag> Jank </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1312,13 +1312,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Startup </tag>
             
-            <tag> Jank </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1345,13 +1345,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Startup </tag>
             
-            <tag> Jank </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1409,13 +1409,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Startup </tag>
             
-            <tag> Jank </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1442,11 +1442,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -1475,11 +1475,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -1508,13 +1508,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Startup </tag>
             
-            <tag> Jank </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1541,13 +1541,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Startup </tag>
             
-            <tag> Jank </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1574,9 +1574,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Systrace </tag>
             
@@ -1607,13 +1607,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Startup </tag>
             
-            <tag> Jank </tag>
+            <tag> Systrace </tag>
             
             <tag> RenderThread </tag>
             
@@ -1640,13 +1640,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Linux </tag>
             
@@ -1673,15 +1673,15 @@
       
         <tags>
             
+            <tag> Jank </tag>
+            
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Android </tag>
-            
             <tag> Systrace </tag>
-            
-            <tag> Jank </tag>
             
         </tags>
       
@@ -1706,13 +1706,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Memory </tag>
             
-            <tag> Jank </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1739,11 +1739,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Systrace </tag>
             
@@ -1772,13 +1772,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Memory </tag>
             
-            <tag> Jank </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1805,9 +1805,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Systrace </tag>
             
@@ -1842,11 +1842,11 @@
             
             <tag> Systrace </tag>
             
-            <tag> RenderThread </tag>
-            
             <tag> Performance </tag>
             
             <tag> Tools </tag>
+            
+            <tag> RenderThread </tag>
             
         </tags>
       
@@ -1875,11 +1875,11 @@
             
             <tag> Systrace </tag>
             
-            <tag> RenderThread </tag>
-            
             <tag> Performance </tag>
             
             <tag> Tools </tag>
+            
+            <tag> RenderThread </tag>
             
         </tags>
       
@@ -1904,11 +1904,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Systrace </tag>
             
@@ -1937,13 +1937,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Startup </tag>
             
-            <tag> Jank </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1970,9 +1970,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Perfetto </tag>
             
@@ -2003,13 +2003,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Startup </tag>
             
-            <tag> Jank </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -2036,9 +2036,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Perfetto </tag>
             
@@ -2069,15 +2069,15 @@
       
         <tags>
             
+            <tag> Jank </tag>
+            
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Android </tag>
-            
             <tag> Systrace </tag>
-            
-            <tag> Jank </tag>
             
         </tags>
       
@@ -2154,11 +2154,11 @@
       
         <tags>
             
+            <tag> Jank </tag>
+            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
-            
-            <tag> Jank </tag>
             
             <tag> RenderThread </tag>
             
@@ -2187,9 +2187,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Linux </tag>
             
@@ -2218,11 +2218,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -2448,9 +2448,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Jank </tag>
+            
+            <tag> Android </tag>
             
             <tag> Reading Notes </tag>
             
@@ -2506,13 +2506,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Process </tag>
             
@@ -2539,13 +2539,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> RenderThread </tag>
             
@@ -2572,9 +2572,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Systrace </tag>
             
@@ -2605,13 +2605,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -2638,13 +2638,13 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Yearly Recommendations </tag>
             
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
         </tags>
       
@@ -2669,11 +2669,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Annual Recommendations </tag>
             
@@ -2779,11 +2779,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -2810,9 +2810,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> DelayLoad </tag>
             
@@ -2841,9 +2841,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> RenderThread </tag>
             
@@ -2874,9 +2874,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Systrace </tag>
             
@@ -2936,11 +2936,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -2969,13 +2969,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3002,11 +3002,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3035,9 +3035,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3068,9 +3068,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Java </tag>
             
@@ -3128,15 +3128,15 @@
       
         <tags>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
-            <tag> RenderThread </tag>
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
+            
+            <tag> RenderThread </tag>
             
         </tags>
       
@@ -3161,15 +3161,15 @@
       
         <tags>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
-            <tag> RenderThread </tag>
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
+            
+            <tag> RenderThread </tag>
             
         </tags>
       
@@ -3194,13 +3194,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
-            <tag> RenderThread </tag>
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
+            
+            <tag> RenderThread </tag>
             
             <tag> MAT </tag>
             
@@ -3227,15 +3227,15 @@
       
         <tags>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
-            <tag> RenderThread </tag>
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
+            
+            <tag> RenderThread </tag>
             
         </tags>
       
@@ -3260,13 +3260,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
-            <tag> RenderThread </tag>
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
+            
+            <tag> RenderThread </tag>
             
             <tag> MAT </tag>
             
@@ -3293,9 +3293,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3326,9 +3326,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3359,9 +3359,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3392,9 +3392,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3450,9 +3450,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
         </tags>
       
@@ -3608,9 +3608,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3666,9 +3666,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
         </tags>
       
@@ -3693,11 +3693,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -3751,9 +3751,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Java </tag>
             
@@ -3782,9 +3782,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Java </tag>
             

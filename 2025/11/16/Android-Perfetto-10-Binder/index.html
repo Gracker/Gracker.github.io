@@ -18,14 +18,14 @@
 <meta property="og:site_name" content="Android Performance">
 <meta property="og:description" content="本文是 Perfetto 系列的第十篇文章，聚焦 Binder 这一 Android 跨进程通信的核心机制。Binder 承载着大部分系统服务与应用的交互，也常常是性能瓶颈的源头。本文站在系统开发与性能调优的视角，结合 linux.ftrace（binder tracepoints + sched）、thread_state 轨道，以及 ART 的 Java Monitor Contention（">
 <meta property="og:locale">
-<meta property="og:image" content="https://androidperformance.com/images/image-20260207113358540.png">
-<meta property="og:image" content="https://androidperformance.com/images/image-20260207110047680.png">
-<meta property="og:image" content="https://androidperformance.com/images/image-20260207130758344.png">
-<meta property="og:image" content="https://androidperformance.com/images/image-20260207130953951.png">
-<meta property="og:image" content="https://androidperformance.com/images/image-20260207105941270.png">
+<meta property="og:image" content="https://androidperformance.com/images/image-20260207113358540.webp">
+<meta property="og:image" content="https://androidperformance.com/images/image-20260207110047680.webp">
+<meta property="og:image" content="https://androidperformance.com/images/image-20260207130758344.webp">
+<meta property="og:image" content="https://androidperformance.com/images/image-20260207130953951.webp">
+<meta property="og:image" content="https://androidperformance.com/images/image-20260207105941270.webp">
 <meta property="og:image" content="https://androidperformance.com/images/WechatIMG581.webp">
 <meta property="article:published_time" content="2025-11-16T07:33:30.000Z">
-<meta property="article:modified_time" content="2026-02-07T05:20:47.684Z">
+<meta property="article:modified_time" content="2026-02-07T05:24:49.187Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Android">
 <meta property="article:tag" content="Perfetto">
@@ -36,7 +36,7 @@
 <meta property="article:tag" content="页面响应">
 <meta property="article:tag" content="Binder">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:image" content="https://androidperformance.com/images/image-20260207113358540.png">
+<meta name="twitter:image" content="https://androidperformance.com/images/image-20260207113358540.webp">
                             <meta http-equiv="Cache-control" content="no-cache">
                             <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
                             <link rel="icon" href="/assets/favicon.ico">
@@ -640,7 +640,7 @@ loading="lazy"             decoding="async"
 <p>因此，当应用进程在启动阶段通过 <code>IActivityManager#attachApplication()</code> 把自己“挂到” SystemServer 时，底层必然借助 Binder 把调用安全、可靠地传递给 <code>system_server</code>。</p>
 <h3 id="从-App-开发者视角的案例"><a href="#从-App-开发者视角的案例" class="headerlink" title="从 App 开发者视角的案例"></a>从 App 开发者视角的案例</h3><p>假设我们在 Trace 里关注到 <code>AIDL::java::IActivityManager::attachApplication::server</code>。它对应的是应用进程通过 <code>IActivityManager#attachApplication(...)</code> 发起的一次<strong>同步</strong> Binder 调用，服务端实现位于 <code>system_server</code> 的 <code>ActivityManagerService</code>。调用路径可以概括为：首先，在 <strong>Proxy 侧</strong>，应用进程通过 <code>ActivityManager.getService()</code> 拿到一个 <code>IActivityManager</code> 的代理对象（<code>BinderProxy</code>）；然后进行<strong>序列化</strong>，调用 <code>attachApplication(...)</code> 时，代理会把参数写入 <code>Parcel</code>，执行 <code>transact()</code>；接着是<strong>内核传输</strong>，Binder 驱动将该事务排入 <code>system_server</code> 的 Binder 线程队列，并<strong>唤醒</strong>一个空闲线程（例如 <code>Binder:1460_5</code>）；随后在 <strong>Stub 侧</strong>，<code>ActivityManagerService</code>（Stub）所在的线程被唤醒，读取参数并进入 <code>attachApplication</code> 的处理流程；最后是<strong>返回</strong>阶段，Service 处理完毕，将结果写入 <code>Parcel</code>，驱动唤醒原 App 线程，App 线程从 <code>waitForResponse()</code> 返回继续执行。</p>
 <p>在 Perfetto 中，这条链路会显示为：<strong>Android Binder &#x2F; Transactions</strong> 轨道上的一次事务（如果 trace 中能解析到 AIDL 信息，Slice 名称会类似 <code>AIDL::java::IActivityManager::attachApplication::client/server</code>，或在 SQL 中体现为 <code>aidl_name=IActivityManager</code>、<code>method_name=attachApplication</code>）；App 线程在 <code>thread_state</code> 里处于 <code>S</code> (Sleeping) 状态（同步调用时常见），且 <code>blocked_function</code> 通常涉及 <code>binder_thread_read</code> &#x2F; <code>epoll_wait</code> &#x2F; <code>ioctl(BINDER_WRITE_READ)</code>；SystemServer 的 Binder 线程出现 <code>Running</code> 切片；以及 <strong>Flow 箭头</strong>（Perfetto 会用箭头把 Client 的 <code>transact</code> 和 Server 的处理线程连接起来）。</p>
-<p><img src="/images/image-20260207113358540.png" alt="image-20260207113358540"></p>
+<p><img src="/images/image-20260207113358540.webp" alt="image-20260207113358540"></p>
 <p><a id="setup"></a></p>
 <h2 id="Perfetto-观测准备"><a href="#Perfetto-观测准备" class="headerlink" title="Perfetto 观测准备"></a>Perfetto 观测准备</h2><p>要在 Perfetto 中诊断 Binder，需要提前准备好数据源与 Trace 配置。</p>
 <h3 id="数据源与轨道总览"><a href="#数据源与轨道总览" class="headerlink" title="数据源与轨道总览"></a>数据源与轨道总览</h3><p>Binder 分析需要把「事务事件」和「线程调度&#x2F;阻塞&#x2F;锁」串起来。录制侧主要依赖 <code>linux.ftrace</code>（包含 Binder tracepoints、调度事件以及可选的 atrace 类别），再配合少量元数据源（进程&#x2F;线程命名映射）。</p>
@@ -733,7 +733,7 @@ loading="lazy"             decoding="async"
 <p>下面这段 SQL 可以直接在 Perfetto UI 的 SQL 页面运行（用于快速找出最慢的同步事务，并拆出派发延迟与服务端耗时）：</p>
 <figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.binder;</span><br><span class="line"></span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  aidl_name,</span><br><span class="line">  method_name,</span><br><span class="line">  client_process,</span><br><span class="line">  client_thread,</span><br><span class="line">  client_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> client_ms,</span><br><span class="line">  server_process,</span><br><span class="line">  server_thread,</span><br><span class="line">  server_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> server_ms,</span><br><span class="line">  (server_ts <span class="operator">-</span> client_ts) <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> dispatch_ms</span><br><span class="line"><span class="keyword">FROM</span> android_binder_txns</span><br><span class="line"><span class="keyword">WHERE</span> is_sync</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> client_dur <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">20</span>;</span><br></pre></td></tr></table></figure>
 
-<p><img src="/images/image-20260207110047680.png" alt="image-20260207110047680"></p>
+<p><img src="/images/image-20260207110047680.webp" alt="image-20260207110047680"></p>
 <p>理解这些耗时之间的关系非常重要，因为它直接决定了你下一步应该往哪个方向深挖。如果 <code>client_dur</code> 很长但 <code>server_dur</code> 很短，通常说明慢主要不在服务端处理，而是在派发&#x2F;排队（<code>dispatch_dur</code> 会很大），这时应该优先检查服务端线程池与调度情况（步骤二）。如果 <code>server_dur</code> 本身就很长，说明服务端处理慢，这时你需要跳转到服务端的 Binder 线程，看它在这段时间里到底在干什么——是在跑业务代码、等锁、还是等 IO。</p>
 <p><a id="workflow-threadpool"></a></p>
 <h3 id="步骤二：评估线程池与-Oneway-队列"><a href="#步骤二：评估线程池与-Oneway-队列" class="headerlink" title="步骤二：评估线程池与 Oneway 队列"></a>步骤二：评估线程池与 Oneway 队列</h3><p>如果步骤一的分析发现耗时主要不在服务端处理，而是在”排队”上，那就需要进一步检查 Binder 线程池的状态了。在深入分析之前，先回答一个经常被问到的问题：**”每个进程大概会有多少个 Binder 线程？system_server 的 Binder 线程池规模大致是什么量级？什么情况下会’耗尽’？”**</p>
@@ -754,12 +754,12 @@ loading="lazy"             decoding="async"
 <p>在 Perfetto 中诊断线程池问题，优先看两个信号：<strong>Binder 线程是否长期满载</strong>，以及事务的 **<code>dispatch_dur</code> 是否显著大于 <code>server_dur</code>**（判读方式与步骤一一致）。</p>
 <p><strong>关于 Oneway 调用在 Perfetto 中的识别</strong>：同步调用（Two-way）和异步调用（Oneway）在 Perfetto 中的表现有明显区别，学会区分它们对分析很有帮助。同步调用时，客户端会阻塞等待（<code>thread_state</code> 显示 <code>S</code>），Perfetto 通常会画出 transaction → reply 的 Flow；而 Oneway 调用客户端发完就返回、几乎无阻塞，Flow 只有单向的 transaction，没有 reply 回来。另外，Oneway 调用的 Slice 名称后面可能会带 <code>[oneway]</code> 标记；在 SQL 里也可以通过 <code>android_binder_txns.is_sync = 0</code> 来过滤 Oneway。</p>
 <p>在分析 Oneway 相关问题时，重点关注两件事：一是服务端的队列深度（如果同一 <code>IBinder</code> 对象上的 Oneway 请求堆积，后续请求的实际执行时机会被不断延后）；二是是否存在批量发送的模式（短时间内大量 Oneway 调用会形成”尖峰”，在 Perfetto 中表现为服务端 Binder 线程上密集排列的短 Slice）。</p>
-<p><img src="/images/image-20260207130758344.png" alt="image-20260207130758344"></p>
+<p><img src="/images/image-20260207130758344.webp" alt="image-20260207130758344"></p>
 <p>值得一提的是，SystemServer 的 Binder 线程不仅要处理来自各个 App 的请求，还要处理系统内部的调用（比如 AMS 调 WMS、WMS 调 SurfaceFlinger 等）。如果某个”行为不端”的 App 在短时间内疯狂发送 Oneway 请求，可能会把某个系统服务的 Oneway 队列塞满，进而影响到其他 App 的异步回调时延，造成全局性的卡顿感。</p>
 <p><a id="workflow-lock"></a></p>
 <h3 id="步骤三：排查锁竞争"><a href="#步骤三：排查锁竞争" class="headerlink" title="步骤三：排查锁竞争"></a>步骤三：排查锁竞争</h3><p>如果你跳转到服务端的 Binder 线程，发现它在处理你的请求期间长时间处于 <code>S</code>（Sleeping）或 <code>D</code>（Disk Sleep &#x2F; Uninterruptible Sleep）状态，那通常意味着它在等待某个资源——要么是在等锁，要么是在等 IO。锁竞争是 SystemServer 中非常常见的性能瓶颈来源，因为 SystemServer 里运行着大量服务，它们之间共享很多全局状态，而这些状态往往通过 <code>synchronized</code> 锁来保护。</p>
 <p><strong>Java 锁（Monitor Contention）</strong> 是最常见的情况。SystemServer 中有不少全局锁，比如 WindowManagerService 的 <code>mGlobalLock</code>、ActivityManagerService 的一些内部锁等。当多个线程同时需要访问被这些锁保护的资源时，就会产生竞争。在 Perfetto 中，如果你看到某个 Binder 线程状态为 <code>S</code>，并且 <code>blocked_function</code> 字段包含 <code>futex</code> 相关的符号（如 <code>futex_wait</code>），那基本可以确定是在等 Java 锁。要进一步确认是在等哪个锁、被谁持有，可以查看 <code>Lock contention</code> 轨道。Perfetto 会把锁竞争的关系可视化出来：用连接线标出 Owner（持有锁的线程，比如 <code>android.display</code> 线程）和 Waiter（等待锁的线程，比如处理你请求的 <code>Binder:123_1</code>）。点击 Contention Slice，还可以在 Details 面板里看到锁对象的类名（比如 <code>com.android.server.wm.WindowManagerGlobalLock</code>），这对于理解问题的根源非常有帮助。</p>
-<p><img src="/images/image-20260207130953951.png" alt="image-20260207130953951"></p>
+<p><img src="/images/image-20260207130953951.webp" alt="image-20260207130953951"></p>
 <p><strong>Native 锁（Mutex &#x2F; RwLock）</strong> 的情况相对少见一些，但在某些场景下也会遇到。表现形式类似：线程状态为 <code>D</code> 或 <code>S</code>，但调用栈里出现的是 <code>__mutex_lock</code>、<code>pthread_mutex_lock</code>、<code>rwsem</code> 等 Native 层的符号，而不是 Java 的 <code>futex_wait</code>。分析这类问题通常需要结合 <code>sched_blocked_reason</code> 事件来看线程具体在等什么，属于比较进阶的内容，这里就不展开了。</p>
 <h4 id="使用-SQL-统计-system-server-中的-Java-Monitor-Contention（可选）"><a href="#使用-SQL-统计-system-server-中的-Java-Monitor-Contention（可选）" class="headerlink" title="使用 SQL 统计 system_server 中的 Java Monitor Contention（可选）"></a>使用 SQL 统计 system_server 中的 Java Monitor Contention（可选）</h4><p>PerfettoSQL 标准库已经提供了解析后的 <code>android_monitor_contention</code> 表（由 ART 的 monitor contention 相关 Slice 解析而来），建议优先使用它来做统计，而不是手工解析 slice 名称字符串：</p>
 <figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.monitor_contention;</span><br><span class="line"></span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  process_name,</span><br><span class="line">  blocked_thread_name <span class="keyword">AS</span> waiter_thread,</span><br><span class="line">  blocking_thread_name <span class="keyword">AS</span> owner_thread,</span><br><span class="line">  (dur <span class="operator">/</span> <span class="number">1e6</span>) <span class="keyword">AS</span> dur_ms,</span><br><span class="line">  (waiter_count <span class="operator">+</span> <span class="number">1</span>) <span class="keyword">AS</span> waiter_threads,</span><br><span class="line">  short_blocked_method,</span><br><span class="line">  short_blocking_method,</span><br><span class="line">  blocked_src,</span><br><span class="line">  blocking_src</span><br><span class="line"><span class="keyword">FROM</span> android_monitor_contention</span><br><span class="line"><span class="keyword">WHERE</span> process_name <span class="operator">=</span> <span class="string">&#x27;system_server&#x27;</span></span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> dur <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">50</span>;</span><br></pre></td></tr></table></figure>
@@ -767,7 +767,7 @@ loading="lazy"             decoding="async"
 <blockquote>
 <p><strong>提示</strong>：如果查不到数据，请确认抓取时 <code>atrace_categories</code> 包含 <code>dalvik</code>，并且问题场景中确实发生了 monitor contention。</p>
 </blockquote>
-<p><img src="/images/image-20260207105941270.png" alt="image-20260207105941270"></p>
+<p><img src="/images/image-20260207105941270.webp" alt="image-20260207105941270"></p>
 <p><a id="platform-features"></a></p>
 <h2 id="最新平台特性与优化建议"><a href="#最新平台特性与优化建议" class="headerlink" title="最新平台特性与优化建议"></a>最新平台特性与优化建议</h2><p>随着 Android 版本演进，Binder 在性能与稳定性上也持续增强。理解这些机制有助于解释 Perfetto 现象并指导优化。</p>
 <p><strong>Binder Freeze（Android 12+）</strong>：Cached 进程被冻结后几乎不获得 CPU。对其发起同步 Binder 调用会被拒绝，并可能触发目标进程终止；异步（<code>oneway</code>）事务通常先缓冲，待解冻后处理。</p>
@@ -808,7 +808,7 @@ loading="lazy"             decoding="async"
             <p>Author：<a href="https://androidperformance.com">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/">https://androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/</a>
             <p>Publish date：<a href="https://androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/">November 16th 2025, 3:33:30 pm</a>
-            <p>Update date：<a href="https://androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/">February 7th 2026, 1:20:47 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/">February 7th 2026, 1:24:49 pm</a>
             <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     <!-- paginator -->
@@ -1125,11 +1125,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/07</span>
-            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/07</span>
-            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
+            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/03</span>
@@ -1537,14 +1537,6 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-tags">
     <div class="sidebar-tags-name">
-            <span class="sidebar-tag-name" data-tags="Jank">
-                <span class="iconfont-archer">&#xe606;</span>
-                Jank
-            </span>
-            <span class="sidebar-tag-name" data-tags="Android">
-                <span class="iconfont-archer">&#xe606;</span>
-                Android
-            </span>
             <span class="sidebar-tag-name" data-tags="年度推荐">
                 <span class="iconfont-archer">&#xe606;</span>
                 年度推荐
@@ -1557,6 +1549,22 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Memory
             </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
             <span class="sidebar-tag-name" data-tags="年终总结">
                 <span class="iconfont-archer">&#xe606;</span>
                 年终总结
@@ -1565,29 +1573,25 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 知识星球
             </span>
+            <span class="sidebar-tag-name" data-tags="随笔">
+                <span class="iconfont-archer">&#xe606;</span>
+                随笔
+            </span>
             <span class="sidebar-tag-name" data-tags="ANR">
                 <span class="iconfont-archer">&#xe606;</span>
                 ANR
-            </span>
-            <span class="sidebar-tag-name" data-tags="Systrace">
-                <span class="iconfont-archer">&#xe606;</span>
-                Systrace
-            </span>
-            <span class="sidebar-tag-name" data-tags="Perfetto">
-                <span class="iconfont-archer">&#xe606;</span>
-                Perfetto
             </span>
             <span class="sidebar-tag-name" data-tags="RenderThread">
                 <span class="iconfont-archer">&#xe606;</span>
                 RenderThread
             </span>
-            <span class="sidebar-tag-name" data-tags="随笔">
-                <span class="iconfont-archer">&#xe606;</span>
-                随笔
-            </span>
             <span class="sidebar-tag-name" data-tags="Performance">
                 <span class="iconfont-archer">&#xe606;</span>
                 Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
             </span>
             <span class="sidebar-tag-name" data-tags="Linux">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1600,10 +1604,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Java">
                 <span class="iconfont-archer">&#xe606;</span>
                 Java
-            </span>
-            <span class="sidebar-tag-name" data-tags="Tools">
-                <span class="iconfont-archer">&#xe606;</span>
-                Tools
             </span>
             <span class="sidebar-tag-name" data-tags="BlastBufferQueue">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1633,13 +1633,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 页面响应
             </span>
-            <span class="sidebar-tag-name" data-tags="MAT">
-                <span class="iconfont-archer">&#xe606;</span>
-                MAT
-            </span>
             <span class="sidebar-tag-name" data-tags="Binder">
                 <span class="iconfont-archer">&#xe606;</span>
                 Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
             </span>
             <span class="sidebar-tag-name" data-tags="DelayLoad">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1653,21 +1653,17 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 程序员
             </span>
-            <span class="sidebar-tag-name" data-tags="Nexus">
-                <span class="iconfont-archer">&#xe606;</span>
-                Nexus
-            </span>
             <span class="sidebar-tag-name" data-tags="Singleton">
                 <span class="iconfont-archer">&#xe606;</span>
                 Singleton
             </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
             <span class="sidebar-tag-name" data-tags="设计规范">
                 <span class="iconfont-archer">&#xe606;</span>
                 设计规范
-            </span>
-            <span class="sidebar-tag-name" data-tags="Compose">
-                <span class="iconfont-archer">&#xe606;</span>
-                Compose
             </span>
             <span class="sidebar-tag-name" data-tags="Kotlin">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1676,6 +1672,10 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Process">
                 <span class="iconfont-archer">&#xe606;</span>
                 Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
             </span>
             <span class="sidebar-tag-name" data-tags="卡顿">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1705,13 +1705,17 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 游戏与编程
             </span>
-            <span class="sidebar-tag-name" data-tags="利器">
-                <span class="iconfont-archer">&#xe606;</span>
-                利器
-            </span>
             <span class="sidebar-tag-name" data-tags="互联网那些事">
                 <span class="iconfont-archer">&#xe606;</span>
                 互联网那些事
+            </span>
+            <span class="sidebar-tag-name" data-tags="阅读之美">
+                <span class="iconfont-archer">&#xe606;</span>
+                阅读之美
+            </span>
+            <span class="sidebar-tag-name" data-tags="利器">
+                <span class="iconfont-archer">&#xe606;</span>
+                利器
             </span>
             <span class="sidebar-tag-name" data-tags="iOS">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1733,10 +1737,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 用户体验
             </span>
-            <span class="sidebar-tag-name" data-tags="阅读之美">
-                <span class="iconfont-archer">&#xe606;</span>
-                阅读之美
-            </span>
     </div>
     <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
     <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
@@ -1747,13 +1747,13 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-categories">
     <div class="sidebar-categories-name">
-        <span class="sidebar-category-name" data-categories="读书笔记">
-            <span class="iconfont-archer">&#xe60a;</span>
-            读书笔记
-        </span>
         <span class="sidebar-category-name" data-categories="随笔">
             <span class="iconfont-archer">&#xe60a;</span>
             随笔
+        </span>
+        <span class="sidebar-category-name" data-categories="读书笔记">
+            <span class="iconfont-archer">&#xe60a;</span>
+            读书笔记
         </span>
         <span class="sidebar-category-name" data-categories="Android">
             <span class="iconfont-archer">&#xe60a;</span>

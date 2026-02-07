@@ -30,12 +30,12 @@
 <meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803173809421.webp">
 <meta property="og:image" content="https://androidperformance.com/images/WechatIMG581.webp">
 <meta property="article:published_time" content="2025-08-02T02:11:45.000Z">
-<meta property="article:modified_time" content="2026-02-07T05:17:47.835Z">
+<meta property="article:modified_time" content="2026-02-07T15:31:25.165Z">
 <meta property="article:author" content="Gracker">
-<meta property="article:tag" content="Jank">
 <meta property="article:tag" content="Android">
 <meta property="article:tag" content="Perfetto">
 <meta property="article:tag" content="Systrace">
+<meta property="article:tag" content="Jank">
 <meta property="article:tag" content="Performance">
 <meta property="article:tag" content="BlastBufferQueue">
 <meta name="twitter:card" content="summary">
@@ -404,17 +404,17 @@ loading="lazy"             decoding="async"
                 Android
             </span>
         </span>
-        <a class="post-tag" href="javascript:void(0);" data-tags="Jank">Jank</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Systrace">Systrace</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Jank">Jank</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="BlastBufferQueue">BlastBufferQueue</a>
 </div>
 
                 <!-- 文章字数统计 -->
                     <div class="post-intro-read">
-                        <span>Word count: <span class="post-count word-count">8.9k</span>Reading time: <span class="post-count reading-time">34 min</span></span>
+                        <span>Word count: <span class="post-count word-count">8.4k</span>Reading time: <span class="post-count reading-time">32 min</span></span>
                     </div>
                 <div class="post-intro-meta">
                     <!-- 撰写日期 -->
@@ -630,7 +630,7 @@ loading="lazy"             decoding="async"
 </ul>
 <h2 id="主线程和渲染线程的工作流程"><a href="#主线程和渲染线程的工作流程" class="headerlink" title="主线程和渲染线程的工作流程"></a>主线程和渲染线程的工作流程</h2><p><img src="/../images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803165650716.webp" alt="image-20250803165650716"></p>
 <p>通过上面的 Perfetto 截图，可以看到一帧完整的渲染流程。我们可以将 Perfetto 图想象成一条河流：主线程在上游处理逻辑，渲染线程在下游执行绘制。河流从左到右流动，每段代表一个步骤。</p>
-<p><strong>重要说明</strong>：并非每一帧都会执行所有步骤。Input、Animation、Insets Animation 这些回调是基于前一帧的状态决定当前帧是否执行，而 Traversal（measure、layout、draw）是每帧的核心流程。</p>
+<p><strong>重要说明</strong>：并非每一帧都会执行所有步骤。Input、Animation、Insets Animation 都是按需执行。Traversal（measure、layout、draw）同样是按需触发：只有 <code>requestLayout</code>、<code>invalidate</code>、窗口属性&#x2F;可见性变化等场景才会通过 <code>scheduleTraversals()</code> 投递 <code>CALLBACK_TRAVERSAL</code>。在连续滑动&#x2F;动画场景下它常常“看起来像每帧都在跑”。</p>
 <p>通过以下描述，试着在脑中”播放”这个完整流程：</p>
 <h3 id="1-主线程等待-Vsync-信号"><a href="#1-主线程等待-Vsync-信号" class="headerlink" title="1. 主线程等待 Vsync 信号"></a>1. 主线程等待 Vsync 信号</h3><ul>
 <li><strong>Perfetto trace</strong>: 主线程处于 Sleep 状态（显示为空闲块）</li>
@@ -681,7 +681,7 @@ loading="lazy"             decoding="async"
 </ul>
 <h3 id="7-Traversal（测量、布局、绘制准备）"><a href="#7-Traversal（测量、布局、绘制准备）" class="headerlink" title="7. Traversal（测量、布局、绘制准备）"></a>7. Traversal（测量、布局、绘制准备）</h3><ul>
 <li><strong>Perfetto trace</strong>: <code>performTraversals</code>, <code>measure</code>, <code>layout</code>, <code>draw</code></li>
-<li><strong>流程说明</strong>: Android UI 渲染的三大核心流程，每一帧都会执行这个完整的流程：</li>
+<li><strong>流程说明</strong>: Android UI 渲染的三大核心流程，但并不是每个 Vsync 都完整执行一遍，是否执行取决于本帧是否有布局&#x2F;绘制请求。</li>
 </ul>
 <h4 id="7-1-Measure（测量阶段）"><a href="#7-1-Measure（测量阶段）" class="headerlink" title="7.1 Measure（测量阶段）"></a>7.1 Measure（测量阶段）</h4><ul>
 <li><strong>作用</strong>: 确定每个 View 的尺寸大小</li>
@@ -714,35 +714,35 @@ loading="lazy"             decoding="async"
 </li>
 <li><strong>Perfetto 中的表现</strong>: <code>draw</code> 事件，在硬件加速下主要是构建 DisplayList</li>
 </ul>
-<h4 id="ViewRootImpl-performTraversals-核心代码"><a href="#ViewRootImpl-performTraversals-核心代码" class="headerlink" title="ViewRootImpl.performTraversals 核心代码"></a>ViewRootImpl.performTraversals 核心代码</h4><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/base/core/java/android/view/ViewRootImpl.java</span></span><br><span class="line"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title function_">performTraversals</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="comment">// ... 其他代码</span></span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 1. Measure 阶段</span></span><br><span class="line">    <span class="keyword">if</span> (mFirst || windowShouldResize || viewVisibilityChanged || params != <span class="literal">null</span>) &#123;</span><br><span class="line">        performMeasure(childWidthMeasureSpec, childHeightMeasureSpec);</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 2. Layout 阶段  </span></span><br><span class="line">    <span class="keyword">final</span> <span class="type">boolean</span> <span class="variable">didLayout</span> <span class="operator">=</span> layoutRequested &amp;&amp; (!mStopped || mReportNextDraw);</span><br><span class="line">    <span class="keyword">if</span> (didLayout) &#123;</span><br><span class="line">        performLayout(lp, mWidth, mHeight);</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 3. Draw 阶段</span></span><br><span class="line">    <span class="keyword">if</span> (!performRequestedAction(mAttachInfo, mFirst)) &#123;</span><br><span class="line">        <span class="keyword">if</span> (mFirst || viewVisibilityChanged) &#123;</span><br><span class="line">            performDraw();</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h4 id="ViewRootImpl-performTraversals-核心代码"><a href="#ViewRootImpl-performTraversals-核心代码" class="headerlink" title="ViewRootImpl.performTraversals 核心代码"></a>ViewRootImpl.performTraversals 核心代码</h4><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/base/core/java/android/view/ViewRootImpl.java</span></span><br><span class="line"><span class="keyword">void</span> <span class="title function_">scheduleTraversals</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="keyword">if</span> (!mTraversalScheduled) &#123;</span><br><span class="line">        mTraversalScheduled = <span class="literal">true</span>;</span><br><span class="line">        mTraversalBarrier = mHandler.getLooper().getQueue().postSyncBarrier();</span><br><span class="line">        mChoreographer.postCallback(CALLBACK_TRAVERSAL, mTraversalRunnable, <span class="literal">null</span>);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title function_">performTraversals</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="comment">// ... 大量窗口/relayout/可见性/同步相关逻辑</span></span><br><span class="line">    <span class="type">boolean</span> <span class="variable">layoutRequested</span> <span class="operator">=</span> mLayoutRequested &amp;&amp; (!mStopped || mReportNextDraw);</span><br><span class="line">    <span class="keyword">if</span> (layoutRequested) &#123;</span><br><span class="line">        <span class="comment">// 可能触发 measureHierarchy / performMeasure</span></span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">final</span> <span class="type">boolean</span> <span class="variable">didLayout</span> <span class="operator">=</span> layoutRequested &amp;&amp; (!mStopped || mReportNextDraw);</span><br><span class="line">    <span class="keyword">if</span> (didLayout) &#123;</span><br><span class="line">        performLayout(lp, mWidth, mHeight);</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 满足条件才会进入 draw；若取消绘制会重新 scheduleTraversals()</span></span><br><span class="line">    performDraw(mActiveSurfaceSyncGroup);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <blockquote>
-<p>注：实际 AOSP 源码中 <code>performTraversals</code> 的条件判断更为复杂，会涉及 <code>mFirst</code>、<code>mAdded</code>、<code>mWindowShouldResize</code> 以及各种 <code>dirty</code> 状态标记，但以上代码清晰地展示了其核心的 Measure、Layout、Draw 三阶段流程。</p>
+<p>注：最新 AOSP 中 <code>performTraversals</code> 的分支远比示例复杂，涉及 relayout、surface 变化、同步组、取消重绘、窗口可见性等；这里仅保留与 Measure&#x2F;Layout&#x2F;Draw 直接相关的主干逻辑。</p>
 </blockquote>
 <p><strong>三阶段的执行条件</strong>：</p>
 <ul>
-<li><strong>Measure</strong>: 当窗口大小变化、首次创建或者视图可见性变化时执行</li>
-<li><strong>Layout</strong>: 当布局被请求且应用未停止时执行  </li>
-<li><strong>Draw</strong>: 当有绘制请求或者是首次绘制、视图可见性变化时执行</li>
+<li><strong>Measure</strong>: 在首次绘制、窗口&#x2F;Insets&#x2F;配置变化或布局请求触发时执行，不是每帧固定执行</li>
+<li><strong>Layout</strong>: 当本帧存在 <code>layoutRequested</code> 且应用处于可绘制状态时执行  </li>
+<li><strong>Draw</strong>: 满足绘制条件时执行；若被 <code>cancelDraw</code>&#x2F;<code>predraw</code> 等分支中断，会重新调度下一次 Traversal</li>
 </ul>
 <h3 id="8-同步-DisplayList-到渲染线程"><a href="#8-同步-DisplayList-到渲染线程" class="headerlink" title="8. 同步 DisplayList 到渲染线程"></a>8. 同步 DisplayList 到渲染线程</h3><ul>
 <li><strong>Perfetto trace</strong>: syncAndDrawFrame，可见 “sync” 或 “syncAndDrawFrame” 事件（通常显示为主线程向渲染线程的数据传递点）</li>
-<li><strong>流程说明</strong>: 主线程通过 syncAndDrawFrame 将构建好的 DisplayList（包含 RenderNode 树、视图属性如变换矩阵、透明度和裁剪区域，以及共享资源如纹理）传递给渲染线程。这个同步过程是硬件加速的核心，确保渲染线程获得完整的绘制指令。同步完成后，主线程立即释放资源（可继续处理其他消息、IdleHandler 或进入 Sleep 等待下一个 Vsync），而渲染线程独立接管后续的 GPU 渲染工作。</li>
+<li><strong>流程说明</strong>: 主线程通过 <code>syncAndDrawFrame</code> 将本帧 RenderNode&#x2F;DisplayList 状态同步到 RenderThread。这里不是“纯异步 fire-and-forget”：UI 线程会短暂等待 RenderThread 完成关键同步点（<code>DrawFrameTask::postAndWait</code>），随后尽早解除阻塞；并不会一直等到屏幕真正显示该帧。</li>
 </ul>
 <h3 id="9-渲染线程获取-Buffer"><a href="#9-渲染线程获取-Buffer" class="headerlink" title="9. 渲染线程获取 Buffer"></a>9. 渲染线程获取 Buffer</h3><ul>
-<li><strong>Perfetto trace</strong>: <code>dequeueBuffer</code> 块</li>
-<li><strong>流程说明</strong>: 渲染线程从 BlastBufferQueue（App 端管理的缓冲队列）通过 dequeueBuffer 获取一个可用缓冲区，作为渲染目标（framebuffer）。BlastBufferQueue 采用生产者-消费者模型，预先管理缓冲池以减少等待时间；如果无可用 Buffer，可能短暂等待或触发新 Buffer 创建。</li>
+<li><strong>Perfetto trace</strong>: 常见可观察 <code>DequeueBufferDuration</code> &#x2F; <code>QueueBufferDuration</code> 相关信息（具体 tag 因版本和厂商实现不同）</li>
+<li><strong>流程说明</strong>: 渲染线程在绘制提交阶段会通过 <code>ANativeWindow/RenderPipeline</code> 路径完成 buffer 申请与交换。是否等待、等待多久，直接影响这一帧是否赶上 deadline。</li>
 </ul>
 <h3 id="10-处理渲染指令并-flush-到-GPU"><a href="#10-处理渲染指令并-flush-到-GPU" class="headerlink" title="10. 处理渲染指令并 flush 到 GPU"></a>10. 处理渲染指令并 flush 到 GPU</h3><ul>
-<li><h5 id="Perfetto-trace-drawing-相关块"><a href="#Perfetto-trace-drawing-相关块" class="headerlink" title="Perfetto trace: drawing 相关块"></a><strong>Perfetto trace</strong>: <code>drawing</code> 相关块</h5></li>
-<li><strong>流程说明</strong>: RenderThread（运行在 CPU 上）通过 HardwareRenderer 和 CanvasContext 处理从 UI thread 同步过来的 DisplayList，调用 OpenGL ES 或 Vulkan API 来准备绘制命令序列（如渲染视图的几何形状、纹理、着色效果）。这些命令被构建成命令缓冲区（command buffer），然后通过 flush 操作（例如 mRenderPipeline-&gt;flush()）提交到 GPU 驱动，同时生成 present fence 用于后续同步。GPU 异步执行这些指令，实际生成图像内容。</li>
+<li><strong>Perfetto trace</strong>: <code>drawing</code> 相关块</li>
+<li><strong>流程说明</strong>: RenderThread（运行在 CPU 上）通过 <code>HardwareRenderer/CanvasContext</code> 处理 UI 线程同步过来的 RenderNode 树，生成 GPU 命令并提交。GPU 异步执行后产出 fence，用于后续的合成同步。</li>
 </ul>
 <h3 id="11-提交-Buffer（可能-unsignaled）"><a href="#11-提交-Buffer（可能-unsignaled）" class="headerlink" title="11. 提交 Buffer（可能 unsignaled）"></a>11. 提交 Buffer（可能 unsignaled）</h3><ul>
 <li><strong>Perfetto trace</strong>: queueBuffer（可观察 acquireFence 状态）</li>
-<li><strong>流程说明</strong>: RenderThread 通过 queueBuffer 将渲染完成的 Buffer 提交回 BlastBufferQueue，此时 Buffer 可能携带 unsignaled 的 acquire fence（即 GPU 渲染命令尚未完全执行完毕）。这种异步提交机制有助于减少整体渲染延迟。</li>
+<li><strong>流程说明</strong>: 帧提交会经过 BufferQueue&#x2F;BLAST 机制进入 SurfaceFlinger，某些场景下会出现 unsignaled fence 相关行为（由系统策略决定是否允许提前 latch），目标是降低端到端延迟。</li>
 </ul>
 <h3 id="12-触发-Transaction-到-SurfaceFlinger"><a href="#12-触发-Transaction-到-SurfaceFlinger" class="headerlink" title="12. 触发 Transaction 到 SurfaceFlinger"></a>12. 触发 Transaction 到 SurfaceFlinger</h3><ul>
 <li><strong>Perfetto trace</strong>:  TransactionQueue 或 BLAST transaction 事件 ，一般在 queueBuffer 之后，有些 Trace 没有这个 Tag</li>
-<li><strong>流程说明</strong>: 在 queueBuffer 完成后，RenderThread 通过 applyPendingTransactions 将积累的 Transaction（包括 Buffer 更新、层属性变化等）批量发送给 SurfaceFlinger。SurfaceFlinger 处理这些 Transaction，根据 LatchUnsignaledConfig 策略（例如 AutoSingleLayer 配置）检查并可能 latch unsignaled buffer 以进一步优化延迟；如果配置禁用 unsignaled latch，则等待 fence signaled 确保 Buffer 就绪。随后，SurfaceFlinger 执行层合成（composite）并将最终图像显示到屏幕。</li>
+<li><strong>流程说明</strong>: App 侧通过 BLAST&#x2F;SurfaceControl transaction 将 buffer 与层属性更新关联后提交到 SurfaceFlinger。SurfaceFlinger 再按 <code>LatchUnsignaledConfig</code> 等策略决定 latch 时机并完成合成显示。</li>
 </ul>
 <p><strong>在 Perfetto 中识别不同的渲染模式</strong>：</p>
 <ul>
@@ -832,10 +832,10 @@ loading="lazy"             decoding="async"
 
 <p>Fork 出来的进程，我们这里可以把他看做主线程，但是这个线程还没有和 Android 进行连接，所以无法处理 Android App 的 Message ；由于 Android App 线程运行<strong>基于消息机制</strong> ，那么这个 Fork 出来的主线程需要和 Android 的 Message 消息绑定，才能处理 Android App 的各种 Message </p>
 <p>这里就引入了 <strong>ActivityThread</strong> ，确切的说，ActivityThread 应该起名叫 ProcessThread 更贴切一些。ActivityThread 连接了 Fork 出来的进程和 App 的 Message ，他们的通力配合组成了我们熟知的 Android App 主线程。所以说 ActivityThread 其实并不是一个 Thread，而是他初始化了 Message 机制所需要的 MessageQueue、Looper、Handler ，而且其 Handler 负责处理大部分 Message 消息，所以我们习惯上觉得 ActivityThread 是主线程，其实他只是主线程的一个逻辑处理单元。</p>
-<h2 id="ActivityThread-的创建"><a href="#ActivityThread-的创建" class="headerlink" title="ActivityThread 的创建"></a>ActivityThread 的创建</h2><p>App 进程 fork 出来之后，回到 App 进程，查找 ActivityThread 的 Main函数</p>
-<p>com&#x2F;android&#x2F;internal&#x2F;os&#x2F;ZygoteInit.java</p>
-<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// Android 16 最新的 Zygote 初始化实现</span></span><br><span class="line"><span class="keyword">static</span> <span class="keyword">final</span> Runnable <span class="title function_">childZygoteInit</span><span class="params">(</span></span><br><span class="line"><span class="params">        <span class="type">int</span> targetSdkVersion, String[] argv, ClassLoader classLoader)</span> &#123;</span><br><span class="line">    RuntimeInit.<span class="type">Arguments</span> <span class="variable">args</span> <span class="operator">=</span> <span class="keyword">new</span> <span class="title class_">RuntimeInit</span>.Arguments(argv);</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 设置线程优先级</span></span><br><span class="line">    <span class="keyword">if</span> (args.niceName != <span class="literal">null</span>) &#123;</span><br><span class="line">        Process.setArgV0(args.niceName);</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 设置应用程序的调试模式</span></span><br><span class="line">    <span class="keyword">if</span> (args.invokeWith != <span class="literal">null</span>) &#123;</span><br><span class="line">        WrapperInit.execApplication(args.invokeWith,</span><br><span class="line">                args.niceName, args.targetSdkVersion,</span><br><span class="line">                VMRuntime.getCurrentInstructionSet(),</span><br><span class="line">                <span class="literal">null</span>, args.remainingArgs);</span><br><span class="line">        </span><br><span class="line">        <span class="comment">// Should not get here.</span></span><br><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> <span class="title class_">IllegalStateException</span>(<span class="string">&quot;WrapperInit.execApplication unexpectedly returned&quot;</span>);</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        ZygoteInit.zygoteInit(args.targetSdkVersion, args.disabledCompatChanges,</span><br><span class="line">                args.remainingArgs, classLoader);</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    <span class="keyword">return</span> RuntimeInit.findStaticMain(args.startClass, args.startArgs, classLoader);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-<p>这里的 startClass 就是 ActivityThread，找到之后调用，逻辑就到了 ActivityThread的main函数</p>
+<h2 id="ActivityThread-的创建"><a href="#ActivityThread-的创建" class="headerlink" title="ActivityThread 的创建"></a>ActivityThread 的创建</h2><p>App 进程 fork 出来之后，主路径是：<br><code>ZygoteConnection.handleChildProc</code> → <code>ZygoteInit.zygoteInit</code> → <code>RuntimeInit.applicationInit</code> → <code>ActivityThread.main</code></p>
+<p>com&#x2F;android&#x2F;internal&#x2F;os&#x2F;ZygoteConnection.java</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> Runnable <span class="title function_">handleChildProc</span><span class="params">(ZygoteArguments parsedArgs, FileDescriptor pipeFd,</span></span><br><span class="line"><span class="params">        <span class="type">boolean</span> isZygote)</span> &#123;</span><br><span class="line">    <span class="comment">// ... 省略前置逻辑</span></span><br><span class="line">    <span class="keyword">if</span> (!isZygote) &#123;</span><br><span class="line">        <span class="keyword">return</span> ZygoteInit.zygoteInit(parsedArgs.mTargetSdkVersion,</span><br><span class="line">                parsedArgs.mDisabledCompatChanges,</span><br><span class="line">                parsedArgs.mRemainingArgs, <span class="literal">null</span> <span class="comment">/* classLoader */</span>);</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> ZygoteInit.childZygoteInit(parsedArgs.mRemainingArgs);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>对于普通 App 进程，上面会走 <code>zygoteInit</code> 分支并最终进入 <code>ActivityThread.main</code>；<code>childZygoteInit</code> 是子 zygote 的分支，不是常规 App 主路径。</p>
 <p>android&#x2F;app&#x2F;ActivityThread.java</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title function_">main</span><span class="params">(String[] args)</span> &#123;</span><br><span class="line">    Trace.traceBegin(Trace.TRACE_TAG_ACTIVITY_MANAGER, <span class="string">&quot;ActivityThreadMain&quot;</span>);</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 1. 初始化 Looper、MessageQueue</span></span><br><span class="line">    Looper.prepareMainLooper();</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 2. 初始化 ActivityThread</span></span><br><span class="line">    <span class="type">long</span> <span class="variable">startSeq</span> <span class="operator">=</span> <span class="number">0</span>;</span><br><span class="line">    <span class="keyword">if</span> (args != <span class="literal">null</span>) &#123;</span><br><span class="line">        <span class="keyword">for</span> (<span class="type">int</span> <span class="variable">i</span> <span class="operator">=</span> args.length - <span class="number">1</span>; i &gt;= <span class="number">0</span>; --i) &#123;</span><br><span class="line">            <span class="keyword">if</span> (args[i] != <span class="literal">null</span> &amp;&amp; args[i].startsWith(PROC_START_SEQ_IDENT)) &#123;</span><br><span class="line">                startSeq = Long.parseLong(</span><br><span class="line">                        args[i].substring(PROC_START_SEQ_IDENT.length()));</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="type">ActivityThread</span> <span class="variable">thread</span> <span class="operator">=</span> <span class="keyword">new</span> <span class="title class_">ActivityThread</span>();</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 3. 主要是调用 AMS.attachApplicationLocked，同步进程信息，做一些初始化工作</span></span><br><span class="line">    thread.attach(<span class="literal">false</span>, startSeq);</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 4. 获取主线程的 Handler，这里是 H ，基本上 App 的 Message 都会在这个 Handler 里面进行处理 </span></span><br><span class="line">    <span class="keyword">if</span> (sMainThreadHandler == <span class="literal">null</span>) &#123;</span><br><span class="line">        sMainThreadHandler = thread.getHandler();</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    Trace.traceEnd(Trace.TRACE_TAG_ACTIVITY_MANAGER);</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 5. 初始化完成，Looper 开始工作</span></span><br><span class="line">    Looper.loop();</span><br><span class="line">    </span><br><span class="line">    <span class="keyword">throw</span> <span class="keyword">new</span> <span class="title class_">RuntimeException</span>(<span class="string">&quot;Main thread loop unexpectedly exited&quot;</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>注释里面都很清楚，这里就不详细说了，main 函数处理完成之后，主线程就算是正式上线开始工作.</p>
@@ -850,7 +850,7 @@ loading="lazy"             decoding="async"
 <p>我们就可以关闭硬件加速，系统检测到你这个 App 关闭了硬件加速，就不会初始化 RenderThread ，直接 cpu 调用 libSkia 来进行渲染。其 Trace 跟踪表现如下<strong>（资源比较老，用 Systrace 图示)</strong></p>
 <p><img src="/../images/Android-Perfetto-07-MainThread-And-RenderThread/15717420572997.jpg" alt="img"></p>
 <p>与这篇文章开头开启硬件加速的 Perfetto 图对比，可以看到主线程由于要进行渲染工作，所以执行的时间变长了，也更容易出现卡顿，同时帧与帧之间的空闲间隔也变短了，使得其他 Message 的执行时间被压缩。在 Perfetto 中，这种差异通过线程活动的时间长度和密集程度可以清晰地观察到。</p>
-<h2 id="硬件加速绘制"><a href="#硬件加速绘制" class="headerlink" title="硬件加速绘制"></a>硬件加速绘制</h2><p>正常情况下，硬件加速是开启的，主线程的 draw 函数并没有真正的执行 drawCall ，而是把要 draw 的内容记录到 DisplayList 里面，通过 syncAndDrawFrame 将 DisplayList 同步到 RenderThread 中，一旦同步完成，主线程就可以被释放出来做其他的事情，RenderThread 则继续进行渲染工作。</p>
+<h2 id="硬件加速绘制"><a href="#硬件加速绘制" class="headerlink" title="硬件加速绘制"></a>硬件加速绘制</h2><p>正常情况下，硬件加速是开启的，主线程的 draw 主要是在构建&#x2F;更新 DisplayList（RenderNode 树），然后通过 <code>syncAndDrawFrame</code> 同步给 RenderThread。UI 线程会在同步关键路径上短暂等待，随后尽快返回继续处理主线程消息；RenderThread 再继续执行后续渲染与提交。</p>
 <h2 id="渲染线程初始化"><a href="#渲染线程初始化" class="headerlink" title="渲染线程初始化"></a>渲染线程初始化</h2><p>渲染线程初始化在真正需要 draw 内容的时候，一般我们启动一个 Activity ，在第一个 draw 执行的时候，会去检测渲染线程是否初始化，如果没有则去进行初始化</p>
 <p>android&#x2F;view&#x2F;ViewRootImpl.java</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 渲染线程初始化</span></span><br><span class="line">mAttachInfo.mThreadedRenderer.initializeIfNeeded(</span><br><span class="line">        mWidth, mHeight, mAttachInfo, mSurface, surfaceInsets);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 初始化 BlastBufferQueue - App 端缓冲区管理器</span></span><br><span class="line"><span class="keyword">if</span> (mBlastBufferQueue == <span class="literal">null</span>) &#123;</span><br><span class="line">    mBlastBufferQueue = <span class="keyword">new</span> <span class="title class_">BLASTBufferQueue</span>(mTag, mSurfaceControl,</span><br><span class="line">        mSurfaceSize.x, mSurfaceSize.y,</span><br><span class="line">        mWindowAttributes.format);</span><br><span class="line">    mBlastBufferQueue.update(mSurfaceControl, </span><br><span class="line">        mSurfaceSize.x, mSurfaceSize.y, mWindowAttributes.format);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
@@ -862,13 +862,15 @@ loading="lazy"             decoding="async"
 <li>在 Perfetto 中可观察到 QueuedBuffer 指标的变化</li>
 </ul>
 <p>后续直接调用 draw </p>
-<p>android&#x2F;graphics&#x2F;HardwareRenderer.java</p>
+<p>android&#x2F;view&#x2F;ThreadedRenderer.java</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br></pre></td><td class="code"><pre><span class="line">mAttachInfo.mThreadedRenderer.draw(mView, mAttachInfo, <span class="built_in">this</span>);</span><br><span class="line"></span><br><span class="line"><span class="keyword">void</span> <span class="title function_">draw</span><span class="params">(View view, AttachInfo attachInfo, DrawCallbacks callbacks)</span> &#123;</span><br><span class="line">    <span class="keyword">final</span> <span class="type">Choreographer</span> <span class="variable">choreographer</span> <span class="operator">=</span> attachInfo.mViewRootImpl.mChoreographer;</span><br><span class="line">    choreographer.mFrameInfo.markDrawStart();</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 更新 RootDisplayList，构建 RenderNode 树</span></span><br><span class="line">    updateRootDisplayList(view, callbacks);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 处理动画 RenderNode</span></span><br><span class="line">    <span class="keyword">if</span> (attachInfo.mPendingAnimatingRenderNodes != <span class="literal">null</span>) &#123;</span><br><span class="line">        <span class="keyword">final</span> <span class="type">int</span> <span class="variable">count</span> <span class="operator">=</span> attachInfo.mPendingAnimatingRenderNodes.size();</span><br><span class="line">        <span class="keyword">for</span> (<span class="type">int</span> <span class="variable">i</span> <span class="operator">=</span> <span class="number">0</span>; i &lt; count; i++) &#123;</span><br><span class="line">            registerAnimatingRenderNode(</span><br><span class="line">                    attachInfo.mPendingAnimatingRenderNodes.get(i));</span><br><span class="line">        &#125;</span><br><span class="line">        attachInfo.mPendingAnimatingRenderNodes.clear();</span><br><span class="line">        attachInfo.mPendingAnimatingRenderNodes = <span class="literal">null</span>;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 同步并绘制帧，这里会触发 RenderThread 工作</span></span><br><span class="line">    <span class="type">int</span> <span class="variable">syncResult</span> <span class="operator">=</span> syncAndDrawFrame(choreographer.mFrameInfo);</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 处理各种结果状态</span></span><br><span class="line">    <span class="keyword">if</span> ((syncResult &amp; SYNC_LOST_SURFACE_REWARD_IF_FOUND) != <span class="number">0</span>) &#123;</span><br><span class="line">        setEnabled(<span class="literal">false</span>);</span><br><span class="line">        attachInfo.mViewRootImpl.mSurface.release();</span><br><span class="line">        attachInfo.mViewRootImpl.invalidate();</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">if</span> ((syncResult &amp; SYNC_REDRAW_REQUESTED) != <span class="number">0</span>) &#123;</span><br><span class="line">        attachInfo.mViewRootImpl.invalidate();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-<p>上面的 draw 只是更新 DisplayList ，更新结束后，调用 syncAndDrawFrame ，通知渲染线程开始工作，主线程释放。在 syncAndDrawFrame 中完成了关键的 <strong>UI Thread 到 RenderThread 的数据同步过程</strong>。</p>
+<p>上面的 draw 先更新 DisplayList，之后调用 <code>syncAndDrawFrame</code> 进入关键同步阶段，完成 <strong>UI Thread 到 RenderThread</strong> 的数据对齐。</p>
 <h3 id="UI-Thread-与-RenderThread-的-DisplayList-同步机制"><a href="#UI-Thread-与-RenderThread-的-DisplayList-同步机制" class="headerlink" title="UI Thread 与 RenderThread 的 DisplayList 同步机制"></a>UI Thread 与 RenderThread 的 DisplayList 同步机制</h3><p>在 <code>syncAndDrawFrame</code> 这个关键函数中，发生了以下重要的同步操作：</p>
 <figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/base/libs/hwui/renderthread/RenderProxy.cpp</span></span><br><span class="line"><span class="function"><span class="type">int</span> <span class="title">RenderProxy::syncAndDrawFrame</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="comment">// 1. 将 UI Thread 的 DisplayList 同步到 RenderThread</span></span><br><span class="line">    <span class="comment">// 这里会把主线程构建的 RenderNode 树传递给渲染线程</span></span><br><span class="line">    <span class="keyword">return</span> mDrawFrameTask.<span class="built_in">drawFrame</span>();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
-<p><code>syncAndDrawFrame</code> 的调用并非一个阻塞的同步过程，而是 UI 线程创建并派发一个 <code>DrawFrameTask</code> 到 RenderThread 的任务队列。这个 Task 封装了渲染这一帧所需的所有信息（主要是 RenderNode 树）。派发后，UI 线程就可以从渲染工作中解脱出来，处理其他事务。RenderThread 在自己的 Looper 中取出这个 Task 并执行，从而实现了两个线程的并行工作。</p>
+<p><code>syncAndDrawFrame</code> 的底层并不是完全非阻塞。最新 AOSP 中 <code>DrawFrameTask::drawFrame()</code> 会执行 <code>postAndWait()</code>：先把任务投递到 RenderThread 队列，再在条件变量上等待；RenderThread 在合适的同步点会 <code>unblockUiThread()</code>。因此它是“<strong>有等待但尽量早释放 UI</strong>”的设计，而不是“UI 完全不等待”。</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/base/libs/hwui/renderthread/DrawFrameTask.cpp</span></span><br><span class="line"><span class="function"><span class="type">int</span> <span class="title">DrawFrameTask::drawFrame</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    mSyncResult = SyncResult::OK;</span><br><span class="line">    mSyncQueued = <span class="built_in">systemTime</span>(SYSTEM_TIME_MONOTONIC);</span><br><span class="line">    <span class="built_in">postAndWait</span>();   <span class="comment">// 关键：UI 线程在这里等待</span></span><br><span class="line">    <span class="keyword">return</span> mSyncResult;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">DrawFrameTask::postAndWait</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    AutoMutex _lock(mLock);</span><br><span class="line">    mRenderThread-&gt;<span class="built_in">queue</span>().<span class="built_in">post</span>([<span class="keyword">this</span>]() &#123; <span class="built_in">run</span>(); &#125;);</span><br><span class="line">    mSignal.<span class="built_in">wait</span>(mLock);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 <p>具体的同步过程包括：</p>
 <ol>
 <li><strong>RenderNode 树的传递</strong>：主线程在 draw 过程中构建的 RenderNode 树（包含 DisplayList）会被传递给 RenderThread</li>
@@ -879,15 +881,18 @@ loading="lazy"             decoding="async"
 <p>这个同步过程是 Android 硬件加速渲染的核心，它实现了 UI Thread 专注于逻辑处理，RenderThread 专注于渲染的分工模式。</p>
 <p>渲染线程的核心实现在 libhwui 库里面，其代码位于 frameworks&#x2F;base&#x2F;libs&#x2F;hwui</p>
 <h3 id="RenderThread-与-BlastBufferQueue-的交互流程"><a href="#RenderThread-与-BlastBufferQueue-的交互流程" class="headerlink" title="RenderThread 与 BlastBufferQueue 的交互流程"></a>RenderThread 与 BlastBufferQueue 的交互流程</h3><p>RenderThread 接收到同步的 DisplayList 后，开始真正的渲染工作，这个过程中会与 BlastBufferQueue 进行密切的交互：</p>
-<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/base/libs/hwui/renderthread/CanvasContext.cpp</span></span><br><span class="line"><span class="comment">// Android 16 最新的 RenderThread 渲染流程</span></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">CanvasContext::draw</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    SkRect dirty;</span><br><span class="line">    mDamageAccumulator.<span class="built_in">finish</span>(&amp;dirty);</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 1. 从 BlastBufferQueue 获取可用的 Buffer</span></span><br><span class="line">    ANativeWindowBuffer* buffer;</span><br><span class="line">    <span class="type">int</span> fenceFd;</span><br><span class="line">    <span class="type">status_t</span> result = mNativeSurface-&gt;<span class="built_in">dequeueBuffer</span>(&amp;buffer, &amp;fenceFd);</span><br><span class="line">    <span class="keyword">if</span> (result != OK) &#123;</span><br><span class="line">        <span class="built_in">ALOGW</span>(<span class="string">&quot;Failed to dequeue buffer: %s (%d)&quot;</span>, <span class="built_in">strerror</span>(-result), result);</span><br><span class="line">        <span class="keyword">return</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 2. 设置渲染目标并绑定 Buffer</span></span><br><span class="line">    mRenderPipeline-&gt;<span class="built_in">onDequeueBuffer</span>(buffer);</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 3. 执行 GPU 渲染命令，包括所有 RenderNode 的绘制</span></span><br><span class="line">    <span class="type">bool</span> drew = mRenderPipeline-&gt;<span class="built_in">draw</span>(frame, windowDirty, dirty, mLightGeometry,</span><br><span class="line">                         &amp;mLayerUpdateQueue, mContentDrawBounds, mOpaque,</span><br><span class="line">                         mLightInfo, mRenderNodes, &amp;(<span class="built_in">profiler</span>()));</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 4. 完成渲染后，提交 Buffer（可能 unsignaled）</span></span><br><span class="line">    <span class="keyword">if</span> (drew) &#123;</span><br><span class="line">        <span class="comment">// GPU 异步渲染，获取 presentFence（可能未 signal）</span></span><br><span class="line">        <span class="type">int</span> presentFence = mRenderPipeline-&gt;<span class="built_in">flush</span>();</span><br><span class="line">        </span><br><span class="line">        <span class="comment">// 5. 直接提交 Buffer 到队列（无需等待 GPU 完成），并将 presentFence 传递给消费者</span></span><br><span class="line">        <span class="comment">// presentFence 是一个同步锁，由 GPU 在完成渲染时解开。根据系统配置（latch_unsignaled），SurfaceFlinger 可能会等待这个 fence，也可能在 fence 未 signaled 时就提前开始合成工作。</span></span><br><span class="line">        result = mNativeSurface-&gt;<span class="built_in">queueBuffer</span>(buffer, presentFence);</span><br><span class="line">        </span><br><span class="line">        <span class="comment">// 6. 触发 transaction，批量提交到 SurfaceFlinger</span></span><br><span class="line">        <span class="comment">// SurfaceFlinger 将根据 latch_unsignaled 策略决定是否接受</span></span><br><span class="line">        <span class="keyword">if</span> (mBlastBufferQueue != <span class="literal">nullptr</span>) &#123;</span><br><span class="line">            mBlastBufferQueue-&gt;<span class="built_in">flushTransaction</span>();</span><br><span class="line">        &#125;</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        <span class="comment">// 如果没有绘制内容，直接取消 Buffer</span></span><br><span class="line">        mNativeSurface-&gt;<span class="built_in">cancelBuffer</span>(buffer, fenceFd);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/base/libs/hwui/renderthread/CanvasContext.cpp</span></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">CanvasContext::draw</span><span class="params">(<span class="type">bool</span> solelyTextureViewUpdates)</span> </span>&#123;</span><br><span class="line">    <span class="comment">// 1. 计算 dirty 区域并准备本帧</span></span><br><span class="line">    <span class="comment">// 2. 通过 mRenderPipeline-&gt;draw(...) 生成绘制命令</span></span><br><span class="line">    <span class="comment">// 3. 通过 mRenderPipeline-&gt;swapBuffers(...) 提交本帧</span></span><br><span class="line">    <span class="comment">// 4. 记录 dequeue/queue 时延到 FrameInfo (DequeueBufferDuration/QueueBufferDuration)</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
+<blockquote>
+<p>注：旧版本常见的 <code>dequeueBuffer/queueBuffer/flushTransaction</code> 直观流程仍可作为理解模型，但在最新主干里这些细节被收敛在 <code>RenderPipeline</code>&#x2F;<code>ANativeWindow</code> 路径中，<code>CanvasContext::draw()</code> 本身已不是旧代码形态。</p>
+</blockquote>
 <p><strong>BlastBufferQueue 的关键特性：</strong></p>
 <ol>
 <li><strong>App 端管理</strong>：不同于传统的 BufferQueue 由 SurfaceFlinger 创建，BlastBufferQueue 是由 App 端创建和管理</li>
 <li><strong>减少同步等待</strong>：通过生产者-消费者模型，减少了 RenderThread 在 dequeueBuffer 时的等待时间</li>
 <li><strong>高效的缓冲区轮转</strong>：支持更智能的缓冲区管理策略，特别适配高刷新率显示器</li>
 <li><strong>异步提交</strong>：通过 transaction 机制异步地将完成的帧提交给 SurfaceFlinger</li>
-<li><strong>支持 unsignaled buffer</strong>：配合 SurfaceFlinger 的 <code>latch_unsignaled</code> 策略，允许提交 GPU 尚未完成的 Buffer，进一步减少渲染延迟</li>
+<li><strong>支持 unsignaled buffer</strong>：配合 SurfaceFlinger 的 unsignaled latch 策略，允许在特定条件下减少端到端延迟</li>
 </ol>
 <p><strong>关于 Latching Unsignaled Buffers 的深入探讨</strong></p>
 <p>现代 Android 系统对 <code>presentFence</code> 的处理有精细的控制，并非总是等待。这个机制被称为 **”Latching Unsignaled Buffers”**（捕获未就绪的缓冲区）。</p>
@@ -898,7 +903,7 @@ loading="lazy"             decoding="async"
 </li>
 </ul>
 <p><strong>控制开关与策略 (Android 13+)</strong>:</p>
-<p>这个行为可以通过系统属性 <code>debug.sf.latch_unsignaled</code> 进行全局调试，但更重要的是，它由一个名为 <code>LatchUnsignaledConfig</code> 的分层策略控制。一个典型的策略是 <code>AutoSingleLayer</code>：</p>
+<p>这个行为可以通过系统属性 <code>debug.sf.auto_latch_unsignaled</code> 进行全局调试，但更重要的是，它由一个名为 <code>LatchUnsignaledConfig</code> 的分层策略控制。一个典型的策略是 <code>AutoSingleLayer</code>：</p>
 <ul>
 <li>当屏幕上只有<strong>单个图层</strong>更新时（如全屏游戏或视频），系统会自动启用 Latch Unsignaled 模式，因为此时没有复杂的图层依赖，风险最低，收益最大。</li>
 <li>当有多个图层更新时，系统会回退到更安全的传统等待模式，以避免潜在的视觉错误。</li>
@@ -940,43 +945,42 @@ loading="lazy"             decoding="async"
 <p>在 Perfetto 跟踪中，BlastBufferQueue 的状态通过以下关键指标显示：</p>
 <h3 id="App-端的-QueuedBuffer-指标"><a href="#App-端的-QueuedBuffer-指标" class="headerlink" title="App 端的 QueuedBuffer 指标"></a>App 端的 QueuedBuffer 指标</h3><ul>
 <li><strong>Perfetto 显示</strong>：<code>QueuedBuffer</code> 数值轨道</li>
-<li><strong>计算规则</strong>：App 生产的 Buffer 总数 &#x3D; QueuedBuffer - 1</li>
-<li><strong>基准值说明</strong>：QueuedBuffer 的最小值为 1，0 表示没有 Buffer 在队列中</li>
-<li><strong>数值含义</strong>：QueuedBuffer 为 2 表示有 1 个 Buffer 在队列中，QueuedBuffer 为 3 表示有 2 个 Buffer 在队列中，以此类推</li>
+<li><strong>AOSP 定义（BLASTBufferQueue）</strong>：<code>QueuedBuffer = mNumFrameAvailable + mNumAcquired - mPendingRelease.size()</code></li>
+<li><strong>解释方式</strong>：它是一个“综合状态量”，反映可用帧、已获取帧、待 release 的平衡关系，不建议用固定常量偏移去做一刀切换算</li>
+<li><strong>实战建议</strong>：重点看趋势和持续时间，而不是单个瞬时值</li>
 </ul>
 <p><img src="/../images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803170713946.webp" alt="image-20250803170713946"></p>
 <h3 id="QueuedBuffer-数值变化时机"><a href="#QueuedBuffer-数值变化时机" class="headerlink" title="QueuedBuffer 数值变化时机"></a>QueuedBuffer 数值变化时机</h3><p><strong>QueuedBuffer +1 的时机</strong>：</p>
 <ul>
-<li><strong>触发条件</strong>：RenderThread 执行 <code>queueBuffer</code> 操作</li>
-<li><strong>Perfetto 表现</strong>：<code>queueBuffer</code> 事件执行时，QueuedBuffer 计数增加</li>
-<li><strong>含义</strong>：RenderThread 将渲染完成的 Buffer 提交到 App 端的 BlastBufferQueue 中等待发送给 SurfaceFlinger</li>
+<li><strong>常见触发</strong>：生产侧有新 buffer 到达 BLAST，并进入可处理状态</li>
+<li><strong>Perfetto 表现</strong>：<code>QueuedBuffer</code> 轨道上升</li>
+<li><strong>含义</strong>：App 端到 SF 端之间的“待处理帧压力”增加</li>
 </ul>
 <p><img src="/../images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803170852607.webp" alt="image-20250803170852607"></p>
 <p><strong>QueuedBuffer -1 的时机</strong>：</p>
 <ul>
 <li><strong>触发条件</strong>：收到 SurfaceFlinger 的 <code>releaseBufferCallback</code></li>
 <li><strong>Perfetto 表现</strong>：可观察到 <code>releaseBuffer</code> 相关事件</li>
-<li><strong>含义</strong>：SurfaceFlinger 已使用完某个 Buffer，将其释放回 App 端 BlastBufferQueue，该 Buffer 可重新用于渲染</li>
+<li><strong>含义</strong>：某个 buffer 完成消费或被处理后释放，队列压力下降</li>
 </ul>
 <p><img src="/../images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803171008400.webp" alt="image-20250803171008400"></p>
 <h3 id="SurfaceFlinger-端的-BufferTX-指标"><a href="#SurfaceFlinger-端的-BufferTX-指标" class="headerlink" title="SurfaceFlinger 端的 BufferTX 指标"></a>SurfaceFlinger 端的 BufferTX 指标</h3><ul>
 <li><strong>Perfetto 显示</strong>：SurfaceFlinger 进程中的 <code>BufferTX</code> 数值轨道</li>
-<li><strong>变化时机</strong>：SurfaceFlinger 接收到 Transaction 后 BufferTX +1</li>
-<li><strong>触发条件</strong>：App 端通过 <code>flushTransaction</code> 将 Buffer 真正发送给 SurfaceFlinger</li>
-<li><strong>最大值限制</strong>：BufferTX 最高为 3</li>
-<li><strong>原因说明</strong>：这个最大值为 3 的限制，实际上就是我们熟知的<strong>三缓冲（Triple Buffering）</strong>机制在合成侧的体现：一个正在被显示器读取（Front Buffer），一个准备在下一个 Vsync   周期被合成（Back Buffer），还有一个作为备用（Third Buffer）。这确保了即使在轻微的渲染抖动下，SurfaceFlinger 依然有帧可合成，从而提升流畅度。</li>
+<li><strong>AOSP 定义（Layer）</strong>：该值对应每层 <code>mPendingBuffers</code> 的跟踪；buffer 到达 server 侧会增加，buffer 被 latch 或 drop 会减少</li>
+<li><strong>触发条件</strong>：与 transaction 和 buffer 生命周期共同相关，不建议简单等价为“收到 transaction 就 +1”</li>
+<li><strong>注意</strong>：它不是通用“固定最大 3”的指标，受图层类型、生产消费节奏和系统策略影响</li>
 </ul>
 <p><img src="/../images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803171228146.webp" alt="image-20250803171228146"></p>
 <h3 id="App-端和-SF-端的协作流程"><a href="#App-端和-SF-端的协作流程" class="headerlink" title="App 端和 SF 端的协作流程"></a>App 端和 SF 端的协作流程</h3><ol>
-<li><strong>App 端</strong>：RenderThread <code>queueBuffer</code> → App 端 QueuedBuffer +1（Buffer 进入 App 端队列）</li>
-<li><strong>App 端</strong>：<code>flushTransaction</code> → 将队列中的 Buffer 批量发送给 SurfaceFlinger</li>
-<li><strong>SF 端</strong>：接收 Transaction → SF 端 BufferTX +1（Buffer 进入 SF 端处理）</li>
-<li><strong>SF 端</strong>：处理完成后发送 <code>releaseBufferCallback</code> → App 端 QueuedBuffer -1（Buffer 释放回 App）</li>
+<li><strong>App 端</strong>：RenderThread 提交新帧后，<code>QueuedBuffer</code> 常见上升</li>
+<li><strong>跨进程</strong>：BLAST&#x2F;SurfaceControl transaction 关联 frameNumber 并进入 SF 侧处理</li>
+<li><strong>SF 端</strong>：<code>BufferTX</code> 随 pending buffer 变化（到达增、latch&#x2F;drop 减）</li>
+<li><strong>回流</strong>：<code>releaseBufferCallback</code> 到 App 端后，<code>QueuedBuffer</code> 下降</li>
 </ol>
 <h3 id="关键性能观察点"><a href="#关键性能观察点" class="headerlink" title="关键性能观察点"></a>关键性能观察点</h3><p>在分析性能时，重点关注：</p>
 <ul>
-<li><strong>App 端 QueuedBuffer 数值</strong>：反映渲染生产速度，如果 App 生产过慢，QueuedBuffer 个数就可以反应出来 （always 是 1 ，说明没有 Buffer 生产出来）。重点关注需要连续出帧的场景（比如滑动过程），QueuedBuffer 的值为 1 超过 1 个 Vsync 的地方，看对应的 App 主线程和渲染线程是否有性能问题。</li>
-<li><strong>SurfaceFlinger 端 BufferTX</strong>：反映系统合成处理能力 ，如果 SurfaceFlinger 消费 Buffer 过慢，也会有性能问题。重点关注需要连续出帧的场景（比如滑动过程） ，对应的 BufferTX 为 0 的情况 或者 BufferTX  没有被消费的情况，前一种情况是 App 的问题，后一种情况是 SurfaceFlinger 的问题。</li>
+<li><strong>App 端 QueuedBuffer 趋势</strong>：连续上升且长时间不回落，通常表示生产&#x2F;消费节奏失衡；结合主线程 <code>performTraversals</code> 与 RenderThread <code>DrawFrames</code> 判断瓶颈在 App 还是 SF&#x2F;GPU 侧</li>
+<li><strong>SurfaceFlinger 端 BufferTX 趋势</strong>：长期偏高常见于消费侧压力大；长期偏低且 App 又频繁 miss deadline，往往是生产侧供给不足</li>
 </ul>
 <p><a id="performance"></a></p>
 <h1 id="性能"><a href="#性能" class="headerlink" title="性能"></a>性能</h1><p>如果主线程需要处理所有任务，则执行耗时较长的操作（例如，网络访问或数据库查询）将会阻塞整个界面线程。一旦被阻塞，线程将无法分派任何事件，包括绘图事件。主线程执行超时通常会带来两个问题</p>
@@ -1104,7 +1108,7 @@ loading="lazy"             decoding="async"
             <p>Author：<a href="https://androidperformance.com">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/</a>
             <p>Publish date：<a href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">August 2nd 2025, 10:11:45 am</a>
-            <p>Update date：<a href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">February 7th 2026, 1:17:47 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">February 7th 2026, 11:31:25 pm</a>
             <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     <!-- paginator -->
@@ -1182,7 +1186,7 @@ loading="lazy"             decoding="async"
                 <div class="toc-catalog">
                     <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
                 </div>
-                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%9C%AC%E6%96%87%E7%9B%AE%E5%BD%95"><span class="toc-number">1.</span> <span class="toc-text">本文目录</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0%E7%9B%AE%E5%BD%95"><span class="toc-number"></span> <span class="toc-text">系列文章目录</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%9F%BA%E4%BA%8E-Perfetto-%E7%9A%84%E6%B8%B2%E6%9F%93%E6%B5%81%E7%A8%8B%E5%88%86%E6%9E%90"><span class="toc-number"></span> <span class="toc-text">基于 Perfetto 的渲染流程分析</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%B8%A7%E7%9A%84%E6%A6%82%E5%BF%B5%E5%92%8C%E5%9F%BA%E6%9C%AC%E5%8F%82%E6%95%B0"><span class="toc-number">1.</span> <span class="toc-text">帧的概念和基本参数</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%BB%E7%BA%BF%E7%A8%8B%E5%92%8C%E6%B8%B2%E6%9F%93%E7%BA%BF%E7%A8%8B%E7%9A%84%E5%B7%A5%E4%BD%9C%E6%B5%81%E7%A8%8B"><span class="toc-number">2.</span> <span class="toc-text">主线程和渲染线程的工作流程</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#1-%E4%B8%BB%E7%BA%BF%E7%A8%8B%E7%AD%89%E5%BE%85-Vsync-%E4%BF%A1%E5%8F%B7"><span class="toc-number">2.1.</span> <span class="toc-text">1. 主线程等待 Vsync 信号</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-Vsync-app-%E4%BF%A1%E5%8F%B7%E4%BC%A0%E9%80%92%E8%BF%87%E7%A8%8B"><span class="toc-number">2.2.</span> <span class="toc-text">2. Vsync-app 信号传递过程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-SurfaceFlinger-%E5%94%A4%E9%86%92-App-%E4%B8%BB%E7%BA%BF%E7%A8%8B"><span class="toc-number">2.3.</span> <span class="toc-text">3. SurfaceFlinger 唤醒 App 主线程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#4-%E5%A4%84%E7%90%86%E8%BE%93%E5%85%A5%E4%BA%8B%E4%BB%B6%EF%BC%88Input%EF%BC%89"><span class="toc-number">2.4.</span> <span class="toc-text">4. 处理输入事件（Input）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#5-%E5%A4%84%E7%90%86%E5%8A%A8%E7%94%BB%EF%BC%88Animation%EF%BC%89"><span class="toc-number">2.5.</span> <span class="toc-text">5. 处理动画（Animation）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#6-%E5%A4%84%E7%90%86-Insets-%E5%8A%A8%E7%94%BB"><span class="toc-number">2.6.</span> <span class="toc-text">6. 处理 Insets 动画</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#7-Traversal%EF%BC%88%E6%B5%8B%E9%87%8F%E3%80%81%E5%B8%83%E5%B1%80%E3%80%81%E7%BB%98%E5%88%B6%E5%87%86%E5%A4%87%EF%BC%89"><span class="toc-number">2.7.</span> <span class="toc-text">7. Traversal（测量、布局、绘制准备）</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#7-1-Measure%EF%BC%88%E6%B5%8B%E9%87%8F%E9%98%B6%E6%AE%B5%EF%BC%89"><span class="toc-number">2.7.1.</span> <span class="toc-text">7.1 Measure（测量阶段）</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#7-2-Layout%EF%BC%88%E5%B8%83%E5%B1%80%E9%98%B6%E6%AE%B5%EF%BC%89"><span class="toc-number">2.7.2.</span> <span class="toc-text">7.2 Layout（布局阶段）</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#7-3-Draw%EF%BC%88%E7%BB%98%E5%88%B6%E9%98%B6%E6%AE%B5%EF%BC%89"><span class="toc-number">2.7.3.</span> <span class="toc-text">7.3 Draw（绘制阶段）</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#ViewRootImpl-performTraversals-%E6%A0%B8%E5%BF%83%E4%BB%A3%E7%A0%81"><span class="toc-number">2.7.4.</span> <span class="toc-text">ViewRootImpl.performTraversals 核心代码</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#8-%E5%90%8C%E6%AD%A5-DisplayList-%E5%88%B0%E6%B8%B2%E6%9F%93%E7%BA%BF%E7%A8%8B"><span class="toc-number">2.8.</span> <span class="toc-text">8. 同步 DisplayList 到渲染线程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#9-%E6%B8%B2%E6%9F%93%E7%BA%BF%E7%A8%8B%E8%8E%B7%E5%8F%96-Buffer"><span class="toc-number">2.9.</span> <span class="toc-text">9. 渲染线程获取 Buffer</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#10-%E5%A4%84%E7%90%86%E6%B8%B2%E6%9F%93%E6%8C%87%E4%BB%A4%E5%B9%B6-flush-%E5%88%B0-GPU"><span class="toc-number">2.10.</span> <span class="toc-text">10. 处理渲染指令并 flush 到 GPU</span></a><ol class="toc-child"><li class="toc-item toc-level-5"><a class="toc-link" href="#Perfetto-trace-drawing-%E7%9B%B8%E5%85%B3%E5%9D%97"><span class="toc-number">2.10.0.1.</span> <span class="toc-text">Perfetto trace: drawing 相关块</span></a></li></ol></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#11-%E6%8F%90%E4%BA%A4-Buffer%EF%BC%88%E5%8F%AF%E8%83%BD-unsignaled%EF%BC%89"><span class="toc-number">2.11.</span> <span class="toc-text">11. 提交 Buffer（可能 unsignaled）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#12-%E8%A7%A6%E5%8F%91-Transaction-%E5%88%B0-SurfaceFlinger"><span class="toc-number">2.12.</span> <span class="toc-text">12. 触发 Transaction 到 SurfaceFlinger</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%BD%AF%E4%BB%B6%E7%BB%98%E5%88%B6-vs-%E7%A1%AC%E4%BB%B6%E5%8A%A0%E9%80%9F"><span class="toc-number">3.</span> <span class="toc-text">软件绘制 vs 硬件加速</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%8F%8C%E7%BA%BF%E7%A8%8B%E6%B8%B2%E6%9F%93%E6%9E%B6%E6%9E%84%E7%9A%84%E6%BC%94%E8%BF%9B"><span class="toc-number"></span> <span class="toc-text">双线程渲染架构的演进</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8D%95%E7%BA%BF%E7%A8%8B%E6%97%B6%E4%BB%A3%EF%BC%88Android-4-4-%E4%B9%8B%E5%89%8D%EF%BC%89"><span class="toc-number">1.</span> <span class="toc-text">单线程时代（Android 4.4 之前）</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%8C%E7%BA%BF%E7%A8%8B%E6%97%B6%E4%BB%A3%EF%BC%88Android-5-0-Lollipop-%E5%BC%80%E5%A7%8B%EF%BC%89"><span class="toc-number">2.</span> <span class="toc-text">双线程时代（Android 5.0 Lollipop 开始）</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E4%B8%BB%E7%BA%BF%E7%A8%8B%E7%9A%84%E5%88%9B%E5%BB%BA%E8%BF%87%E7%A8%8B"><span class="toc-number"></span> <span class="toc-text">主线程的创建过程</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#ActivityThread-%E7%9A%84%E5%88%9B%E5%BB%BA"><span class="toc-number">1.</span> <span class="toc-text">ActivityThread 的创建</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#ActivityThread-%E7%9A%84%E5%8A%9F%E8%83%BD"><span class="toc-number">2.</span> <span class="toc-text">ActivityThread 的功能</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E6%B8%B2%E6%9F%93%E7%BA%BF%E7%A8%8B%E7%9A%84%E5%88%9B%E5%BB%BA%E5%92%8C%E5%8F%91%E5%B1%95"><span class="toc-number"></span> <span class="toc-text">渲染线程的创建和发展</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%BD%AF%E4%BB%B6%E7%BB%98%E5%88%B6"><span class="toc-number">1.</span> <span class="toc-text">软件绘制</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%A1%AC%E4%BB%B6%E5%8A%A0%E9%80%9F%E7%BB%98%E5%88%B6"><span class="toc-number">2.</span> <span class="toc-text">硬件加速绘制</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%B8%B2%E6%9F%93%E7%BA%BF%E7%A8%8B%E5%88%9D%E5%A7%8B%E5%8C%96"><span class="toc-number">3.</span> <span class="toc-text">渲染线程初始化</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#UI-Thread-%E4%B8%8E-RenderThread-%E7%9A%84-DisplayList-%E5%90%8C%E6%AD%A5%E6%9C%BA%E5%88%B6"><span class="toc-number">3.1.</span> <span class="toc-text">UI Thread 与 RenderThread 的 DisplayList 同步机制</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#RenderThread-%E4%B8%8E-BlastBufferQueue-%E7%9A%84%E4%BA%A4%E4%BA%92%E6%B5%81%E7%A8%8B"><span class="toc-number">3.2.</span> <span class="toc-text">RenderThread 与 BlastBufferQueue 的交互流程</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%BB%E7%BA%BF%E7%A8%8B%E5%92%8C%E6%B8%B2%E6%9F%93%E7%BA%BF%E7%A8%8B%E7%9A%84%E5%88%86%E5%B7%A5"><span class="toc-number">4.</span> <span class="toc-text">主线程和渲染线程的分工</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#BlastBufferQueue-%E7%9A%84%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86"><span class="toc-number">4.1.</span> <span class="toc-text">BlastBufferQueue 的工作原理</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#App-%E7%AB%AF%E7%9A%84-QueuedBuffer-%E6%8C%87%E6%A0%87"><span class="toc-number">4.2.</span> <span class="toc-text">App 端的 QueuedBuffer 指标</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#QueuedBuffer-%E6%95%B0%E5%80%BC%E5%8F%98%E5%8C%96%E6%97%B6%E6%9C%BA"><span class="toc-number">4.3.</span> <span class="toc-text">QueuedBuffer 数值变化时机</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#SurfaceFlinger-%E7%AB%AF%E7%9A%84-BufferTX-%E6%8C%87%E6%A0%87"><span class="toc-number">4.4.</span> <span class="toc-text">SurfaceFlinger 端的 BufferTX 指标</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#App-%E7%AB%AF%E5%92%8C-SF-%E7%AB%AF%E7%9A%84%E5%8D%8F%E4%BD%9C%E6%B5%81%E7%A8%8B"><span class="toc-number">4.5.</span> <span class="toc-text">App 端和 SF 端的协作流程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%85%B3%E9%94%AE%E6%80%A7%E8%83%BD%E8%A7%82%E5%AF%9F%E7%82%B9"><span class="toc-number">4.6.</span> <span class="toc-text">关键性能观察点</span></a></li></ol></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E6%80%A7%E8%83%BD"><span class="toc-number"></span> <span class="toc-text">性能</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-%E7%8B%AC%E6%9C%89%E7%9A%84-FrameTimeline-%E5%8A%9F%E8%83%BD"><span class="toc-number">1.</span> <span class="toc-text">Perfetto 独有的 FrameTimeline 功能</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#FrameTimeline-%E7%9A%84%E6%A0%B8%E5%BF%83%E6%A6%82%E5%BF%B5"><span class="toc-number">1.1.</span> <span class="toc-text">FrameTimeline 的核心概念</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#1-Expected-Timeline%EF%BC%88%E9%A2%84%E6%9C%9F%E6%97%B6%E9%97%B4%E7%BA%BF%EF%BC%89"><span class="toc-number">1.1.1.</span> <span class="toc-text">1. Expected Timeline（预期时间线）</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#2-Actual-Timeline%EF%BC%88%E5%AE%9E%E9%99%85%E6%97%B6%E9%97%B4%E7%BA%BF%EF%BC%89"><span class="toc-number">1.1.2.</span> <span class="toc-text">2. Actual Timeline（实际时间线）</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%A2%9C%E8%89%B2%E7%BC%96%E7%A0%81%E7%B3%BB%E7%BB%9F"><span class="toc-number">1.2.</span> <span class="toc-text">颜色编码系统</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%8D%A1%E9%A1%BF%E7%B1%BB%E5%9E%8B%E5%88%86%E6%9E%90"><span class="toc-number">1.3.</span> <span class="toc-text">卡顿类型分析</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#%E5%BA%94%E7%94%A8%E7%AB%AF%E5%8D%A1%E9%A1%BF%EF%BC%9A"><span class="toc-number">1.3.1.</span> <span class="toc-text">应用端卡顿：</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#SurfaceFlinger-%E5%8D%A1%E9%A1%BF%EF%BC%9A"><span class="toc-number">1.3.2.</span> <span class="toc-text">SurfaceFlinger 卡顿：</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%85%8D%E7%BD%AE-FrameTimeline"><span class="toc-number">1.4.</span> <span class="toc-text">配置 FrameTimeline</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-%E4%B8%AD-Vsync-%E4%BF%A1%E5%8F%B7"><span class="toc-number">2.</span> <span class="toc-text">Perfetto 中 Vsync 信号</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%AD%A3%E7%A1%AE%E7%9A%84-Vsync-%E4%BF%A1%E5%8F%B7%E8%AF%86%E5%88%AB"><span class="toc-number">2.1.</span> <span class="toc-text">正确的 Vsync 信号识别</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%88%86%E6%9E%90%E6%8A%80%E5%B7%A7"><span class="toc-number">2.2.</span> <span class="toc-text">分析技巧</span></a></li></ol></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%8F%82%E8%80%83"><span class="toc-number"></span> <span class="toc-text">参考</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E9%99%84%E4%BB%B6"><span class="toc-number"></span> <span class="toc-text">附件</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number"></span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%9C%AC%E6%96%87%E7%9B%AE%E5%BD%95"><span class="toc-number">1.</span> <span class="toc-text">本文目录</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0%E7%9B%AE%E5%BD%95"><span class="toc-number"></span> <span class="toc-text">系列文章目录</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%9F%BA%E4%BA%8E-Perfetto-%E7%9A%84%E6%B8%B2%E6%9F%93%E6%B5%81%E7%A8%8B%E5%88%86%E6%9E%90"><span class="toc-number"></span> <span class="toc-text">基于 Perfetto 的渲染流程分析</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%B8%A7%E7%9A%84%E6%A6%82%E5%BF%B5%E5%92%8C%E5%9F%BA%E6%9C%AC%E5%8F%82%E6%95%B0"><span class="toc-number">1.</span> <span class="toc-text">帧的概念和基本参数</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%BB%E7%BA%BF%E7%A8%8B%E5%92%8C%E6%B8%B2%E6%9F%93%E7%BA%BF%E7%A8%8B%E7%9A%84%E5%B7%A5%E4%BD%9C%E6%B5%81%E7%A8%8B"><span class="toc-number">2.</span> <span class="toc-text">主线程和渲染线程的工作流程</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#1-%E4%B8%BB%E7%BA%BF%E7%A8%8B%E7%AD%89%E5%BE%85-Vsync-%E4%BF%A1%E5%8F%B7"><span class="toc-number">2.1.</span> <span class="toc-text">1. 主线程等待 Vsync 信号</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-Vsync-app-%E4%BF%A1%E5%8F%B7%E4%BC%A0%E9%80%92%E8%BF%87%E7%A8%8B"><span class="toc-number">2.2.</span> <span class="toc-text">2. Vsync-app 信号传递过程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-SurfaceFlinger-%E5%94%A4%E9%86%92-App-%E4%B8%BB%E7%BA%BF%E7%A8%8B"><span class="toc-number">2.3.</span> <span class="toc-text">3. SurfaceFlinger 唤醒 App 主线程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#4-%E5%A4%84%E7%90%86%E8%BE%93%E5%85%A5%E4%BA%8B%E4%BB%B6%EF%BC%88Input%EF%BC%89"><span class="toc-number">2.4.</span> <span class="toc-text">4. 处理输入事件（Input）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#5-%E5%A4%84%E7%90%86%E5%8A%A8%E7%94%BB%EF%BC%88Animation%EF%BC%89"><span class="toc-number">2.5.</span> <span class="toc-text">5. 处理动画（Animation）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#6-%E5%A4%84%E7%90%86-Insets-%E5%8A%A8%E7%94%BB"><span class="toc-number">2.6.</span> <span class="toc-text">6. 处理 Insets 动画</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#7-Traversal%EF%BC%88%E6%B5%8B%E9%87%8F%E3%80%81%E5%B8%83%E5%B1%80%E3%80%81%E7%BB%98%E5%88%B6%E5%87%86%E5%A4%87%EF%BC%89"><span class="toc-number">2.7.</span> <span class="toc-text">7. Traversal（测量、布局、绘制准备）</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#7-1-Measure%EF%BC%88%E6%B5%8B%E9%87%8F%E9%98%B6%E6%AE%B5%EF%BC%89"><span class="toc-number">2.7.1.</span> <span class="toc-text">7.1 Measure（测量阶段）</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#7-2-Layout%EF%BC%88%E5%B8%83%E5%B1%80%E9%98%B6%E6%AE%B5%EF%BC%89"><span class="toc-number">2.7.2.</span> <span class="toc-text">7.2 Layout（布局阶段）</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#7-3-Draw%EF%BC%88%E7%BB%98%E5%88%B6%E9%98%B6%E6%AE%B5%EF%BC%89"><span class="toc-number">2.7.3.</span> <span class="toc-text">7.3 Draw（绘制阶段）</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#ViewRootImpl-performTraversals-%E6%A0%B8%E5%BF%83%E4%BB%A3%E7%A0%81"><span class="toc-number">2.7.4.</span> <span class="toc-text">ViewRootImpl.performTraversals 核心代码</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#8-%E5%90%8C%E6%AD%A5-DisplayList-%E5%88%B0%E6%B8%B2%E6%9F%93%E7%BA%BF%E7%A8%8B"><span class="toc-number">2.8.</span> <span class="toc-text">8. 同步 DisplayList 到渲染线程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#9-%E6%B8%B2%E6%9F%93%E7%BA%BF%E7%A8%8B%E8%8E%B7%E5%8F%96-Buffer"><span class="toc-number">2.9.</span> <span class="toc-text">9. 渲染线程获取 Buffer</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#10-%E5%A4%84%E7%90%86%E6%B8%B2%E6%9F%93%E6%8C%87%E4%BB%A4%E5%B9%B6-flush-%E5%88%B0-GPU"><span class="toc-number">2.10.</span> <span class="toc-text">10. 处理渲染指令并 flush 到 GPU</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#11-%E6%8F%90%E4%BA%A4-Buffer%EF%BC%88%E5%8F%AF%E8%83%BD-unsignaled%EF%BC%89"><span class="toc-number">2.11.</span> <span class="toc-text">11. 提交 Buffer（可能 unsignaled）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#12-%E8%A7%A6%E5%8F%91-Transaction-%E5%88%B0-SurfaceFlinger"><span class="toc-number">2.12.</span> <span class="toc-text">12. 触发 Transaction 到 SurfaceFlinger</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%BD%AF%E4%BB%B6%E7%BB%98%E5%88%B6-vs-%E7%A1%AC%E4%BB%B6%E5%8A%A0%E9%80%9F"><span class="toc-number">3.</span> <span class="toc-text">软件绘制 vs 硬件加速</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%8F%8C%E7%BA%BF%E7%A8%8B%E6%B8%B2%E6%9F%93%E6%9E%B6%E6%9E%84%E7%9A%84%E6%BC%94%E8%BF%9B"><span class="toc-number"></span> <span class="toc-text">双线程渲染架构的演进</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8D%95%E7%BA%BF%E7%A8%8B%E6%97%B6%E4%BB%A3%EF%BC%88Android-4-4-%E4%B9%8B%E5%89%8D%EF%BC%89"><span class="toc-number">1.</span> <span class="toc-text">单线程时代（Android 4.4 之前）</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%8C%E7%BA%BF%E7%A8%8B%E6%97%B6%E4%BB%A3%EF%BC%88Android-5-0-Lollipop-%E5%BC%80%E5%A7%8B%EF%BC%89"><span class="toc-number">2.</span> <span class="toc-text">双线程时代（Android 5.0 Lollipop 开始）</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E4%B8%BB%E7%BA%BF%E7%A8%8B%E7%9A%84%E5%88%9B%E5%BB%BA%E8%BF%87%E7%A8%8B"><span class="toc-number"></span> <span class="toc-text">主线程的创建过程</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#ActivityThread-%E7%9A%84%E5%88%9B%E5%BB%BA"><span class="toc-number">1.</span> <span class="toc-text">ActivityThread 的创建</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#ActivityThread-%E7%9A%84%E5%8A%9F%E8%83%BD"><span class="toc-number">2.</span> <span class="toc-text">ActivityThread 的功能</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E6%B8%B2%E6%9F%93%E7%BA%BF%E7%A8%8B%E7%9A%84%E5%88%9B%E5%BB%BA%E5%92%8C%E5%8F%91%E5%B1%95"><span class="toc-number"></span> <span class="toc-text">渲染线程的创建和发展</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%BD%AF%E4%BB%B6%E7%BB%98%E5%88%B6"><span class="toc-number">1.</span> <span class="toc-text">软件绘制</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%A1%AC%E4%BB%B6%E5%8A%A0%E9%80%9F%E7%BB%98%E5%88%B6"><span class="toc-number">2.</span> <span class="toc-text">硬件加速绘制</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%B8%B2%E6%9F%93%E7%BA%BF%E7%A8%8B%E5%88%9D%E5%A7%8B%E5%8C%96"><span class="toc-number">3.</span> <span class="toc-text">渲染线程初始化</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#UI-Thread-%E4%B8%8E-RenderThread-%E7%9A%84-DisplayList-%E5%90%8C%E6%AD%A5%E6%9C%BA%E5%88%B6"><span class="toc-number">3.1.</span> <span class="toc-text">UI Thread 与 RenderThread 的 DisplayList 同步机制</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#RenderThread-%E4%B8%8E-BlastBufferQueue-%E7%9A%84%E4%BA%A4%E4%BA%92%E6%B5%81%E7%A8%8B"><span class="toc-number">3.2.</span> <span class="toc-text">RenderThread 与 BlastBufferQueue 的交互流程</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%BB%E7%BA%BF%E7%A8%8B%E5%92%8C%E6%B8%B2%E6%9F%93%E7%BA%BF%E7%A8%8B%E7%9A%84%E5%88%86%E5%B7%A5"><span class="toc-number">4.</span> <span class="toc-text">主线程和渲染线程的分工</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#BlastBufferQueue-%E7%9A%84%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86"><span class="toc-number">4.1.</span> <span class="toc-text">BlastBufferQueue 的工作原理</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#App-%E7%AB%AF%E7%9A%84-QueuedBuffer-%E6%8C%87%E6%A0%87"><span class="toc-number">4.2.</span> <span class="toc-text">App 端的 QueuedBuffer 指标</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#QueuedBuffer-%E6%95%B0%E5%80%BC%E5%8F%98%E5%8C%96%E6%97%B6%E6%9C%BA"><span class="toc-number">4.3.</span> <span class="toc-text">QueuedBuffer 数值变化时机</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#SurfaceFlinger-%E7%AB%AF%E7%9A%84-BufferTX-%E6%8C%87%E6%A0%87"><span class="toc-number">4.4.</span> <span class="toc-text">SurfaceFlinger 端的 BufferTX 指标</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#App-%E7%AB%AF%E5%92%8C-SF-%E7%AB%AF%E7%9A%84%E5%8D%8F%E4%BD%9C%E6%B5%81%E7%A8%8B"><span class="toc-number">4.5.</span> <span class="toc-text">App 端和 SF 端的协作流程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%85%B3%E9%94%AE%E6%80%A7%E8%83%BD%E8%A7%82%E5%AF%9F%E7%82%B9"><span class="toc-number">4.6.</span> <span class="toc-text">关键性能观察点</span></a></li></ol></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E6%80%A7%E8%83%BD"><span class="toc-number"></span> <span class="toc-text">性能</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-%E7%8B%AC%E6%9C%89%E7%9A%84-FrameTimeline-%E5%8A%9F%E8%83%BD"><span class="toc-number">1.</span> <span class="toc-text">Perfetto 独有的 FrameTimeline 功能</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#FrameTimeline-%E7%9A%84%E6%A0%B8%E5%BF%83%E6%A6%82%E5%BF%B5"><span class="toc-number">1.1.</span> <span class="toc-text">FrameTimeline 的核心概念</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#1-Expected-Timeline%EF%BC%88%E9%A2%84%E6%9C%9F%E6%97%B6%E9%97%B4%E7%BA%BF%EF%BC%89"><span class="toc-number">1.1.1.</span> <span class="toc-text">1. Expected Timeline（预期时间线）</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#2-Actual-Timeline%EF%BC%88%E5%AE%9E%E9%99%85%E6%97%B6%E9%97%B4%E7%BA%BF%EF%BC%89"><span class="toc-number">1.1.2.</span> <span class="toc-text">2. Actual Timeline（实际时间线）</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%A2%9C%E8%89%B2%E7%BC%96%E7%A0%81%E7%B3%BB%E7%BB%9F"><span class="toc-number">1.2.</span> <span class="toc-text">颜色编码系统</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%8D%A1%E9%A1%BF%E7%B1%BB%E5%9E%8B%E5%88%86%E6%9E%90"><span class="toc-number">1.3.</span> <span class="toc-text">卡顿类型分析</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#%E5%BA%94%E7%94%A8%E7%AB%AF%E5%8D%A1%E9%A1%BF%EF%BC%9A"><span class="toc-number">1.3.1.</span> <span class="toc-text">应用端卡顿：</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#SurfaceFlinger-%E5%8D%A1%E9%A1%BF%EF%BC%9A"><span class="toc-number">1.3.2.</span> <span class="toc-text">SurfaceFlinger 卡顿：</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%85%8D%E7%BD%AE-FrameTimeline"><span class="toc-number">1.4.</span> <span class="toc-text">配置 FrameTimeline</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-%E4%B8%AD-Vsync-%E4%BF%A1%E5%8F%B7"><span class="toc-number">2.</span> <span class="toc-text">Perfetto 中 Vsync 信号</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%AD%A3%E7%A1%AE%E7%9A%84-Vsync-%E4%BF%A1%E5%8F%B7%E8%AF%86%E5%88%AB"><span class="toc-number">2.1.</span> <span class="toc-text">正确的 Vsync 信号识别</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%88%86%E6%9E%90%E6%8A%80%E5%B7%A7"><span class="toc-number">2.2.</span> <span class="toc-text">分析技巧</span></a></li></ol></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%8F%82%E8%80%83"><span class="toc-number"></span> <span class="toc-text">参考</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E9%99%84%E4%BB%B6"><span class="toc-number"></span> <span class="toc-text">附件</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number"></span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a>
             </div>
         <!-- sidebar -->
         <div class="sidebar sidebar-hide">
@@ -1425,11 +1429,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/07</span>
-            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/07</span>
-            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
+            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/03</span>
@@ -1837,14 +1841,6 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-tags">
     <div class="sidebar-tags-name">
-            <span class="sidebar-tag-name" data-tags="Jank">
-                <span class="iconfont-archer">&#xe606;</span>
-                Jank
-            </span>
-            <span class="sidebar-tag-name" data-tags="Android">
-                <span class="iconfont-archer">&#xe606;</span>
-                Android
-            </span>
             <span class="sidebar-tag-name" data-tags="年度推荐">
                 <span class="iconfont-archer">&#xe606;</span>
                 年度推荐
@@ -1857,6 +1853,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Memory
             </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
             <span class="sidebar-tag-name" data-tags="Perfetto">
                 <span class="iconfont-archer">&#xe606;</span>
                 Perfetto
@@ -1864,6 +1864,10 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Systrace">
                 <span class="iconfont-archer">&#xe606;</span>
                 Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
             </span>
             <span class="sidebar-tag-name" data-tags="年终总结">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1873,13 +1877,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 知识星球
             </span>
-            <span class="sidebar-tag-name" data-tags="随笔">
-                <span class="iconfont-archer">&#xe606;</span>
-                随笔
-            </span>
             <span class="sidebar-tag-name" data-tags="ANR">
                 <span class="iconfont-archer">&#xe606;</span>
                 ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="随笔">
+                <span class="iconfont-archer">&#xe606;</span>
+                随笔
             </span>
             <span class="sidebar-tag-name" data-tags="Performance">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1888,10 +1892,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Tools">
                 <span class="iconfont-archer">&#xe606;</span>
                 Tools
-            </span>
-            <span class="sidebar-tag-name" data-tags="RenderThread">
-                <span class="iconfont-archer">&#xe606;</span>
-                RenderThread
             </span>
             <span class="sidebar-tag-name" data-tags="Framework">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1904,6 +1904,10 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Linux">
                 <span class="iconfont-archer">&#xe606;</span>
                 Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
             </span>
             <span class="sidebar-tag-name" data-tags="BlastBufferQueue">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1945,6 +1949,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 DelayLoad
             </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
             <span class="sidebar-tag-name" data-tags="程序员">
                 <span class="iconfont-archer">&#xe606;</span>
                 程序员
@@ -1952,10 +1960,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Singleton">
                 <span class="iconfont-archer">&#xe606;</span>
                 Singleton
-            </span>
-            <span class="sidebar-tag-name" data-tags="HashMap">
-                <span class="iconfont-archer">&#xe606;</span>
-                HashMap
             </span>
             <span class="sidebar-tag-name" data-tags="设计规范">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1965,13 +1969,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Nexus
             </span>
-            <span class="sidebar-tag-name" data-tags="Compose">
-                <span class="iconfont-archer">&#xe606;</span>
-                Compose
-            </span>
             <span class="sidebar-tag-name" data-tags="Kotlin">
                 <span class="iconfont-archer">&#xe606;</span>
                 Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
             </span>
             <span class="sidebar-tag-name" data-tags="Process">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1989,10 +1993,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 程序员的修炼
             </span>
-            <span class="sidebar-tag-name" data-tags="了解你的用户">
-                <span class="iconfont-archer">&#xe606;</span>
-                了解你的用户
-            </span>
             <span class="sidebar-tag-name" data-tags="设计原则">
                 <span class="iconfont-archer">&#xe606;</span>
                 设计原则
@@ -2005,17 +2005,21 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 互联网那些事
             </span>
+            <span class="sidebar-tag-name" data-tags="了解你的用户">
+                <span class="iconfont-archer">&#xe606;</span>
+                了解你的用户
+            </span>
             <span class="sidebar-tag-name" data-tags="游戏与编程">
                 <span class="iconfont-archer">&#xe606;</span>
                 游戏与编程
             </span>
-            <span class="sidebar-tag-name" data-tags="阅读之美">
-                <span class="iconfont-archer">&#xe606;</span>
-                阅读之美
-            </span>
             <span class="sidebar-tag-name" data-tags="利器">
                 <span class="iconfont-archer">&#xe606;</span>
                 利器
+            </span>
+            <span class="sidebar-tag-name" data-tags="阅读之美">
+                <span class="iconfont-archer">&#xe606;</span>
+                阅读之美
             </span>
             <span class="sidebar-tag-name" data-tags="iOS">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -2025,10 +2029,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Design
             </span>
-            <span class="sidebar-tag-name" data-tags="用户体验">
-                <span class="iconfont-archer">&#xe606;</span>
-                用户体验
-            </span>
             <span class="sidebar-tag-name" data-tags="Smooth">
                 <span class="iconfont-archer">&#xe606;</span>
                 Smooth
@@ -2036,6 +2036,10 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="体验优化">
                 <span class="iconfont-archer">&#xe606;</span>
                 体验优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="用户体验">
+                <span class="iconfont-archer">&#xe606;</span>
+                用户体验
             </span>
     </div>
     <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
@@ -2047,10 +2051,6 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-categories">
     <div class="sidebar-categories-name">
-        <span class="sidebar-category-name" data-categories="读书笔记">
-            <span class="iconfont-archer">&#xe60a;</span>
-            读书笔记
-        </span>
         <span class="sidebar-category-name" data-categories="随笔">
             <span class="iconfont-archer">&#xe60a;</span>
             随笔
@@ -2058,6 +2058,10 @@ loading="lazy"             decoding="async"
         <span class="sidebar-category-name" data-categories="Android">
             <span class="iconfont-archer">&#xe60a;</span>
             Android
+        </span>
+        <span class="sidebar-category-name" data-categories="读书笔记">
+            <span class="iconfont-archer">&#xe60a;</span>
+            读书笔记
         </span>
         <span class="sidebar-category-name" data-categories="Java">
             <span class="iconfont-archer">&#xe60a;</span>

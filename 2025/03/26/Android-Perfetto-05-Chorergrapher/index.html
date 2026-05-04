@@ -36,7 +36,7 @@
 <meta property="og:image" content="https://androidperformance.com/images/15717422623134.jpg">
 <meta property="og:image" content="https://androidperformance.com/images/WechatIMG581.webp">
 <meta property="article:published_time" content="2025-03-26T10:55:11.000Z">
-<meta property="article:modified_time" content="2026-04-18T07:32:45.173Z">
+<meta property="article:modified_time" content="2026-05-04T09:53:03.633Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Android">
 <meta property="article:tag" content="Jank">
@@ -107,6 +107,7 @@
                                     <link id="stylesheet-base" rel="stylesheet" href="/css/style.css">
                                     <link id="stylesheet-mobile" rel="stylesheet" href="/css/mobile.css" media="screen and (max-width: 960px)">
                                     <link id="stylesheet-theme-dark" rel="stylesheet" href="/css/dark.css">
+                                    <link id="stylesheet-custom" rel="stylesheet" href="/css/custom.css">
                                     <link rel="preload" href="/lib/jquery.min.js" as="script">
                                     <link rel="preload" href="/scripts/main.js" as="script">
                                     <!-- algolia -->
@@ -134,13 +135,17 @@
     </div>
     <!-- header actions -->
     <div class="header-actions">
+        <!-- search button -->
+            <span class="header-search-btn header-element popup-trigger" role="button" aria-label="Search" data-tooltip="Search">
+                <span class="iconfont-archer search-icon" aria-hidden="true">&#xe627;</span>
+            </span>
         <!-- theme mode switch button -->
-        <span class="header-theme-btn header-element">
+        <span class="header-theme-btn header-element" role="button" aria-label="Theme" data-tooltip="Theme">
             <span aria-hidden="true">&#9680;</span>
         </span>
         <!-- language transition button -->
-        <span class="header-lang-btn header-element">
-            <a href="javascript:void(0)" onclick="toggleLanguage()" class="lang-text">EN</a>
+        <span class="header-lang-btn header-element" data-tooltip="Language">
+            <a href="javascript:void(0)" onclick="toggleLanguage()" class="lang-text" aria-label="Language">EN</a>
             <script>
                 // Update language button text based on current path
                 (function() {
@@ -168,9 +173,15 @@
                 }
             </script>
         </span>
-        <!-- back to home page text -->
+        <!-- home button -->
         <span class="home-link header-element">
-            <a href="/">Android Performance</a>
+            <a href="/" aria-label="Home" data-tooltip="Home">
+                <svg class="home-icon" aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="m3 10.5 9-7 9 7"></path>
+                    <path d="M5 9.5V21h14V9.5"></path>
+                    <path d="M10 21v-6h4v6"></path>
+                </svg>
+            </a>
         </span>
     </div>
     <!-- toggle banner -->
@@ -412,12 +423,10 @@ loading="lazy"             decoding="async"
 <p>有了上面这个整体的概念，我们将 UI Thread 的每一帧放大来看，看看 Choreographer 的位置以及 Choreographer 是怎么组织每一帧的</p>
 <p><img src="/images/Android-Perfetto-05-Chorergrapher/image-20250401002047386.webp" alt="image-20250401002047386"></p>
 <h2 id="Choreographer-的工作流程"><a href="#Choreographer-的工作流程" class="headerlink" title="Choreographer 的工作流程"></a>Choreographer 的工作流程</h2><ol>
-<li>Choreographer 初始化<ol>
+<li>Choreographer 初始化</li>
 <li>初始化 FrameHandler，绑定 Looper</li>
 <li>初始化 FrameDisplayEventReceiver，与 SurfaceFlinger 建立通信用于接收和请求 Vsync</li>
 <li>初始化 CallBackQueues</li>
-</ol>
-</li>
 <li>SurfaceFlinger 的 appEventThread 唤醒发送 Vsync，Choreographer 回调 FrameDisplayEventReceiver.onVsync，进入 Choreographer 的主处理函数 doFrame</li>
 <li>Choreographer.doFrame 计算掉帧逻辑</li>
 <li>Choreographer.doFrame 处理 Choreographer 的第一个 callback：input</li>
@@ -427,34 +436,32 @@ loading="lazy"             decoding="async"
 <li>traversal-draw 中 UIThread 与 RenderThread 同步数据</li>
 <li>Choreographer.doFrame 处理 Choreographer 的第五个 callback：commit</li>
 <li>RenderThread 处理绘制命令</li>
-<li>在 Android 11 及以上版本中，RenderThread 通过 BlastBufferQueue 向 SurfaceFlinger 提交绘制内容（不同版本细节持续演进）<ol>
+<li>在 Android 11 及以上版本中，RenderThread 通过 BlastBufferQueue 向 SurfaceFlinger 提交绘制内容（不同版本细节持续演进）</li>
 <li>BlastBufferQueue 由 App 端创建和管理</li>
 <li>通过生产者 (BBQ_BufferQueue_Producer) 和消费者 (BufferQueue_Consumer) 模型工作</li>
 <li>UI 线程等待 RenderThread 的概率与时长通常会降低，可以更早地准备下一帧（仍取决于具体同步点）</li>
 </ol>
-</li>
-</ol>
 <p><strong>第一步初始化完成后，后续就会在步骤 2-10 之间循环</strong></p>
 <p>同时也附上这一帧所对应的 MethodTrace（这里预览一下即可，下面会有详细的大图）</p>
 <p><img src="/images/15717420948412.jpg" alt="配图"></p>
-<h2 id="Choreographer-与-RenderThread-及-BlastBufferQueue-的交互"><a href="#Choreographer-与-RenderThread-及-BlastBufferQueue-的交互" class="headerlink" title="Choreographer 与 RenderThread 及 BlastBufferQueue 的交互"></a>Choreographer 与 RenderThread 及 BlastBufferQueue 的交互</h2><p>从 Android R (Android 11) 开始，RenderThread 与 SurfaceFlinger 之间的交互发生了重要变化，其核心是 BlastBufferQueue 的引入与后续演进。下面我们来看看这一机制是如何工作的。</p>
+<h2 id="Choreographer-与-RenderThread-及-BlastBufferQueue-的交互"><a href="#Choreographer-与-RenderThread-及-BlastBufferQueue-的交互" class="headerlink" title="Choreographer 与 RenderThread 及 BlastBufferQueue 的交互"></a>Choreographer 与 RenderThread 及 BlastBufferQueue 的交互</h2><p>从 Android R (Android 11) 开始，RenderThread 与 SurfaceFlinger 之间的交互发生了重要变化，其核心是 BlastBufferQueue 的引入与后续演进。下面看这一机制是如何工作的。</p>
 <h3 id="BlastBufferQueue-工作原理"><a href="#BlastBufferQueue-工作原理" class="headerlink" title="BlastBufferQueue 工作原理"></a>BlastBufferQueue 工作原理</h3><p>BlastBufferQueue 是一个专为 UI 渲染优化的 BufferQueue 变体，它替代了传统由 SurfaceFlinger 创建的 BufferQueue，转为由 App 端创建和管理，用于 App 与 SurfaceFlinger 之间的缓冲区管理。</p>
 <ol>
-<li><p><strong>更高效的缓冲区管理</strong><br>在传统的 BufferQueue 中，App 需要通过 dequeueBuffer 获取一个可用的缓冲区，然后渲染内容，最后通过 queueBuffer 将缓冲区提交给 SurfaceFlinger。这个过程中，如果没有可用的缓冲区，App 需要等待，这会导致阻塞。</p>
-<p>BlastBufferQueue 通过更智能的缓冲区管理，减少了这种等待，特别是在高刷新率设备上，效果更明显。</p>
+<li><strong>更高效的缓冲区管理</strong><br>  在传统的 BufferQueue 中，App 需要通过 dequeueBuffer 获取一个可用的缓冲区，然后渲染内容，最后通过 queueBuffer 将缓冲区提交给 SurfaceFlinger。这个过程中，如果没有可用的缓冲区，App 需要等待，这会导致阻塞。</li>
+</ol>
+<p>  BlastBufferQueue 通过更智能的缓冲区管理，减少了这种等待，特别是在高刷新率设备上，效果更明显。</p>
+<ol start="2">
+<li><p><strong>RenderThread 与 UI 线程的解耦</strong><br>  在较老实现中，UI 线程与 Buffer 提交路径耦合更紧，主线程更容易在关键同步点发生等待。引入 BlastBufferQueue 并持续优化后，UI 线程通常可以更早完成本帧 Java 侧工作并进入下一帧准备，从而降低主线程阻塞概率（是否阻塞仍取决于具体同步点与场景）。</p>
 </li>
-<li><p><strong>RenderThread 与 UI 线程的解耦</strong><br>在较老实现中，UI 线程与 Buffer 提交路径耦合更紧，主线程更容易在关键同步点发生等待。引入 BlastBufferQueue 并持续优化后，UI 线程通常可以更早完成本帧 Java 侧工作并进入下一帧准备，从而降低主线程阻塞概率（是否阻塞仍取决于具体同步点与场景）。</p>
-</li>
-<li><p><strong>创建机制</strong><br>BlastBufferQueue 在 ViewRootImpl 的 relayoutWindow 过程中创建：</p>
+<li><p><strong>创建机制</strong><br>  BlastBufferQueue 在 ViewRootImpl 的 relayoutWindow 过程中创建：</p>
 </li>
 </ol>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">// 创建 BBQ 的示例代码</span><br><span class="line">if (mBlastBufferQueue == null) &#123;</span><br><span class="line">    mBlastBufferQueue = new BLASTBufferQueue(mTag, mSurfaceControl,</span><br><span class="line">        mSurfaceSize.x, mSurfaceSize.y,</span><br><span class="line">        mWindowAttributes.format);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">// 创建 BBQ 的示例代码</span><br><span class="line">if (mBlastBufferQueue == null) &#123;</span><br><span class="line">    mBlastBufferQueue = new BLASTBufferQueue(mTag, mSurfaceControl,</span><br><span class="line">        mSurfaceSize.x, mSurfaceSize.y,</span><br><span class="line">        mWindowAttributes.format);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
 <ol start="4">
-<li><p><strong>与 Choreographer 的配合</strong><br>Choreographer 仍然是协调这一切的核心。当 Vsync 信号到来时，Choreographer 会触发 doFrame，执行各种回调，其中 CALLBACK_TRAVERSAL 会触发 ViewRootImpl 的 performTraversals()，最终走到 draw 流程。</p>
-<p>在 draw 流程中，通过 BlastBufferQueue，RenderThread 可以更独立地工作，而 UI 线程可以更早地返回处理其他任务。</p>
-</li>
+<li><strong>与 Choreographer 的配合</strong><br>  Choreographer 仍然是协调这一切的核心。当 Vsync 信号到来时，Choreographer 会触发 doFrame，执行各种回调，其中 CALLBACK_TRAVERSAL 会触发 ViewRootImpl 的 performTraversals()，最终走到 draw 流程。</li>
 </ol>
+<p>  在 draw 流程中，通过 BlastBufferQueue，RenderThread 可以更独立地工作，而 UI 线程可以更早地返回处理其他任务。</p>
 <p>下面我们就从源码的角度，来看一下具体的实现</p>
 <p><a id="source"></a></p>
 <h1 id="源码解析"><a href="#源码解析" class="headerlink" title="源码解析"></a>源码解析</h1><p>下面从源码的角度来简单看一下，源码只摘抄了部分重要的逻辑，其他的逻辑则被剔除，另外 Native 部分与 SurfaceFlinger 交互的部分也没有列入，不是本文的重点，有兴趣的可以自己去跟一下。下面的源码基于 AOSP mainline（<code>frameworks/base</code> HEAD，核对日期：2026-02）实现，不同 Android release 的细节可能会有差异。</p>
@@ -467,7 +474,7 @@ loading="lazy"             decoding="async"
 <ol>
 <li>onVsync – Vsync 信号回调</li>
 <li>run – 执行 doFrame</li>
-<li>scheduleVsync  – 请求 Vsync 信号</li>
+<li>scheduleVsync – 请求 Vsync 信号</li>
 </ol>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">final</span> <span class="keyword">class</span> <span class="title class_">FrameDisplayEventReceiver</span> <span class="keyword">extends</span> <span class="title class_">DisplayEventReceiver</span> <span class="keyword">implements</span> <span class="title class_">Runnable</span> &#123;</span><br><span class="line">    ......</span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">onVsync</span><span class="params">(<span class="type">long</span> timestampNanos, <span class="type">long</span> physicalDisplayId, <span class="type">int</span> frame, VsyncEventData eventData)</span> &#123;</span><br><span class="line">        ......</span><br><span class="line">        mTimestampNanos = timestampNanos;</span><br><span class="line">        mFrame = frame;</span><br><span class="line">        <span class="comment">// VsyncEventData 在 Android 13/14 已存在，较新版本继续扩展了可用字段</span></span><br><span class="line">        mVsyncEventData = eventData;</span><br><span class="line">        <span class="type">Message</span> <span class="variable">msg</span> <span class="operator">=</span> Message.obtain(mHandler, <span class="built_in">this</span>);</span><br><span class="line">        msg.setAsynchronous(<span class="literal">true</span>);</span><br><span class="line">        mHandler.sendMessageAtTime(msg, timestampNanos / TimeUtils.NANOS_PER_MS);</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">run</span><span class="params">()</span> &#123;</span><br><span class="line">        mHavePendingVsync = <span class="literal">false</span>;</span><br><span class="line">        doFrame(mTimestampNanos, mFrame, mVsyncEventData);</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">scheduleVsync</span><span class="params">()</span> &#123;</span><br><span class="line">        ......</span><br><span class="line">        nativeScheduleVsync(mReceiverPtr);</span><br><span class="line">        ......</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <h2 id="Choreographer-中-Vsync-的注册"><a href="#Choreographer-中-Vsync-的注册" class="headerlink" title="Choreographer 中 Vsync 的注册"></a>Choreographer 中 Vsync 的注册</h2><p>从下面的函数调用栈可以看到，Choreographer 的内部类 FrameDisplayEventReceiver.onVsync 负责接收 Vsync 回调，通知 UIThread 进行数据处理。</p>
@@ -495,7 +502,7 @@ loading="lazy"             decoding="async"
 <p>整个通信流程如下：</p>
 <figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br></pre></td><td class="code"><pre><span class="line">App 进程                                    SurfaceFlinger 进程</span><br><span class="line">|                                             |</span><br><span class="line">| -- 创建 DisplayEventReceiver --------------&gt;  |</span><br><span class="line">|                                             |</span><br><span class="line">| &lt;- 返回 <span class="built_in">IDisplayEventConnection</span> (Binder) ---- |</span><br><span class="line">|                                             |</span><br><span class="line">| -- 创建 BitTube --------------------------&gt;   |</span><br><span class="line">|                                             |</span><br><span class="line">| &lt;- 文件描述符交换 --------------------------       |</span><br><span class="line">|                                             |</span><br><span class="line">| -- 注册文件描述符到 Looper ----------------         |</span><br><span class="line">|                                             |</span><br><span class="line">| -- 请求 <span class="built_in">Vsync</span> (requestNextVsync) ----------&gt;  |</span><br><span class="line">|                                             |</span><br><span class="line">| &lt;- 发送 Vsync 事件数据 ---------------------      |</span><br><span class="line">|                                             |</span><br><span class="line">| -- Looper 通知 -&gt; handleEvent -------------   |</span><br><span class="line">|                                             |</span><br><span class="line">| -- 回调 Java 层 onVsync -------------------    |</span><br><span class="line">|                                             |</span><br></pre></td></tr></table></figure>
 
-<p>这种设计的优势在于避免了使用 Binder 传递高频的 Vsync 事件数据，通过直接的 socket 通信提高了性能和实时性，这对于保证流畅的 UI 渲染至关重要。同时，由于 BitTube 使用了文件描述符，可以无缝集成到 Android 的 Looper 机制中，使得整个系统能够以事件驱动的方式工作。</p>
+<p>这种设计的优势在于避免了使用 Binder 传递高频的 Vsync 事件数据，通过直接的 socket 通信提高了性能和实时性，这对于保证流畅的 UI 渲染很重要。同时，由于 BitTube 使用了文件描述符，可以无缝集成到 Android 的 Looper 机制中，使得整个系统能够以事件驱动的方式工作。</p>
 <h2 id="Choreographer-处理一帧的逻辑"><a href="#Choreographer-处理一帧的逻辑" class="headerlink" title="Choreographer 处理一帧的逻辑"></a>Choreographer 处理一帧的逻辑</h2><p>Choreographer 处理绘制的逻辑核心在 Choreographer.doFrame 函数中，从下图可以看到，FrameDisplayEventReceiver.onVsync post 了自己，其 run 方法直接调用了 doFrame 开始一帧的逻辑处理</p>
 <p>android&#x2F;view&#x2F;Choreographer.java</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">onVsync</span><span class="params">(<span class="type">long</span> timestampNanos, <span class="type">long</span> physicalDisplayId, <span class="type">int</span> frame, VsyncEventData eventData)</span> &#123;</span><br><span class="line">    ......</span><br><span class="line">    mTimestampNanos = timestampNanos;</span><br><span class="line">    mFrame = frame;</span><br><span class="line">    mVsyncEventData = eventData;</span><br><span class="line">    <span class="type">Message</span> <span class="variable">msg</span> <span class="operator">=</span> Message.obtain(mHandler, <span class="built_in">this</span>);</span><br><span class="line">    msg.setAsynchronous(<span class="literal">true</span>);</span><br><span class="line">    mHandler.sendMessageAtTime(msg, timestampNanos / TimeUtils.NANOS_PER_MS);</span><br><span class="line">&#125;</span><br><span class="line"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">run</span><span class="params">()</span> &#123;</span><br><span class="line">    mHavePendingVsync = <span class="literal">false</span>;</span><br><span class="line">    doFrame(mTimestampNanos, mFrame, mVsyncEventData);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
@@ -509,8 +516,8 @@ loading="lazy"             decoding="async"
 <p>从 FrameInfo 这些标志就可以看出记录的内容，后面我们看 dumpsys gfxinfo 的时候数据就是按照这个来排列的</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br></pre></td><td class="code"><pre><span class="line"></span><br><span class="line"><span class="keyword">public</span> <span class="meta">@interface</span> FrameInfoFlags &#123;&#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">FRAME_TIMELINE_VSYNC_ID</span> <span class="operator">=</span> <span class="number">1</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// The intended vsync time, unadjusted by jitter</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">INTENDED_VSYNC</span> <span class="operator">=</span> <span class="number">2</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// Jitter-adjusted vsync time, this is what was used as input into the</span></span><br><span class="line">    <span class="comment">// animation &amp; drawing system</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">VSYNC</span> <span class="operator">=</span> <span class="number">3</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// The id of the input event that caused the current frame</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">INPUT_EVENT_ID</span> <span class="operator">=</span> <span class="number">4</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// When input event handling started</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">HANDLE_INPUT_START</span> <span class="operator">=</span> <span class="number">5</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// When animation evaluations started</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">ANIMATION_START</span> <span class="operator">=</span> <span class="number">6</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// When ViewRootImpl#performTraversals() started</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">PERFORM_TRAVERSALS_START</span> <span class="operator">=</span> <span class="number">7</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// When View:draw() started</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">DRAW_START</span> <span class="operator">=</span> <span class="number">8</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// When the frame needs to be ready by</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">FRAME_DEADLINE</span> <span class="operator">=</span> <span class="number">9</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// When frame actually started.</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">FRAME_START_TIME</span> <span class="operator">=</span> <span class="number">10</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// Interval between two consecutive frames</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">FRAME_INTERVAL</span> <span class="operator">=</span> <span class="number">11</span>;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
 <p>doFrame 函数记录从 Vsync time 到 markPerformTraversalsStart 的时间</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">void doFrame(long frameTimeNanos, int frame, VsyncEventData eventData) &#123;</span><br><span class="line">    ......</span><br><span class="line">    mFrameInfo.setVsync(intendedFrameTimeNanos, frameTimeNanos);</span><br><span class="line">    // 处理 CALLBACK_INPUT Callbacks</span><br><span class="line">    mFrameInfo.markInputHandlingStart();</span><br><span class="line">    // 处理 CALLBACK_ANIMATION Callbacks</span><br><span class="line">    mFrameInfo.markAnimationsStart();</span><br><span class="line">    // 处理 CALLBACK_INSETS_ANIMATION Callbacks</span><br><span class="line">    // 处理 CALLBACK_TRAVERSAL Callbacks</span><br><span class="line">    mFrameInfo.markPerformTraversalsStart();</span><br><span class="line">    // 处理 CALLBACK_COMMIT Callbacks</span><br><span class="line">    ......</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-<h3 id="执行-Callbacks"><a href="#执行-Callbacks" class="headerlink" title="执行 Callbacks"></a>执行 Callbacks</h3><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line">void doFrame(long frameTimeNanos, int frame, VsyncEventData eventData) &#123;</span><br><span class="line">    ......</span><br><span class="line">    // 处理 CALLBACK_INPUT Callbacks</span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_INPUT, frameTimeNanos);</span><br><span class="line">    // 处理 CALLBACK_ANIMATION Callbacks</span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_ANIMATION, frameTimeNanos);</span><br><span class="line">    // 处理 CALLBACK_INSETS_ANIMATION Callbacks</span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_INSETS_ANIMATION, frameTimeNanos);</span><br><span class="line">    // 处理 CALLBACK_TRAVERSAL Callbacks</span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_TRAVERSAL, frameTimeNanos);</span><br><span class="line">    // 处理 CALLBACK_COMMIT Callbacks</span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_COMMIT, frameTimeNanos);</span><br><span class="line">    ......</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">void doFrame(long frameTimeNanos, int frame, VsyncEventData eventData) &#123;</span><br><span class="line">    ......</span><br><span class="line">    mFrameInfo.setVsync(intendedFrameTimeNanos, frameTimeNanos);</span><br><span class="line">    // 处理 CALLBACK_INPUT Callbacks</span><br><span class="line">    mFrameInfo.markInputHandlingStart();</span><br><span class="line">    // 处理 CALLBACK_ANIMATION Callbacks</span><br><span class="line">    mFrameInfo.markAnimationsStart();</span><br><span class="line">    // 处理 CALLBACK_INSETS_ANIMATION Callbacks</span><br><span class="line">    // 处理 CALLBACK_TRAVERSAL Callbacks</span><br><span class="line">    mFrameInfo.markPerformTraversalsStart();</span><br><span class="line">    // 处理 CALLBACK_COMMIT Callbacks</span><br><span class="line">    ......</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h3 id="执行-Callbacks"><a href="#执行-Callbacks" class="headerlink" title="执行 Callbacks"></a>执行 Callbacks</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line">void doFrame(long frameTimeNanos, int frame, VsyncEventData eventData) &#123;</span><br><span class="line">    ......</span><br><span class="line">    // 处理 CALLBACK_INPUT Callbacks</span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_INPUT, frameTimeNanos);</span><br><span class="line">    // 处理 CALLBACK_ANIMATION Callbacks</span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_ANIMATION, frameTimeNanos);</span><br><span class="line">    // 处理 CALLBACK_INSETS_ANIMATION Callbacks</span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_INSETS_ANIMATION, frameTimeNanos);</span><br><span class="line">    // 处理 CALLBACK_TRAVERSAL Callbacks</span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_TRAVERSAL, frameTimeNanos);</span><br><span class="line">    // 处理 CALLBACK_COMMIT Callbacks</span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_COMMIT, frameTimeNanos);</span><br><span class="line">    ......</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p><strong>Input 回调调用栈</strong></p>
 <p><strong>input callback</strong> 一般是执行 ViewRootImpl.ConsumeBatchedInputRunnable</p>
 <p>android&#x2F;view&#x2F;ViewRootImpl.java</p>
@@ -556,13 +563,16 @@ loading="lazy"             decoding="async"
 <li><p><strong>Choreographer</strong> 定义了FrameCallback接口，其doFrame方法在每次Vsync到来时被调用。这一设计对Android动画系统具有重要意义，使动画能够与屏幕刷新率精确同步，相比早期自行计时的实现，提供了更加流畅、省电的动画体验。</p>
 </li>
 <li><p><strong>Choreographer</strong> 核心功能是接收Vsync信号并触发通过postCallback注册的回调函数。框架定义了五种类型的回调，按照执行优先级排序：</p>
-<ol>
-<li><strong>CALLBACK_INPUT</strong>：处理输入事件，如触摸、按键等交互</li>
-<li><strong>CALLBACK_ANIMATION</strong>：处理各类动画计算与更新</li>
-<li><strong>CALLBACK_INSETS_ANIMATION</strong>：处理系统插入动画，如软键盘、状态栏动画等</li>
-<li><strong>CALLBACK_TRAVERSAL</strong>：处理视图树的测量、布局与绘制</li>
-<li><strong>CALLBACK_COMMIT</strong>：执行 post-draw 收尾工作，并在必要时修正 frame time（用于更准确地反映延迟与抖动）</li>
-</ol>
+</li>
+<li><p><strong>CALLBACK_INPUT</strong>：处理输入事件，如触摸、按键等交互</p>
+</li>
+<li><p><strong>CALLBACK_ANIMATION</strong>：处理各类动画计算与更新</p>
+</li>
+<li><p><strong>CALLBACK_INSETS_ANIMATION</strong>：处理系统插入动画，如软键盘、状态栏动画等</p>
+</li>
+<li><p><strong>CALLBACK_TRAVERSAL</strong>：处理视图树的测量、布局与绘制</p>
+</li>
+<li><p><strong>CALLBACK_COMMIT</strong>：执行 post-draw 收尾工作，并在必要时修正 frame time（用于更准确地反映延迟与抖动）</p>
 </li>
 <li><p><strong>ListView</strong> 和 <strong>RecyclerView</strong> 的Item复用机制(ViewHolder模式)在框架层面上的具体实现会涉及到CALLBACK_INPUT和CALLBACK_ANIMATION阶段。在滑动或快速滚动时，Item的初始化、测量与绘制可能在Input回调中触发(如直接响应触摸事件)，也可能在Animation回调中执行(如惯性滑动或自动滚动)。RecyclerView通过更高效的复用机制和预取(Prefetch)策略，能够在这两个阶段更智能地准备ViewHolder，减少主线程阻塞，尤其在高刷新率设备上表现更为出色。</p>
 </li>
@@ -579,35 +589,34 @@ loading="lazy"             decoding="async"
 <li>利用 SurfaceFlinger PageFlip 机制：<code>adb service call SurfaceFlinger 1013</code>（需要系统权限）</li>
 <li>Choreographer 自身的掉帧计算逻辑</li>
 <li>BlockCanary 基于 Looper 的性能监控</li>
-<li>Perfetto 工具的强大监控能力<ol>
+<li>Perfetto 工具的强大监控能力</li>
 <li>Perfetto 已是 Android 主线 tracing 基础设施（Android 10+ 已明显替代早期 systrace.py 工作流）</li>
 <li>Perfetto可以捕获更详细的系统性能数据，包括Choreographer的工作细节</li>
 <li>使用Perfetto UI可以可视化分析帧渲染过程</li>
 </ol>
-</li>
-</ol>
 <h2 id="利用-Perfetto-进行高级监控"><a href="#利用-Perfetto-进行高级监控" class="headerlink" title="利用 Perfetto 进行高级监控"></a>利用 Perfetto 进行高级监控</h2><p>Perfetto 是 Android 新一代的系统跟踪工具，目前已是 Android 主线系统跟踪方案。它提供了比 Systrace 更强大的功能：</p>
 <ol>
-<li><p><strong>更全面的性能数据采集</strong><br>Perfetto 可以同时收集 CPU、内存、图形渲染、系统服务等多维度的数据</p>
+<li><p><strong>更全面的性能数据采集</strong><br>  Perfetto 可以同时收集 CPU、内存、图形渲染、系统服务等多维度的数据</p>
 </li>
-<li><p><strong>更低的开销</strong><br>采用高效的跟踪引擎，对系统性能影响更小</p>
+<li><p><strong>更低的开销</strong><br>  采用高效的跟踪引擎，对系统性能影响更小</p>
 </li>
-<li><p><strong>更好的 Choreographer 追踪</strong><br>可以详细跟踪 Choreographer 的工作过程，包括:</p>
+<li><p><strong>更好的 Choreographer 追踪</strong><br>  可以详细跟踪 Choreographer 的工作过程，包括:</p>
+</li>
+</ol>
 <ul>
 <li>Vsync 信号的接收和处理</li>
 <li>doFrame 方法的执行细节</li>
 <li>各类回调的执行时间</li>
 <li>UI 线程和 RenderThread 的协作过程</li>
 </ul>
-</li>
-<li><p><strong>追踪 BlastBufferQueue 相关链路</strong><br>能够跟踪 BlastBufferQueue 的工作过程，帮助开发者理解缓冲区管理机制</p>
-</li>
+<ol start="4">
+<li><strong>追踪 BlastBufferQueue 相关链路</strong><br>  能够跟踪 BlastBufferQueue 的工作过程，帮助开发者理解缓冲区管理机制</li>
 </ol>
 <h3 id="使用-Perfetto-跟踪-Choreographer"><a href="#使用-Perfetto-跟踪-Choreographer" class="headerlink" title="使用 Perfetto 跟踪 Choreographer"></a>使用 Perfetto 跟踪 Choreographer</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 开始记录 Perfetto trace（示例：15 秒，常用类别）</span></span><br><span class="line">adb shell perfetto -o /data/misc/perfetto-traces/trace.perfetto-trace -t 15s \</span><br><span class="line">    <span class="built_in">sched</span> freq idle am wm gfx view binder_driver hal</span><br><span class="line"></span><br><span class="line"><span class="comment"># 完成后获取 trace 文件</span></span><br><span class="line">adb pull /data/misc/perfetto-traces/trace.perfetto-trace</span><br><span class="line"></span><br><span class="line"><span class="comment"># 在 Perfetto UI 中分析(https://ui.perfetto.dev/)</span></span><br></pre></td></tr></table></figure>
 
 <p>在 Perfetto UI 中，可以找到名为 “Choreographer#doFrame” 的事件，它展示了每一帧的处理时间和细节。还可以查看 UI 线程和 RenderThread 之间的协作关系，以及与 SurfaceFlinger 的交互。</p>
 <h2 id="利用-framestats（底层依赖-FrameInfo）进行监控"><a href="#利用-framestats（底层依赖-FrameInfo）进行监控" class="headerlink" title="利用 framestats（底层依赖 FrameInfo）进行监控"></a>利用 framestats（底层依赖 FrameInfo）进行监控</h2><p>adb shell dumpsys gfxinfo <packagename> framestats</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line">Window: StatusBar</span><br><span class="line">Stats since: 17990256398ns</span><br><span class="line">Total frames rendered: 1562</span><br><span class="line">Janky frames: 361 (23.11%)</span><br><span class="line">50th percentile: 6ms</span><br><span class="line">90th percentile: 23ms</span><br><span class="line">95th percentile: 36ms</span><br><span class="line">99th percentile: 101ms</span><br><span class="line">Number Missed Vsync: 33</span><br><span class="line">Number High input latency: 683</span><br><span class="line">Number Slow UI thread: 273</span><br><span class="line">Number Slow bitmap uploads: 8</span><br><span class="line">Number Slow issue draw commands: 18</span><br><span class="line">Number Frame deadline missed: 287</span><br><span class="line">HISTOGRAM: 5ms=670 6ms=128 7ms=84 8ms=63 9ms=38 10ms=23 11ms=21 12ms=20 13ms=25 14ms=39 15ms=65 16ms=36 17ms=51 18ms=37 19ms=41 20ms=20 21ms=19 22ms=18 23ms=15 24ms=14 25ms=8 26ms=4 27ms=6 28ms=3 29ms=4 30ms=2 31ms=2 32ms=6 34ms=12 36ms=10 38ms=9 40ms=3 42ms=4 44ms=5 46ms=8 48ms=6 53ms=6 57ms=4 61ms=1 65ms=0 69ms=2 73ms=2 77ms=3 81ms=4 85ms=1 89ms=2 93ms=0 97ms=2 101ms=1 105ms=1 109ms=1 113ms=1 117ms=1 121ms=2 125ms=1 129ms=0 133ms=1 150ms=2 200ms=3 250ms=0 300ms=1 350ms=1 400ms=0 450ms=0 500ms=0 550ms=0 600ms=0 650ms=0</span><br><span class="line"></span><br><span class="line">---PROFILEDATA---</span><br><span class="line">Flags,IntendedVsync,Vsync,OldestInputEvent,NewestInputEvent,HandleInputStart,AnimationStart,PerformTraversalsStart,DrawStart,SyncQueued,SyncStart,IssueDrawCommandsStart,SwapBuffers,FrameCompleted,DequeueBufferDuration,QueueBufferDuration,</span><br><span class="line">0,10158314881426,10158314881426,9223372036854775807,0,10158315693363,10158315760759,10158315769821,10158316032165,10158316627842,10158316838988,10158318055915,10158320387269,10158321770654,428000,773000,</span><br><span class="line">0,10158332036261,10158332036261,9223372036854775807,0,10158332799196,10158332868519,10158332877269,10158333137738,10158333780654,10158333993206,10158335078467,10158337689561,10158339307061,474000,885000,</span><br><span class="line">0,10158348665353,10158348665353,9223372036854775807,0,10158349710238,10158349773102,10158349780863,10158350405863,10158351135967,10158351360446,10158352300863,10158354305654,10158355814509,471000,836000,</span><br><span class="line">0,10158365296729,10158365296729,9223372036854775807,0,10158365782373,10158365821019,10158365825238,10158365975290,10158366547946,10158366687217,10158367240706,10158368429248,10158369291852,269000,476000,</span><br></pre></td></tr></table></figure>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line">Window: StatusBar</span><br><span class="line">Stats since: 17990256398ns</span><br><span class="line">Total frames rendered: 1562</span><br><span class="line">Janky frames: 361 (23.11%)</span><br><span class="line">50th percentile: 6ms</span><br><span class="line">90th percentile: 23ms</span><br><span class="line">95th percentile: 36ms</span><br><span class="line">99th percentile: 101ms</span><br><span class="line">Number Missed Vsync: 33</span><br><span class="line">Number High input latency: 683</span><br><span class="line">Number Slow UI thread: 273</span><br><span class="line">Number Slow bitmap uploads: 8</span><br><span class="line">Number Slow issue draw commands: 18</span><br><span class="line">Number Frame deadline missed: 287</span><br><span class="line">HISTOGRAM: 5ms=670 6ms=128 7ms=84 8ms=63 9ms=38 10ms=23 11ms=21 12ms=20 13ms=25 14ms=39 15ms=65 16ms=36 17ms=51 18ms=37 19ms=41 20ms=20 21ms=19 22ms=18 23ms=15 24ms=14 25ms=8 26ms=4 27ms=6 28ms=3 29ms=4 30ms=2 31ms=2 32ms=6 34ms=12 36ms=10 38ms=9 40ms=3 42ms=4 44ms=5 46ms=8 48ms=6 53ms=6 57ms=4 61ms=1 65ms=0 69ms=2 73ms=2 77ms=3 81ms=4 85ms=1 89ms=2 93ms=0 97ms=2 101ms=1 105ms=1 109ms=1 113ms=1 117ms=1 121ms=2 125ms=1 129ms=0 133ms=1 150ms=2 200ms=3 250ms=0 300ms=1 350ms=1 400ms=0 450ms=0 500ms=0 550ms=0 600ms=0 650ms=0</span><br><span class="line"></span><br><span class="line">---PROFILEDATA---</span><br><span class="line">Flags,IntendedVsync,Vsync,OldestInputEvent,NewestInputEvent,HandleInputStart,AnimationStart,PerformTraversalsStart,DrawStart,SyncQueued,SyncStart,IssueDrawCommandsStart,SwapBuffers,FrameCompleted,DequeueBufferDuration,QueueBufferDuration,</span><br><span class="line">0,10158314881426,10158314881426,9223372036854775807,0,10158315693363,10158315760759,10158315769821,10158316032165,10158316627842,10158316838988,10158318055915,10158320387269,10158321770654,428000,773000,</span><br><span class="line">0,10158332036261,10158332036261,9223372036854775807,0,10158332799196,10158332868519,10158332877269,10158333137738,10158333780654,10158333993206,10158335078467,10158337689561,10158339307061,474000,885000,</span><br><span class="line">0,10158348665353,10158348665353,9223372036854775807,0,10158349710238,10158349773102,10158349780863,10158350405863,10158351135967,10158351360446,10158352300863,10158354305654,10158355814509,471000,836000,</span><br><span class="line">0,10158365296729,10158365296729,9223372036854775807,0,10158365782373,10158365821019,10158365825238,10158365975290,10158366547946,10158366687217,10158367240706,10158368429248,10158369291852,269000,476000,</span><br></pre></td></tr></table></figure>
 <h2 id="利用-SurfaceFlinger-进行监控"><a href="#利用-SurfaceFlinger-进行监控" class="headerlink" title="利用 SurfaceFlinger 进行监控"></a>利用 SurfaceFlinger 进行监控</h2><p>命令解释：</p>
 <ol>
 <li>数据的单位是纳秒，时间是以开机时间为起始点</li>
@@ -623,9 +632,9 @@ loading="lazy"             decoding="async"
 <p><strong>掉帧 jank 计算</strong></p>
 <p>每一行都可以通过下面的公式得到一个值，该值是一个标准，我们称为jankflag，如果当前行的jankflag与上一行的jankflag发生改变，那么就叫掉帧</p>
 <p>ceil((C - A) &#x2F; refresh-period)</p>
-<h2 id="利用-SurfaceFlinger-PageFlip-机制进行监控"><a href="#利用-SurfaceFlinger-PageFlip-机制进行监控" class="headerlink" title="利用 SurfaceFlinger PageFlip 机制进行监控"></a>利用 SurfaceFlinger PageFlip 机制进行监控</h2><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line">Parcel data = Parcel.obtain();</span><br><span class="line">Parcel reply = Parcel.obtain();</span><br><span class="line">    data.writeInterfaceToken(&quot;android.ui.ISurfaceComposer&quot;);</span><br><span class="line">mFlinger.transact(1013, data, reply, 0);</span><br><span class="line">final int pageFlipCount = reply.readInt();</span><br><span class="line"></span><br><span class="line">final long now = System.nanoTime();</span><br><span class="line">final int frames = pageFlipCount - mLastPageFlipCount;</span><br><span class="line">final long duration = now - mLastUpdateTime;</span><br><span class="line">mFps = (float) (frames * 1e9 / duration);</span><br><span class="line">mLastPageFlipCount = pageFlipCount;</span><br><span class="line">mLastUpdateTime = now;</span><br><span class="line">reply.recycle();</span><br><span class="line">data.recycle();</span><br></pre></td></tr></table></figure>
-<h2 id="Choreographer-自身的掉帧计算逻辑"><a href="#Choreographer-自身的掉帧计算逻辑" class="headerlink" title="Choreographer 自身的掉帧计算逻辑"></a>Choreographer 自身的掉帧计算逻辑</h2><p>SKIPPED_FRAME_WARNING_LIMIT 默认为30 , 由 debug.choreographer.skipwarning 这个属性控制</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">if (jitterNanos &gt;= mFrameIntervalNanos) &#123;</span><br><span class="line">    final long skippedFrames = jitterNanos / mFrameIntervalNanos;</span><br><span class="line">    if (skippedFrames &gt;= SKIPPED_FRAME_WARNING_LIMIT) &#123;</span><br><span class="line">        Log.i(TAG, &quot;Skipped &quot; + skippedFrames + &quot; frames!  &quot;</span><br><span class="line">                + &quot;The application may be doing too much work on its main thread.&quot;);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h2 id="利用-SurfaceFlinger-PageFlip-机制进行监控"><a href="#利用-SurfaceFlinger-PageFlip-机制进行监控" class="headerlink" title="利用 SurfaceFlinger PageFlip 机制进行监控"></a>利用 SurfaceFlinger PageFlip 机制进行监控</h2><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line">Parcel data = Parcel.obtain();</span><br><span class="line">Parcel reply = Parcel.obtain();</span><br><span class="line">    data.writeInterfaceToken(&quot;android.ui.ISurfaceComposer&quot;);</span><br><span class="line">mFlinger.transact(1013, data, reply, 0);</span><br><span class="line">final int pageFlipCount = reply.readInt();</span><br><span class="line"></span><br><span class="line">final long now = System.nanoTime();</span><br><span class="line">final int frames = pageFlipCount - mLastPageFlipCount;</span><br><span class="line">final long duration = now - mLastUpdateTime;</span><br><span class="line">mFps = (float) (frames * 1e9 / duration);</span><br><span class="line">mLastPageFlipCount = pageFlipCount;</span><br><span class="line">mLastUpdateTime = now;</span><br><span class="line">reply.recycle();</span><br><span class="line">data.recycle();</span><br></pre></td></tr></table></figure>
+<h2 id="Choreographer-自身的掉帧计算逻辑"><a href="#Choreographer-自身的掉帧计算逻辑" class="headerlink" title="Choreographer 自身的掉帧计算逻辑"></a>Choreographer 自身的掉帧计算逻辑</h2><p>SKIPPED_FRAME_WARNING_LIMIT 默认为30, 由 debug.choreographer.skipwarning 这个属性控制</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">if (jitterNanos &gt;= mFrameIntervalNanos) &#123;</span><br><span class="line">    final long skippedFrames = jitterNanos / mFrameIntervalNanos;</span><br><span class="line">    if (skippedFrames &gt;= SKIPPED_FRAME_WARNING_LIMIT) &#123;</span><br><span class="line">        Log.i(TAG, &quot;Skipped &quot; + skippedFrames + &quot; frames!  &quot;</span><br><span class="line">                + &quot;The application may be doing too much work on its main thread.&quot;);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
 <h2 id="BlockCanary"><a href="#BlockCanary" class="headerlink" title="BlockCanary"></a>BlockCanary</h2><p>Blockcanary 做性能监控使用的是 Looper 的消息机制，通过对 MessageQueue 中每一个 Message 的前后进行记录，打到监控性能的目的</p>
 <p>android&#x2F;os&#x2F;Looper.java</p>
@@ -636,7 +645,7 @@ loading="lazy"             decoding="async"
 <p>消息默认为同步类型，只有通过 Message 的 setAsynchronous 方法（该方法为隐藏 API）才能将消息设置为异步。在初始化 Handler 时，可以通过特定参数指定该 Handler 发送的所有消息均为异步类型，此时 Handler 的 enqueueMessage 方法会自动调用 Message 的 setAsynchronous 方法。</p>
 <p>异步消息的核心价值在于能够绕过消息屏障继续执行，如果没有设置屏障，异步消息与同步消息的处理方式完全相同。通过 removeSyncBarrier 方法可以移除之前设置的屏障。</p>
 <h2 id="SyncBarrier-在-Choreographer-中使用的一个示例"><a href="#SyncBarrier-在-Choreographer-中使用的一个示例" class="headerlink" title="SyncBarrier 在 Choreographer 中使用的一个示例"></a>SyncBarrier 在 Choreographer 中使用的一个示例</h2><p>scheduleTraversals 的时候 postSyncBarrier</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">void scheduleTraversals() &#123;</span><br><span class="line">    if (!mTraversalScheduled) &#123;</span><br><span class="line">        mTraversalScheduled = true;</span><br><span class="line">        //为了提高优先级，先 postSyncBarrier</span><br><span class="line">        mTraversalBarrier = mHandler.getLooper().getQueue().postSyncBarrier();</span><br><span class="line">        mChoreographer.postCallback(</span><br><span class="line">                Choreographer.CALLBACK_TRAVERSAL, mTraversalRunnable, null);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">void scheduleTraversals() &#123;</span><br><span class="line">    if (!mTraversalScheduled) &#123;</span><br><span class="line">        mTraversalScheduled = true;</span><br><span class="line">        //为了提高优先级，先 postSyncBarrier</span><br><span class="line">        mTraversalBarrier = mHandler.getLooper().getQueue().postSyncBarrier();</span><br><span class="line">        mChoreographer.postCallback(</span><br><span class="line">                Choreographer.CALLBACK_TRAVERSAL, mTraversalRunnable, null);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>doTraversal 的时候 removeSyncBarrier</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> <span class="title function_">doTraversal</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="keyword">if</span> (mTraversalScheduled) &#123;</span><br><span class="line">        mTraversalScheduled = <span class="literal">false</span>;</span><br><span class="line">        <span class="comment">// 这里把 SyncBarrier remove</span></span><br><span class="line">mHandler.getLooper().getQueue().removeSyncBarrier(mTraversalBarrier);</span><br><span class="line">        <span class="comment">// 真正开始</span></span><br><span class="line">        performTraversals();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>Choreographer post Message 的时候，会把这些消息设为 Asynchronous ，这样 Choreographer 中的这些 Message 的优先级就会比较高，</p>
@@ -692,7 +701,7 @@ loading="lazy"             decoding="async"
             <p>Author：<a href="https://androidperformance.com">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/2025/03/26/Android-Perfetto-05-Chorergrapher/">https://androidperformance.com/2025/03/26/Android-Perfetto-05-Chorergrapher/</a>
             <p>Publish date：<a href="https://androidperformance.com/2025/03/26/Android-Perfetto-05-Chorergrapher/">March 26th 2025, 6:55:11 pm</a>
-            <p>Update date：<a href="https://androidperformance.com/2025/03/26/Android-Perfetto-05-Chorergrapher/">April 18th 2026, 3:32:45 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/2025/03/26/Android-Perfetto-05-Chorergrapher/">May 4th 2026, 5:53:03 pm</a>
             <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     <!-- paginator -->
@@ -910,7 +919,6 @@ loading="lazy"             decoding="async"
         <div class="total-archive">
         Total : 125
         </div>
-        <!-- search  -->
     </div>
     <div class="post-archive">
             <div class="archive-year"> 2026 </div>
@@ -1477,14 +1485,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Jank
             </span>
-            <span class="sidebar-tag-name" data-tags="年终总结">
-                <span class="iconfont-archer">&#xe606;</span>
-                年终总结
-            </span>
-            <span class="sidebar-tag-name" data-tags="知识星球">
-                <span class="iconfont-archer">&#xe606;</span>
-                知识星球
-            </span>
             <span class="sidebar-tag-name" data-tags="Perfetto">
                 <span class="iconfont-archer">&#xe606;</span>
                 Perfetto
@@ -1497,9 +1497,41 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 随笔
             </span>
+            <span class="sidebar-tag-name" data-tags="年终总结">
+                <span class="iconfont-archer">&#xe606;</span>
+                年终总结
+            </span>
+            <span class="sidebar-tag-name" data-tags="知识星球">
+                <span class="iconfont-archer">&#xe606;</span>
+                知识星球
+            </span>
             <span class="sidebar-tag-name" data-tags="ANR">
                 <span class="iconfont-archer">&#xe606;</span>
                 ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
             </span>
             <span class="sidebar-tag-name" data-tags="Agent OS">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1517,30 +1549,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Mobile OS
             </span>
-            <span class="sidebar-tag-name" data-tags="RenderThread">
-                <span class="iconfont-archer">&#xe606;</span>
-                RenderThread
-            </span>
-            <span class="sidebar-tag-name" data-tags="Performance">
-                <span class="iconfont-archer">&#xe606;</span>
-                Performance
-            </span>
-            <span class="sidebar-tag-name" data-tags="Tools">
-                <span class="iconfont-archer">&#xe606;</span>
-                Tools
-            </span>
-            <span class="sidebar-tag-name" data-tags="Linux">
-                <span class="iconfont-archer">&#xe606;</span>
-                Linux
-            </span>
-            <span class="sidebar-tag-name" data-tags="Framework">
-                <span class="iconfont-archer">&#xe606;</span>
-                Framework
-            </span>
-            <span class="sidebar-tag-name" data-tags="Java">
-                <span class="iconfont-archer">&#xe606;</span>
-                Java
-            </span>
             <span class="sidebar-tag-name" data-tags="BlastBufferQueue">
                 <span class="iconfont-archer">&#xe606;</span>
                 BlastBufferQueue
@@ -1548,6 +1556,10 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="性能优化">
                 <span class="iconfont-archer">&#xe606;</span>
                 性能优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
             </span>
             <span class="sidebar-tag-name" data-tags="线程优化">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1557,10 +1569,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 卡顿优化
             </span>
-            <span class="sidebar-tag-name" data-tags="电量优化">
-                <span class="iconfont-archer">&#xe606;</span>
-                电量优化
-            </span>
             <span class="sidebar-tag-name" data-tags="ANR分析">
                 <span class="iconfont-archer">&#xe606;</span>
                 ANR分析
@@ -1569,29 +1577,33 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 页面响应
             </span>
-            <span class="sidebar-tag-name" data-tags="Binder">
-                <span class="iconfont-archer">&#xe606;</span>
-                Binder
-            </span>
             <span class="sidebar-tag-name" data-tags="MAT">
                 <span class="iconfont-archer">&#xe606;</span>
                 MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="电量优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                电量优化
             </span>
             <span class="sidebar-tag-name" data-tags="DelayLoad">
                 <span class="iconfont-archer">&#xe606;</span>
                 DelayLoad
             </span>
-            <span class="sidebar-tag-name" data-tags="HashMap">
-                <span class="iconfont-archer">&#xe606;</span>
-                HashMap
-            </span>
             <span class="sidebar-tag-name" data-tags="程序员">
                 <span class="iconfont-archer">&#xe606;</span>
                 程序员
             </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
             <span class="sidebar-tag-name" data-tags="Singleton">
                 <span class="iconfont-archer">&#xe606;</span>
                 Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
             </span>
             <span class="sidebar-tag-name" data-tags="OpenClaw">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1605,10 +1617,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 本地模型
             </span>
-            <span class="sidebar-tag-name" data-tags="Nexus">
-                <span class="iconfont-archer">&#xe606;</span>
-                Nexus
-            </span>
             <span class="sidebar-tag-name" data-tags="AI Agent">
                 <span class="iconfont-archer">&#xe606;</span>
                 AI Agent
@@ -1621,29 +1629,29 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 MCP
             </span>
+            <span class="sidebar-tag-name" data-tags="Open Source">
+                <span class="iconfont-archer">&#xe606;</span>
+                Open Source
+            </span>
             <span class="sidebar-tag-name" data-tags="设计规范">
                 <span class="iconfont-archer">&#xe606;</span>
                 设计规范
-            </span>
-            <span class="sidebar-tag-name" data-tags="Kotlin">
-                <span class="iconfont-archer">&#xe606;</span>
-                Kotlin
             </span>
             <span class="sidebar-tag-name" data-tags="Compose">
                 <span class="iconfont-archer">&#xe606;</span>
                 Compose
             </span>
-            <span class="sidebar-tag-name" data-tags="卡顿">
+            <span class="sidebar-tag-name" data-tags="Kotlin">
                 <span class="iconfont-archer">&#xe606;</span>
-                卡顿
+                Kotlin
             </span>
             <span class="sidebar-tag-name" data-tags="Process">
                 <span class="iconfont-archer">&#xe606;</span>
                 Process
             </span>
-            <span class="sidebar-tag-name" data-tags="Open Source">
+            <span class="sidebar-tag-name" data-tags="卡顿">
                 <span class="iconfont-archer">&#xe606;</span>
-                Open Source
+                卡顿
             </span>
             <span class="sidebar-tag-name" data-tags="读书笔记">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1665,13 +1673,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 互联网那些事
             </span>
-            <span class="sidebar-tag-name" data-tags="了解你的用户">
-                <span class="iconfont-archer">&#xe606;</span>
-                了解你的用户
-            </span>
             <span class="sidebar-tag-name" data-tags="游戏与编程">
                 <span class="iconfont-archer">&#xe606;</span>
                 游戏与编程
+            </span>
+            <span class="sidebar-tag-name" data-tags="了解你的用户">
+                <span class="iconfont-archer">&#xe606;</span>
+                了解你的用户
             </span>
             <span class="sidebar-tag-name" data-tags="阅读之美">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1856,7 +1864,37 @@ loading="lazy"             decoding="async"
     })();
 </script>
 
-        <!-- algolia -->
+        <!-- search -->
+            <div class="site-search site-search-loading local-search-shell">
+    <div class="algolia-popup popup local-search-popup" role="dialog" aria-modal="true" aria-label="Search posts">
+        <div class="algolia-search local-search-header">
+            <div class="algolia-search-input-icon">
+                <i class="iconfont-archer">&#xe627;</i>
+            </div>
+            <div class="algolia-search-input local-search-input">
+                <input id="local-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="搜索文章">
+            </div>
+            <button class="popup-btn-close local-search-close" type="button" aria-label="Close search">
+                <i class="iconfont-archer" aria-hidden="true">&#xe609;</i>
+            </button>
+        </div>
+
+        <div class="algolia-results local-search-results">
+            <div
+                id="local-search-config"
+                data-path="/search.xml"
+                data-per-page="10"
+                data-empty="没有找到与「${query}」相关的文章"
+                data-stats="找到 ${hits} 个结果"
+                data-loading="正在加载搜索索引..."
+                data-error="搜索索引加载失败，请稍后重试"></div>
+            <div id="local-search-stats" class="algolia-stats"></div>
+            <div id="local-search-hits"></div>
+        </div>
+    </div>
+</div>
+
+            <script src="/scripts/local-search.js" async></script>
         <!-- async load share.js on first click -->
             <script>
                 (function(){

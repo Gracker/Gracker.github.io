@@ -36,12 +36,12 @@
 <meta property="og:image" content="https://androidperformance.com/en/images/15717422623134.jpg">
 <meta property="og:image" content="https://androidperformance.com/en/images/WechatIMG581.webp">
 <meta property="article:published_time" content="2025-03-26T10:55:11.000Z">
-<meta property="article:modified_time" content="2026-04-18T07:32:44.280Z">
+<meta property="article:modified_time" content="2026-05-04T09:45:19.299Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Android">
-<meta property="article:tag" content="Jank">
 <meta property="article:tag" content="Perfetto">
 <meta property="article:tag" content="Systrace">
+<meta property="article:tag" content="Jank">
 <meta property="article:tag" content="RenderThread">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:image" content="https://androidperformance.com/en/images/15717420275540.jpg">
@@ -107,6 +107,7 @@
                                     <link id="stylesheet-base" rel="stylesheet" href="/en/css/style.css">
                                     <link id="stylesheet-mobile" rel="stylesheet" href="/en/css/mobile.css" media="screen and (max-width: 960px)">
                                     <link id="stylesheet-theme-dark" rel="stylesheet" href="/en/css/dark.css">
+                                    <link id="stylesheet-custom" rel="stylesheet" href="/en/css/custom.css">
                                     <link rel="preload" href="/en/lib/jquery.min.js" as="script">
                                     <link rel="preload" href="/en/scripts/main.js" as="script">
                                     <!-- algolia -->
@@ -134,13 +135,17 @@
     </div>
     <!-- header actions -->
     <div class="header-actions">
+        <!-- search button -->
+            <span class="header-search-btn header-element popup-trigger" role="button" aria-label="Search" data-tooltip="Search">
+                <span class="iconfont-archer search-icon" aria-hidden="true">&#xe627;</span>
+            </span>
         <!-- theme mode switch button -->
-        <span class="header-theme-btn header-element">
+        <span class="header-theme-btn header-element" role="button" aria-label="Theme" data-tooltip="Theme">
             <span aria-hidden="true">&#9680;</span>
         </span>
         <!-- language transition button -->
-        <span class="header-lang-btn header-element">
-            <a href="javascript:void(0)" onclick="toggleLanguage()" class="lang-text">EN</a>
+        <span class="header-lang-btn header-element" data-tooltip="Language">
+            <a href="javascript:void(0)" onclick="toggleLanguage()" class="lang-text" aria-label="Language">EN</a>
             <script>
                 // Update language button text based on current path
                 (function() {
@@ -168,9 +173,15 @@
                 }
             </script>
         </span>
-        <!-- back to home page text -->
+        <!-- home button -->
         <span class="home-link header-element">
-            <a href="/en/">Android Performance</a>
+            <a href="/en/" aria-label="Home" data-tooltip="Home">
+                <svg class="home-icon" aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="m3 10.5 9-7 9 7"></path>
+                    <path d="M5 9.5V21h14V9.5"></path>
+                    <path d="M10 21v-6h4v6"></path>
+                </svg>
+            </a>
         </span>
     </div>
     <!-- toggle banner -->
@@ -260,9 +271,9 @@ loading="lazy"             decoding="async"
             </span>
         </span>
         <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
-        <a class="post-tag" href="javascript:void(0);" data-tags="Jank">Jank</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Systrace">Systrace</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Jank">Jank</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="RenderThread">RenderThread</a>
 </div>
 
@@ -453,16 +464,16 @@ loading="lazy"             decoding="async"
 <h1 id="Source-Code-Analysis"><a href="#Source-Code-Analysis" class="headerlink" title="Source Code Analysis"></a>Source Code Analysis</h1><p>Below is a brief look from the source code perspective. The source code only excerpts some important logic, other logic is removed. In addition, the Native part interacting with SurfaceFlinger is not included, which is not the focus of this article. Those interested can follow it themselves. The following source code is based on AOSP mainline (<code>frameworks/base</code> HEAD, verified in 2026-02). Details may vary across Android releases.</p>
 <h2 id="Choreographer-Initialization"><a href="#Choreographer-Initialization" class="headerlink" title="Choreographer Initialization"></a>Choreographer Initialization</h2><h3 id="Choreographer-Singleton-Initialization"><a href="#Choreographer-Singleton-Initialization" class="headerlink" title="Choreographer Singleton Initialization"></a>Choreographer Singleton Initialization</h3><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// Thread local storage for the choreographer.</span></span><br><span class="line"><span class="keyword">private</span> <span class="keyword">static</span> <span class="keyword">final</span> ThreadLocal&lt;Choreographer&gt; sThreadInstance =</span><br><span class="line">        <span class="keyword">new</span> <span class="title class_">ThreadLocal</span>&lt;Choreographer&gt;() &#123;</span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">protected</span> Choreographer <span class="title function_">initialValue</span><span class="params">()</span> &#123;</span><br><span class="line">        <span class="comment">// Get Looper of current thread</span></span><br><span class="line">        <span class="type">Looper</span> <span class="variable">looper</span> <span class="operator">=</span> Looper.myLooper();</span><br><span class="line">        <span class="keyword">if</span> (looper == <span class="literal">null</span>) &#123;</span><br><span class="line">            <span class="keyword">throw</span> <span class="keyword">new</span> <span class="title class_">IllegalStateException</span>(<span class="string">&quot;The current thread must have a looper!&quot;</span>);</span><br><span class="line">        &#125;</span><br><span class="line">        <span class="comment">// Construct Choreographer object, use VSYNC_SOURCE_APP as Vsync source</span></span><br><span class="line">        <span class="type">Choreographer</span> <span class="variable">choreographer</span> <span class="operator">=</span> <span class="keyword">new</span> <span class="title class_">Choreographer</span>(looper, VSYNC_SOURCE_APP);</span><br><span class="line">        <span class="keyword">if</span> (looper == Looper.getMainLooper()) &#123;</span><br><span class="line">            mMainInstance = choreographer;</span><br><span class="line">        &#125;</span><br><span class="line">        <span class="keyword">return</span> choreographer;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure>
 <h3 id="Choreographer-Constructor"><a href="#Choreographer-Constructor" class="headerlink" title="Choreographer Constructor"></a>Choreographer Constructor</h3><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="title function_">Choreographer</span><span class="params">(Looper looper, <span class="type">int</span> vsyncSource)</span> &#123;</span><br><span class="line">    mLooper = looper;</span><br><span class="line">    <span class="comment">// 1. Initialize FrameHandler</span></span><br><span class="line">    mHandler = <span class="keyword">new</span> <span class="title class_">FrameHandler</span>(looper);</span><br><span class="line">    <span class="comment">// 2. Initialize DisplayEventReceiver</span></span><br><span class="line">    mDisplayEventReceiver = USE_VSYNC</span><br><span class="line">            ? <span class="keyword">new</span> <span class="title class_">FrameDisplayEventReceiver</span>(looper, vsyncSource)</span><br><span class="line">            : <span class="literal">null</span>;</span><br><span class="line">    mLastFrameTimeNanos = Long.MIN_VALUE;</span><br><span class="line">    mFrameIntervalNanos = (<span class="type">long</span>)(<span class="number">1000000000</span> / getRefreshRate());</span><br><span class="line">    <span class="comment">//3. Initialize CallbacksQueues</span></span><br><span class="line">    mCallbackQueues = <span class="keyword">new</span> <span class="title class_">CallbackQueue</span>[CALLBACK_LAST + <span class="number">1</span>];</span><br><span class="line">    <span class="keyword">for</span> (<span class="type">int</span> <span class="variable">i</span> <span class="operator">=</span> <span class="number">0</span>; i &lt;= CALLBACK_LAST; i++) &#123;</span><br><span class="line">        mCallbackQueues[i] = <span class="keyword">new</span> <span class="title class_">CallbackQueue</span>();</span><br><span class="line">    &#125;</span><br><span class="line">    ......</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-<h3 id="FrameHandler"><a href="#FrameHandler" class="headerlink" title="FrameHandler"></a>FrameHandler</h3><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">final</span> <span class="keyword">class</span> <span class="title class_">FrameHandler</span> <span class="keyword">extends</span> <span class="title class_">Handler</span> &#123;</span><br><span class="line">    ......</span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">handleMessage</span><span class="params">(Message msg)</span> &#123;</span><br><span class="line">        <span class="keyword">switch</span> (msg.what) &#123;</span><br><span class="line">            <span class="keyword">case</span> MSG_DO_FRAME:<span class="comment">// Start operation for the next frame</span></span><br><span class="line">                doFrame(System.nanoTime(), <span class="number">0</span>);</span><br><span class="line">                <span class="keyword">break</span>;</span><br><span class="line">            <span class="keyword">case</span> MSG_DO_SCHEDULE_VSYNC:<span class="comment">// Request Vsync </span></span><br><span class="line">                doScheduleVsync();</span><br><span class="line">                <span class="keyword">break</span>;</span><br><span class="line">            <span class="keyword">case</span> MSG_DO_SCHEDULE_CALLBACK:<span class="comment">// Handle Callback</span></span><br><span class="line">                doScheduleCallback(msg.arg1);</span><br><span class="line">                <span class="keyword">break</span>;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h3 id="FrameHandler"><a href="#FrameHandler" class="headerlink" title="FrameHandler"></a>FrameHandler</h3><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">final</span> <span class="keyword">class</span> <span class="title class_">FrameHandler</span> <span class="keyword">extends</span> <span class="title class_">Handler</span> &#123;</span><br><span class="line">    ......</span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">handleMessage</span><span class="params">(Message msg)</span> &#123;</span><br><span class="line">        <span class="keyword">switch</span> (msg.what) &#123;</span><br><span class="line">            <span class="keyword">case</span> MSG_DO_FRAME:<span class="comment">// Start operation for the next frame</span></span><br><span class="line">                doFrame(System.nanoTime(), <span class="number">0</span>);</span><br><span class="line">                <span class="keyword">break</span>;</span><br><span class="line">            <span class="keyword">case</span> MSG_DO_SCHEDULE_VSYNC:<span class="comment">// Request Vsync</span></span><br><span class="line">                doScheduleVsync();</span><br><span class="line">                <span class="keyword">break</span>;</span><br><span class="line">            <span class="keyword">case</span> MSG_DO_SCHEDULE_CALLBACK:<span class="comment">// Handle Callback</span></span><br><span class="line">                doScheduleCallback(msg.arg1);</span><br><span class="line">                <span class="keyword">break</span>;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <h3 id="Choreographer-Initialization-Chain"><a href="#Choreographer-Initialization-Chain" class="headerlink" title="Choreographer Initialization Chain"></a>Choreographer Initialization Chain</h3><p>During the Activity startup process, after <code>onResume</code> is executed, <code>Activity.makeVisible()</code> is called, and then <code>addView()</code> is called. The calls layer by layer enter the following method:</p>
-<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">ActivityThread.handleResumeActivity(IBinder, <span class="type">boolean</span>, <span class="type">boolean</span>, String) (android.app) </span><br><span class="line">--&gt;WindowManagerImpl.addView(View, LayoutParams) (android.view) </span><br><span class="line">  --&gt;WindowManagerGlobal.addView(View, LayoutParams, Display, Window) (android.view) </span><br><span class="line">    --&gt;ViewRootImpl.ViewRootImpl(Context, Display) (android.view) </span><br><span class="line">    <span class="keyword">public</span> <span class="title function_">ViewRootImpl</span><span class="params">(Context context, Display display)</span> &#123;</span><br><span class="line">        ......</span><br><span class="line">        mChoreographer = Choreographer.getInstance();</span><br><span class="line">        ......</span><br><span class="line">    &#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">ActivityThread.handleResumeActivity(IBinder, <span class="type">boolean</span>, <span class="type">boolean</span>, String) (android.app)</span><br><span class="line">--&gt;WindowManagerImpl.addView(View, LayoutParams) (android.view)</span><br><span class="line">  --&gt;WindowManagerGlobal.addView(View, LayoutParams, Display, Window) (android.view)</span><br><span class="line">    --&gt;ViewRootImpl.ViewRootImpl(Context, Display) (android.view)</span><br><span class="line">    <span class="keyword">public</span> <span class="title function_">ViewRootImpl</span><span class="params">(Context context, Display display)</span> &#123;</span><br><span class="line">        ......</span><br><span class="line">        mChoreographer = Choreographer.getInstance();</span><br><span class="line">        ......</span><br><span class="line">    &#125;</span><br></pre></td></tr></table></figure>
 <h2 id="Introduction-to-FrameDisplayEventReceiver"><a href="#Introduction-to-FrameDisplayEventReceiver" class="headerlink" title="Introduction to FrameDisplayEventReceiver"></a>Introduction to FrameDisplayEventReceiver</h2><p>Vsync registration, application, and reception are all done through the <code>FrameDisplayEventReceiver</code> class, so let’s introduce it simply first. <code>FrameDisplayEventReceiver</code> inherits from <code>DisplayEventReceiver</code> and has three important methods:</p>
 <ol>
 <li><code>onVsync</code> – Vsync signal callback</li>
 <li><code>run</code> – Execute <code>doFrame</code></li>
 <li><code>scheduleVsync</code>  – Request Vsync signal</li>
 </ol>
-<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">final</span> <span class="keyword">class</span> <span class="title class_">FrameDisplayEventReceiver</span> <span class="keyword">extends</span> <span class="title class_">DisplayEventReceiver</span> <span class="keyword">implements</span> <span class="title class_">Runnable</span> &#123;</span><br><span class="line">    ......</span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">onVsync</span><span class="params">(<span class="type">long</span> timestampNanos, <span class="type">long</span> physicalDisplayId, <span class="type">int</span> frame, VsyncEventData eventData)</span> &#123;</span><br><span class="line">        ......</span><br><span class="line">        mTimestampNanos = timestampNanos;</span><br><span class="line">        mFrame = frame;</span><br><span class="line">        <span class="comment">// VsyncEventData already existed in Android 13/14; newer versions further expanded fields</span></span><br><span class="line">        mVsyncEventData = eventData;</span><br><span class="line">        <span class="type">Message</span> <span class="variable">msg</span> <span class="operator">=</span> Message.obtain(mHandler, <span class="built_in">this</span>);</span><br><span class="line">        msg.setAsynchronous(<span class="literal">true</span>);</span><br><span class="line">        mHandler.sendMessageAtTime(msg, timestampNanos / TimeUtils.NANOS_PER_MS);</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">run</span><span class="params">()</span> &#123;</span><br><span class="line">        mHavePendingVsync = <span class="literal">false</span>;</span><br><span class="line">        doFrame(mTimestampNanos, mFrame, mVsyncEventData);</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">scheduleVsync</span><span class="params">()</span> &#123;</span><br><span class="line">        ......  </span><br><span class="line">        nativeScheduleVsync(mReceiverPtr);</span><br><span class="line">        ......</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">final</span> <span class="keyword">class</span> <span class="title class_">FrameDisplayEventReceiver</span> <span class="keyword">extends</span> <span class="title class_">DisplayEventReceiver</span> <span class="keyword">implements</span> <span class="title class_">Runnable</span> &#123;</span><br><span class="line">    ......</span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">onVsync</span><span class="params">(<span class="type">long</span> timestampNanos, <span class="type">long</span> physicalDisplayId, <span class="type">int</span> frame, VsyncEventData eventData)</span> &#123;</span><br><span class="line">        ......</span><br><span class="line">        mTimestampNanos = timestampNanos;</span><br><span class="line">        mFrame = frame;</span><br><span class="line">        <span class="comment">// VsyncEventData already existed in Android 13/14; newer versions further expanded fields</span></span><br><span class="line">        mVsyncEventData = eventData;</span><br><span class="line">        <span class="type">Message</span> <span class="variable">msg</span> <span class="operator">=</span> Message.obtain(mHandler, <span class="built_in">this</span>);</span><br><span class="line">        msg.setAsynchronous(<span class="literal">true</span>);</span><br><span class="line">        mHandler.sendMessageAtTime(msg, timestampNanos / TimeUtils.NANOS_PER_MS);</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">run</span><span class="params">()</span> &#123;</span><br><span class="line">        mHavePendingVsync = <span class="literal">false</span>;</span><br><span class="line">        doFrame(mTimestampNanos, mFrame, mVsyncEventData);</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">scheduleVsync</span><span class="params">()</span> &#123;</span><br><span class="line">        ......</span><br><span class="line">        nativeScheduleVsync(mReceiverPtr);</span><br><span class="line">        ......</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <h2 id="Vsync-Registration-in-Choreographer"><a href="#Vsync-Registration-in-Choreographer" class="headerlink" title="Vsync Registration in Choreographer"></a>Vsync Registration in Choreographer</h2><p>From the function call stack below, we can see that <code>Choreographer</code>‘s inner class <code>FrameDisplayEventReceiver.onVsync</code> is responsible for receiving Vsync callbacks and notifying UIThread to process data.</p>
 <p>So how does <code>FrameDisplayEventReceiver</code> callback <code>onVsync</code> when the Vsync signal arrives? The answer is that during the initialization of <code>FrameDisplayEventReceiver</code>, it finally listens to the file handle. The corresponding initialization process is as follows:</p>
 <p>android&#x2F;view&#x2F;Choreographer.java</p>
@@ -486,7 +497,7 @@ loading="lazy"             decoding="async"
 </li>
 </ol>
 <p>The entire communication flow is as follows:</p>
-<figure class="highlight gherkin"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br></pre></td><td class="code"><pre><span class="line">App Process                                    SurfaceFlinger Process</span><br><span class="line">  |<span class="string">                                             </span>|</span><br><span class="line">  |<span class="string">-- Create DisplayEventReceiver -------------&gt;</span>|</span><br><span class="line">  |<span class="string">                                             </span>|</span><br><span class="line">  |<span class="string">&lt;- Return IDisplayEventConnection (Binder)---</span>|</span><br><span class="line">  |<span class="string">                                             </span>|</span><br><span class="line">  |<span class="string">-- Create BitTube --------------------------&gt;</span>|</span><br><span class="line">  |<span class="string">                                             </span>|</span><br><span class="line">  |<span class="string">&lt;- File Descriptor Exchange -----------------</span>|</span><br><span class="line">  |<span class="string">                                             </span>|</span><br><span class="line">  |<span class="string">-- Register File Descriptor to Looper -------</span>|</span><br><span class="line">  |<span class="string">                                             </span>|</span><br><span class="line">  |<span class="string">-- Request Vsync (requestNextVsync) --------&gt;</span>|</span><br><span class="line">  |<span class="string">                                             </span>|</span><br><span class="line">  |<span class="string">&lt;- Send Vsync Event Data --------------------</span>|</span><br><span class="line">  |<span class="string">                                             </span>|</span><br><span class="line">  |<span class="string">-- Looper Notify -&gt; handleEvent -------------</span>|</span><br><span class="line">  |<span class="string">                                             </span>|</span><br><span class="line">  |<span class="string">-- Callback Java Layer onVsync --------------</span>|</span><br><span class="line">  |<span class="string">                                             </span>|</span><br></pre></td></tr></table></figure>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br></pre></td><td class="code"><pre><span class="line">App Process                                    SurfaceFlinger Process</span><br><span class="line">  |                                             |</span><br><span class="line">  |-- Create DisplayEventReceiver -------------&gt;|</span><br><span class="line">  |                                             |</span><br><span class="line">  |&lt;- Return IDisplayEventConnection (Binder)---|</span><br><span class="line">  |                                             |</span><br><span class="line">  |-- Create BitTube --------------------------&gt;|</span><br><span class="line">  |                                             |</span><br><span class="line">  |&lt;- File Descriptor Exchange -----------------|</span><br><span class="line">  |                                             |</span><br><span class="line">  |-- Register File Descriptor to Looper -------|</span><br><span class="line">  |                                             |</span><br><span class="line">  |-- Request Vsync (requestNextVsync) --------&gt;|</span><br><span class="line">  |                                             |</span><br><span class="line">  |&lt;- Send Vsync Event Data --------------------|</span><br><span class="line">  |                                             |</span><br><span class="line">  |-- Looper Notify -&gt; handleEvent -------------|</span><br><span class="line">  |                                             |</span><br><span class="line">  |-- Callback Java Layer onVsync --------------|</span><br><span class="line">  |                                             |</span><br></pre></td></tr></table></figure>
 
 <p>The advantage of this design is that it avoids using Binder to pass high-frequency Vsync event data, improving performance and real-time performance through direct socket communication, which is crucial for ensuring smooth UI rendering. At the same time, since BitTube uses file descriptors, it can be seamlessly integrated into Android’s Looper mechanism, enabling the entire system to work in an event-driven manner.</p>
 <h2 id="Logic-of-Choreographer-Processing-a-Frame"><a href="#Logic-of-Choreographer-Processing-a-Frame" class="headerlink" title="Logic of Choreographer Processing a Frame"></a>Logic of Choreographer Processing a Frame</h2><p>The core of Choreographer’s drawing logic is in the <code>Choreographer.doFrame</code> function. As can be seen from the figure below, <code>FrameDisplayEventReceiver.onVsync</code> posts itself, and its <code>run</code> method directly calls <code>doFrame</code> to start the logic processing of a frame.</p>
@@ -502,8 +513,8 @@ loading="lazy"             decoding="async"
 <p>From these <code>FrameInfo</code> flags, we can see the recorded content. Later when we look at <code>dumpsys gfxinfo</code>, the data is arranged according to this.</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br></pre></td><td class="code"><pre><span class="line"></span><br><span class="line"><span class="keyword">public</span> <span class="meta">@interface</span> FrameInfoFlags &#123;&#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">FRAME_TIMELINE_VSYNC_ID</span> <span class="operator">=</span> <span class="number">1</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// The intended vsync time, unadjusted by jitter</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">INTENDED_VSYNC</span> <span class="operator">=</span> <span class="number">2</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// Jitter-adjusted vsync time, this is what was used as input into the</span></span><br><span class="line">    <span class="comment">// animation &amp; drawing system</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">VSYNC</span> <span class="operator">=</span> <span class="number">3</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// The id of the input event that caused the current frame</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">INPUT_EVENT_ID</span> <span class="operator">=</span> <span class="number">4</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// When input event handling started</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">HANDLE_INPUT_START</span> <span class="operator">=</span> <span class="number">5</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// When animation evaluations started</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">ANIMATION_START</span> <span class="operator">=</span> <span class="number">6</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// When ViewRootImpl#performTraversals() started</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">PERFORM_TRAVERSALS_START</span> <span class="operator">=</span> <span class="number">7</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// When View:draw() started</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">DRAW_START</span> <span class="operator">=</span> <span class="number">8</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// When the frame needs to be ready by</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">FRAME_DEADLINE</span> <span class="operator">=</span> <span class="number">9</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// When frame actually started.</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">FRAME_START_TIME</span> <span class="operator">=</span> <span class="number">10</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// Interval between two consecutive frames</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">FRAME_INTERVAL</span> <span class="operator">=</span> <span class="number">11</span>;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
 <p>The <code>doFrame</code> function records the time from Vsync time to <code>markPerformTraversalsStart</code>.</p>
-<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> <span class="title function_">doFrame</span><span class="params">(<span class="type">long</span> frameTimeNanos, <span class="type">int</span> frame, VsyncEventData eventData)</span> &#123;</span><br><span class="line">    ......</span><br><span class="line">    mFrameInfo.setVsync(intendedFrameTimeNanos, frameTimeNanos);</span><br><span class="line">    <span class="comment">// Handle CALLBACK_INPUT Callbacks </span></span><br><span class="line">    mFrameInfo.markInputHandlingStart();</span><br><span class="line">    <span class="comment">// Handle CALLBACK_ANIMATION Callbacks</span></span><br><span class="line">    mFrameInfo.markAnimationsStart();</span><br><span class="line">    <span class="comment">// Handle CALLBACK_INSETS_ANIMATION Callbacks</span></span><br><span class="line">    <span class="comment">// Handle CALLBACK_TRAVERSAL Callbacks</span></span><br><span class="line">    mFrameInfo.markPerformTraversalsStart();</span><br><span class="line">    <span class="comment">// Handle CALLBACK_COMMIT Callbacks</span></span><br><span class="line">    ......</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-<h3 id="Executing-Callbacks"><a href="#Executing-Callbacks" class="headerlink" title="Executing Callbacks"></a>Executing Callbacks</h3><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> <span class="title function_">doFrame</span><span class="params">(<span class="type">long</span> frameTimeNanos, <span class="type">int</span> frame, VsyncEventData eventData)</span> &#123;</span><br><span class="line">    ......</span><br><span class="line">    <span class="comment">// Handle CALLBACK_INPUT Callbacks </span></span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_INPUT, frameTimeNanos);</span><br><span class="line">    <span class="comment">// Handle CALLBACK_ANIMATION Callbacks</span></span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_ANIMATION, frameTimeNanos);</span><br><span class="line">    <span class="comment">// Handle CALLBACK_INSETS_ANIMATION Callbacks</span></span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_INSETS_ANIMATION, frameTimeNanos);</span><br><span class="line">    <span class="comment">// Handle CALLBACK_TRAVERSAL Callbacks</span></span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_TRAVERSAL, frameTimeNanos);</span><br><span class="line">    <span class="comment">// Handle CALLBACK_COMMIT Callbacks</span></span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_COMMIT, frameTimeNanos);</span><br><span class="line">    ......</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> <span class="title function_">doFrame</span><span class="params">(<span class="type">long</span> frameTimeNanos, <span class="type">int</span> frame, VsyncEventData eventData)</span> &#123;</span><br><span class="line">    ......</span><br><span class="line">    mFrameInfo.setVsync(intendedFrameTimeNanos, frameTimeNanos);</span><br><span class="line">    <span class="comment">// Handle CALLBACK_INPUT Callbacks</span></span><br><span class="line">    mFrameInfo.markInputHandlingStart();</span><br><span class="line">    <span class="comment">// Handle CALLBACK_ANIMATION Callbacks</span></span><br><span class="line">    mFrameInfo.markAnimationsStart();</span><br><span class="line">    <span class="comment">// Handle CALLBACK_INSETS_ANIMATION Callbacks</span></span><br><span class="line">    <span class="comment">// Handle CALLBACK_TRAVERSAL Callbacks</span></span><br><span class="line">    mFrameInfo.markPerformTraversalsStart();</span><br><span class="line">    <span class="comment">// Handle CALLBACK_COMMIT Callbacks</span></span><br><span class="line">    ......</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h3 id="Executing-Callbacks"><a href="#Executing-Callbacks" class="headerlink" title="Executing Callbacks"></a>Executing Callbacks</h3><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> <span class="title function_">doFrame</span><span class="params">(<span class="type">long</span> frameTimeNanos, <span class="type">int</span> frame, VsyncEventData eventData)</span> &#123;</span><br><span class="line">    ......</span><br><span class="line">    <span class="comment">// Handle CALLBACK_INPUT Callbacks</span></span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_INPUT, frameTimeNanos);</span><br><span class="line">    <span class="comment">// Handle CALLBACK_ANIMATION Callbacks</span></span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_ANIMATION, frameTimeNanos);</span><br><span class="line">    <span class="comment">// Handle CALLBACK_INSETS_ANIMATION Callbacks</span></span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_INSETS_ANIMATION, frameTimeNanos);</span><br><span class="line">    <span class="comment">// Handle CALLBACK_TRAVERSAL Callbacks</span></span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_TRAVERSAL, frameTimeNanos);</span><br><span class="line">    <span class="comment">// Handle CALLBACK_COMMIT Callbacks</span></span><br><span class="line">    doCallbacks(Choreographer.CALLBACK_COMMIT, frameTimeNanos);</span><br><span class="line">    ......</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p><strong>Input Callback Call Stack</strong></p>
 <p><strong>input callback</strong> generally executes <code>ViewRootImpl.ConsumeBatchedInputRunnable</code></p>
 <p>android&#x2F;view&#x2F;ViewRootImpl.java</p>
@@ -600,7 +611,7 @@ loading="lazy"             decoding="async"
 
 <p>In Perfetto UI, you can find the event named “Choreographer#doFrame”, which shows the processing time and details of each frame. You can also check the collaboration relationship between the UI thread and RenderThread, and the interaction with SurfaceFlinger.</p>
 <h2 id="Use-framestats-internally-backed-by-FrameInfo-for-Monitoring"><a href="#Use-framestats-internally-backed-by-FrameInfo-for-Monitoring" class="headerlink" title="Use framestats (internally backed by FrameInfo) for Monitoring"></a>Use framestats (internally backed by FrameInfo) for Monitoring</h2><p><code>adb shell dumpsys gfxinfo &lt;packagename&gt; framestats</code></p>
-<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line">Window: StatusBar</span><br><span class="line">Stats since: 17990256398ns</span><br><span class="line">Total frames rendered: 1562</span><br><span class="line">Janky frames: 361 (23.11%)</span><br><span class="line">50th percentile: 6ms</span><br><span class="line">90th percentile: 23ms</span><br><span class="line">95th percentile: 36ms</span><br><span class="line">99th percentile: 101ms</span><br><span class="line">Number Missed Vsync: 33</span><br><span class="line">Number High input latency: 683</span><br><span class="line">Number Slow UI thread: 273</span><br><span class="line">Number Slow bitmap uploads: 8</span><br><span class="line">Number Slow issue draw commands: 18</span><br><span class="line">Number Frame deadline missed: 287</span><br><span class="line">HISTOGRAM: 5ms=670 6ms=128 7ms=84 8ms=63 9ms=38 10ms=23 11ms=21 12ms=20 13ms=25 14ms=39 15ms=65 16ms=36 17ms=51 18ms=37 19ms=41 20ms=20 21ms=19 22ms=18 23ms=15 24ms=14 25ms=8 26ms=4 27ms=6 28ms=3 29ms=4 30ms=2 31ms=2 32ms=6 34ms=12 36ms=10 38ms=9 40ms=3 42ms=4 44ms=5 46ms=8 48ms=6 53ms=6 57ms=4 61ms=1 65ms=0 69ms=2 73ms=2 77ms=3 81ms=4 85ms=1 89ms=2 93ms=0 97ms=2 101ms=1 105ms=1 109ms=1 113ms=1 117ms=1 121ms=2 125ms=1 129ms=0 133ms=1 150ms=2 200ms=3 250ms=0 300ms=1 350ms=1 400ms=0 450ms=0 500ms=0 550ms=0 600ms=0 650ms=0 </span><br><span class="line"></span><br><span class="line">---PROFILEDATA---</span><br><span class="line">Flags,IntendedVsync,Vsync,OldestInputEvent,NewestInputEvent,HandleInputStart,AnimationStart,PerformTraversalsStart,DrawStart,SyncQueued,SyncStart,IssueDrawCommandsStart,SwapBuffers,FrameCompleted,DequeueBufferDuration,QueueBufferDuration,</span><br><span class="line">0,10158314881426,10158314881426,9223372036854775807,0,10158315693363,10158315760759,10158315769821,10158316032165,10158316627842,10158316838988,10158318055915,10158320387269,10158321770654,428000,773000,</span><br><span class="line">0,10158332036261,10158332036261,9223372036854775807,0,10158332799196,10158332868519,10158332877269,10158333137738,10158333780654,10158333993206,10158335078467,10158337689561,10158339307061,474000,885000,</span><br><span class="line">0,10158348665353,10158348665353,9223372036854775807,0,10158349710238,10158349773102,10158349780863,10158350405863,10158351135967,10158351360446,10158352300863,10158354305654,10158355814509,471000,836000,</span><br><span class="line">0,10158365296729,10158365296729,9223372036854775807,0,10158365782373,10158365821019,10158365825238,10158365975290,10158366547946,10158366687217,10158367240706,10158368429248,10158369291852,269000,476000,</span><br></pre></td></tr></table></figure>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line">Window: StatusBar</span><br><span class="line">Stats since: 17990256398ns</span><br><span class="line">Total frames rendered: 1562</span><br><span class="line">Janky frames: 361 (23.11%)</span><br><span class="line">50th percentile: 6ms</span><br><span class="line">90th percentile: 23ms</span><br><span class="line">95th percentile: 36ms</span><br><span class="line">99th percentile: 101ms</span><br><span class="line">Number Missed Vsync: 33</span><br><span class="line">Number High input latency: 683</span><br><span class="line">Number Slow UI thread: 273</span><br><span class="line">Number Slow bitmap uploads: 8</span><br><span class="line">Number Slow issue draw commands: 18</span><br><span class="line">Number Frame deadline missed: 287</span><br><span class="line">HISTOGRAM: 5ms=670 6ms=128 7ms=84 8ms=63 9ms=38 10ms=23 11ms=21 12ms=20 13ms=25 14ms=39 15ms=65 16ms=36 17ms=51 18ms=37 19ms=41 20ms=20 21ms=19 22ms=18 23ms=15 24ms=14 25ms=8 26ms=4 27ms=6 28ms=3 29ms=4 30ms=2 31ms=2 32ms=6 34ms=12 36ms=10 38ms=9 40ms=3 42ms=4 44ms=5 46ms=8 48ms=6 53ms=6 57ms=4 61ms=1 65ms=0 69ms=2 73ms=2 77ms=3 81ms=4 85ms=1 89ms=2 93ms=0 97ms=2 101ms=1 105ms=1 109ms=1 113ms=1 117ms=1 121ms=2 125ms=1 129ms=0 133ms=1 150ms=2 200ms=3 250ms=0 300ms=1 350ms=1 400ms=0 450ms=0 500ms=0 550ms=0 600ms=0 650ms=0</span><br><span class="line"></span><br><span class="line">---PROFILEDATA---</span><br><span class="line">Flags,IntendedVsync,Vsync,OldestInputEvent,NewestInputEvent,HandleInputStart,AnimationStart,PerformTraversalsStart,DrawStart,SyncQueued,SyncStart,IssueDrawCommandsStart,SwapBuffers,FrameCompleted,DequeueBufferDuration,QueueBufferDuration,</span><br><span class="line">0,10158314881426,10158314881426,9223372036854775807,0,10158315693363,10158315760759,10158315769821,10158316032165,10158316627842,10158316838988,10158318055915,10158320387269,10158321770654,428000,773000,</span><br><span class="line">0,10158332036261,10158332036261,9223372036854775807,0,10158332799196,10158332868519,10158332877269,10158333137738,10158333780654,10158333993206,10158335078467,10158337689561,10158339307061,474000,885000,</span><br><span class="line">0,10158348665353,10158348665353,9223372036854775807,0,10158349710238,10158349773102,10158349780863,10158350405863,10158351135967,10158351360446,10158352300863,10158354305654,10158355814509,471000,836000,</span><br><span class="line">0,10158365296729,10158365296729,9223372036854775807,0,10158365782373,10158365821019,10158365825238,10158365975290,10158366547946,10158366687217,10158367240706,10158368429248,10158369291852,269000,476000,</span><br></pre></td></tr></table></figure>
 <h2 id="Use-SurfaceFlinger-for-Monitoring"><a href="#Use-SurfaceFlinger-for-Monitoring" class="headerlink" title="Use SurfaceFlinger for Monitoring"></a>Use SurfaceFlinger for Monitoring</h2><p>Command explanation:</p>
 <ol>
 <li>The unit of data is nanoseconds, and the time starts from the boot time</li>
@@ -678,8 +689,6 @@ loading="lazy"             decoding="async"
 <p><strong>One person can go faster, a group of people can go further</strong></p>
 </blockquote>
 <p><img src="/en/images/WechatIMG581.webp" alt="Wechat Scan"></p>
-<pre><code>
-</code></pre>
 
     </article>
     <!-- license -->
@@ -687,7 +696,7 @@ loading="lazy"             decoding="async"
             <p>Author：<a href="https://androidperformance.com/en">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">https://androidperformance.com/en/2025/03/26/Android-Perfetto-05-Chorergrapher/</a>
             <p>Publish date：<a href="https://androidperformance.com/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">March 26th 2025, 6:55:11 pm</a>
-            <p>Update date：<a href="https://androidperformance.com/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">April 18th 2026, 3:32:44 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">May 4th 2026, 5:45:19 pm</a>
             <p>License：This work is licensed under <a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a></p>
         </div>
     <!-- paginator -->
@@ -908,7 +917,6 @@ loading="lazy"             decoding="async"
         <div class="total-archive">
         Total : 127
         </div>
-        <!-- search  -->
     </div>
     <div class="post-archive">
             <div class="archive-year"> 2026 </div>
@@ -974,11 +982,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/08</span>
-            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/08</span>
-            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
         </li>
                 </ul>
             <div class="archive-year"> 2024 </div>
@@ -1039,11 +1047,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/07</span>
-            <a class="archive-post-title" href="/en/2022/01/07/The-Performace-1-Performance-Tools/">Android Performance Optimization: Techniques, Methods, and Tools</a>
+            <a class="archive-post-title" href="/en/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/07</span>
-            <a class="archive-post-title" href="/en/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+            <a class="archive-post-title" href="/en/2022/01/07/The-Performace-1-Performance-Tools/">Android Performance Optimization: Techniques, Methods, and Tools</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/03</span>
@@ -1062,11 +1070,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/13</span>
-            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace Responsiveness in Action 1 - Understanding Responsiveness Principles</a>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace Responsiveness in Action 2 - Responsiveness Analysis - Using App Startup as an Example</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/13</span>
-            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace Responsiveness in Action 2 - Responsiveness Analysis - Using App Startup as an Example</a>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace Responsiveness in Action 1 - Understanding Responsiveness Principles</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/13</span>
@@ -1074,7 +1082,7 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
-            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace Smoothness in Action 3 - FAQs During Jank Analysis</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
@@ -1082,7 +1090,7 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
-            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace Smoothness in Action 3 - FAQs During Jank Analysis</a>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
         </li>
                 </ul>
             <div class="archive-year"> 2020 </div>
@@ -1168,11 +1176,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
-            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
-            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
@@ -1344,7 +1352,7 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">07/20</span>
-            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-AndroidResource/">Android Code Memory Optimization Suggestions - Android Resources</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">07/20</span>
@@ -1352,7 +1360,7 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">07/20</span>
-            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-AndroidResource/">Android Code Memory Optimization Suggestions - Android Resources</a>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/29</span>
@@ -1368,11 +1376,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/19</span>
-            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-3/">Android Performance Patterns: Understanding VSYNC</a>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns/">Overview of Android Performance Patterns</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/19</span>
-            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns/">Overview of Android Performance Patterns</a>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-3/">Android Performance Patterns: Understanding VSYNC</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/19</span>
@@ -1388,15 +1396,19 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/11</span>
-            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/11</span>
-            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/31</span>
             <a class="archive-post-title" href="/en/2015/03/31/android-performance-case-study-follow-up/">Android Performance Case Study Follow-up</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/15</span>
@@ -1405,10 +1417,6 @@ loading="lazy"             decoding="async"
         <li class="archive-post-item">
             <span class="archive-post-date">03/15</span>
             <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-4/">Android Tips Round-Up, Part 4</a>
-        </li>
-        <li class="archive-post-item">
-            <span class="archive-post-date">03/15</span>
-            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/04</span>
@@ -1463,25 +1471,9 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-tags">
     <div class="sidebar-tags-name">
-            <span class="sidebar-tag-name" data-tags="Yearly Recommendations">
-                <span class="iconfont-archer">&#xe606;</span>
-                Yearly Recommendations
-            </span>
-            <span class="sidebar-tag-name" data-tags="Startup">
-                <span class="iconfont-archer">&#xe606;</span>
-                Startup
-            </span>
-            <span class="sidebar-tag-name" data-tags="Memory">
-                <span class="iconfont-archer">&#xe606;</span>
-                Memory
-            </span>
             <span class="sidebar-tag-name" data-tags="Android">
                 <span class="iconfont-archer">&#xe606;</span>
                 Android
-            </span>
-            <span class="sidebar-tag-name" data-tags="Jank">
-                <span class="iconfont-archer">&#xe606;</span>
-                Jank
             </span>
             <span class="sidebar-tag-name" data-tags="Perfetto">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1491,6 +1483,14 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Systrace
             </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
             <span class="sidebar-tag-name" data-tags="Year in Review">
                 <span class="iconfont-archer">&#xe606;</span>
                 Year in Review
@@ -1498,6 +1498,14 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Knowledge Planet">
                 <span class="iconfont-archer">&#xe606;</span>
                 Knowledge Planet
+            </span>
+            <span class="sidebar-tag-name" data-tags="Yearly Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Yearly Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
             </span>
             <span class="sidebar-tag-name" data-tags="Essays">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1507,10 +1515,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 ANR
             </span>
-            <span class="sidebar-tag-name" data-tags="RenderThread">
-                <span class="iconfont-archer">&#xe606;</span>
-                RenderThread
-            </span>
             <span class="sidebar-tag-name" data-tags="Performance">
                 <span class="iconfont-archer">&#xe606;</span>
                 Performance
@@ -1519,6 +1523,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Tools
             </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
             <span class="sidebar-tag-name" data-tags="DelayLoad">
                 <span class="iconfont-archer">&#xe606;</span>
                 DelayLoad
@@ -1526,6 +1534,14 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Java">
                 <span class="iconfont-archer">&#xe606;</span>
                 Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
             </span>
             <span class="sidebar-tag-name" data-tags="Agent OS">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1542,26 +1558,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Mobile OS">
                 <span class="iconfont-archer">&#xe606;</span>
                 Mobile OS
-            </span>
-            <span class="sidebar-tag-name" data-tags="Framework">
-                <span class="iconfont-archer">&#xe606;</span>
-                Framework
-            </span>
-            <span class="sidebar-tag-name" data-tags="Linux">
-                <span class="iconfont-archer">&#xe606;</span>
-                Linux
-            </span>
-            <span class="sidebar-tag-name" data-tags="Binder">
-                <span class="iconfont-archer">&#xe606;</span>
-                Binder
-            </span>
-            <span class="sidebar-tag-name" data-tags="Locking">
-                <span class="iconfont-archer">&#xe606;</span>
-                Locking
-            </span>
-            <span class="sidebar-tag-name" data-tags="Scheduling">
-                <span class="iconfont-archer">&#xe606;</span>
-                Scheduling
             </span>
             <span class="sidebar-tag-name" data-tags="Performance Optimization">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1587,6 +1583,18 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Page Response
             </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="Locking">
+                <span class="iconfont-archer">&#xe606;</span>
+                Locking
+            </span>
+            <span class="sidebar-tag-name" data-tags="Scheduling">
+                <span class="iconfont-archer">&#xe606;</span>
+                Scheduling
+            </span>
             <span class="sidebar-tag-name" data-tags="MAT">
                 <span class="iconfont-archer">&#xe606;</span>
                 MAT
@@ -1595,45 +1603,21 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Programmer
             </span>
-            <span class="sidebar-tag-name" data-tags="HashMap">
+            <span class="sidebar-tag-name" data-tags="Nexus">
                 <span class="iconfont-archer">&#xe606;</span>
-                HashMap
+                Nexus
             </span>
             <span class="sidebar-tag-name" data-tags="Singleton">
                 <span class="iconfont-archer">&#xe606;</span>
                 Singleton
             </span>
-            <span class="sidebar-tag-name" data-tags="Annual Recommendations">
-                <span class="iconfont-archer">&#xe606;</span>
-                Annual Recommendations
-            </span>
-            <span class="sidebar-tag-name" data-tags="Nexus">
-                <span class="iconfont-archer">&#xe606;</span>
-                Nexus
-            </span>
             <span class="sidebar-tag-name" data-tags="OpenClaw">
                 <span class="iconfont-archer">&#xe606;</span>
                 OpenClaw
             </span>
-            <span class="sidebar-tag-name" data-tags="Productivity Tools">
-                <span class="iconfont-archer">&#xe606;</span>
-                Productivity Tools
-            </span>
-            <span class="sidebar-tag-name" data-tags="Local Models">
-                <span class="iconfont-archer">&#xe606;</span>
-                Local Models
-            </span>
             <span class="sidebar-tag-name" data-tags="AI Agent">
                 <span class="iconfont-archer">&#xe606;</span>
                 AI Agent
-            </span>
-            <span class="sidebar-tag-name" data-tags="SmartPerfetto">
-                <span class="iconfont-archer">&#xe606;</span>
-                SmartPerfetto
-            </span>
-            <span class="sidebar-tag-name" data-tags="MCP">
-                <span class="iconfont-archer">&#xe606;</span>
-                MCP
             </span>
             <span class="sidebar-tag-name" data-tags="Sharp Tools">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1643,21 +1627,33 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Productivity
             </span>
-            <span class="sidebar-tag-name" data-tags="Design Specs">
+            <span class="sidebar-tag-name" data-tags="Annual Recommendations">
                 <span class="iconfont-archer">&#xe606;</span>
-                Design Specs
+                Annual Recommendations
             </span>
-            <span class="sidebar-tag-name" data-tags="Compose">
+            <span class="sidebar-tag-name" data-tags="SmartPerfetto">
                 <span class="iconfont-archer">&#xe606;</span>
-                Compose
+                SmartPerfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="MCP">
+                <span class="iconfont-archer">&#xe606;</span>
+                MCP
+            </span>
+            <span class="sidebar-tag-name" data-tags="Open Source">
+                <span class="iconfont-archer">&#xe606;</span>
+                Open Source
             </span>
             <span class="sidebar-tag-name" data-tags="Kotlin">
                 <span class="iconfont-archer">&#xe606;</span>
                 Kotlin
             </span>
-            <span class="sidebar-tag-name" data-tags="Process">
+            <span class="sidebar-tag-name" data-tags="Compose">
                 <span class="iconfont-archer">&#xe606;</span>
-                Process
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Specs">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Specs
             </span>
             <span class="sidebar-tag-name" data-tags="Stutter">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1667,9 +1663,21 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Overdraw
             </span>
-            <span class="sidebar-tag-name" data-tags="Open Source">
+            <span class="sidebar-tag-name" data-tags="Productivity Tools">
                 <span class="iconfont-archer">&#xe606;</span>
-                Open Source
+                Productivity Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Local Models">
+                <span class="iconfont-archer">&#xe606;</span>
+                Local Models
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
             </span>
             <span class="sidebar-tag-name" data-tags="Reading Notes">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1683,13 +1691,17 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Design Principles
             </span>
+            <span class="sidebar-tag-name" data-tags="User Experience">
+                <span class="iconfont-archer">&#xe606;</span>
+                User Experience
+            </span>
             <span class="sidebar-tag-name" data-tags="Testing">
                 <span class="iconfont-archer">&#xe606;</span>
                 Testing
             </span>
-            <span class="sidebar-tag-name" data-tags="User Experience">
+            <span class="sidebar-tag-name" data-tags="Internet">
                 <span class="iconfont-archer">&#xe606;</span>
-                User Experience
+                Internet
             </span>
             <span class="sidebar-tag-name" data-tags="Reading">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1699,17 +1711,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Game Programming
             </span>
-            <span class="sidebar-tag-name" data-tags="Internet">
+            <span class="sidebar-tag-name" data-tags="Community">
                 <span class="iconfont-archer">&#xe606;</span>
-                Internet
+                Community
             </span>
             <span class="sidebar-tag-name" data-tags="Liqi">
                 <span class="iconfont-archer">&#xe606;</span>
                 Liqi
-            </span>
-            <span class="sidebar-tag-name" data-tags="Community">
-                <span class="iconfont-archer">&#xe606;</span>
-                Community
             </span>
             <span class="sidebar-tag-name" data-tags="Smooth">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1729,14 +1737,6 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-categories">
     <div class="sidebar-categories-name">
-        <span class="sidebar-category-name" data-categories="Casual Notes">
-            <span class="iconfont-archer">&#xe60a;</span>
-            Casual Notes
-        </span>
-        <span class="sidebar-category-name" data-categories="Reading Notes">
-            <span class="iconfont-archer">&#xe60a;</span>
-            Reading Notes
-        </span>
         <span class="sidebar-category-name" data-categories="Essays">
             <span class="iconfont-archer">&#xe60a;</span>
             Essays
@@ -1744,6 +1744,14 @@ loading="lazy"             decoding="async"
         <span class="sidebar-category-name" data-categories="Android">
             <span class="iconfont-archer">&#xe60a;</span>
             Android
+        </span>
+        <span class="sidebar-category-name" data-categories="Reading Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Reading Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Casual Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Casual Notes
         </span>
         <span class="sidebar-category-name" data-categories="Java">
             <span class="iconfont-archer">&#xe60a;</span>
@@ -1874,7 +1882,37 @@ loading="lazy"             decoding="async"
     })();
 </script>
 
-        <!-- algolia -->
+        <!-- search -->
+            <div class="site-search site-search-loading local-search-shell">
+    <div class="algolia-popup popup local-search-popup" role="dialog" aria-modal="true" aria-label="Search posts">
+        <div class="algolia-search local-search-header">
+            <div class="algolia-search-input-icon">
+                <i class="iconfont-archer">&#xe627;</i>
+            </div>
+            <div class="algolia-search-input local-search-input">
+                <input id="local-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search for Posts">
+            </div>
+            <button class="popup-btn-close local-search-close" type="button" aria-label="Close search">
+                <i class="iconfont-archer" aria-hidden="true">&#xe609;</i>
+            </button>
+        </div>
+
+        <div class="algolia-results local-search-results">
+            <div
+                id="local-search-config"
+                data-path="/en/search.xml"
+                data-per-page="10"
+                data-empty="We did not find any results for: ${query}"
+                data-stats="${hits} results found"
+                data-loading="Loading search index..."
+                data-error="Failed to load the search index. Please try again later."></div>
+            <div id="local-search-stats" class="algolia-stats"></div>
+            <div id="local-search-hits"></div>
+        </div>
+    </div>
+</div>
+
+            <script src="/en/scripts/local-search.js" async></script>
         <!-- async load share.js on first click -->
             <script>
                 (function(){

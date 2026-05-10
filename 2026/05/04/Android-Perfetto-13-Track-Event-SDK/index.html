@@ -1,0 +1,1908 @@
+<!DOCTYPE html>
+<html lang="zh,en">
+    <!-- title -->
+            <!-- keywords -->
+
+                  <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <meta name="author" content="Gracker">
+                    <meta name="renderer" content="webkit">
+                    <meta name="copyright" content="Gracker">
+                      <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,启动优化,Startup,Perfetto,Systrace,RenderThread,Java">
+                          <meta name="description" content="Focus On Android Performance">
+                          <meta name="description" content="系统 Trace 能告诉你线程什么时候运行、CPU 跑在哪个核、FrameTimeline 哪一帧超时；在启用 Binder&#x2F;ftrace&#x2F;sched 证据时，也能还原 Binder 调用和等待线索。但它不知道播放器正在解哪一个 frame id，也不知道游戏引擎正在加载哪个 scene，更不知道一个业务任务在队列里排了多久。 第 13 篇只回答一个问题：业务语义怎么进入 Tr">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Android Perfetto 系列 13：用 Track Event 给系统 Trace 补业务语义">
+<meta property="og:url" content="https://androidperformance.com/2026/05/04/Android-Perfetto-13-Track-Event-SDK/index.html">
+<meta property="og:site_name" content="Android Performance">
+<meta property="og:description" content="系统 Trace 能告诉你线程什么时候运行、CPU 跑在哪个核、FrameTimeline 哪一帧超时；在启用 Binder&#x2F;ftrace&#x2F;sched 证据时，也能还原 Binder 调用和等待线索。但它不知道播放器正在解哪一个 frame id，也不知道游戏引擎正在加载哪个 scene，更不知道一个业务任务在队列里排了多久。 第 13 篇只回答一个问题：业务语义怎么进入 Tr">
+<meta property="og:locale">
+<meta property="article:published_time" content="2026-05-04T02:13:00.000Z">
+<meta property="article:modified_time" content="2026-05-10T23:29:51.638Z">
+<meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Android">
+<meta property="article:tag" content="Perfetto">
+<meta property="article:tag" content="Performance">
+<meta property="article:tag" content="SDK">
+<meta property="article:tag" content="TraceEvent">
+<meta name="twitter:card" content="summary">
+                            <meta http-equiv="Cache-control" content="no-cache">
+                            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+                            <link rel="icon" href="/assets/favicon.ico">
+                                <title>
+                                  Android Perfetto 系列 13：用 Track Event 给系统 Trace 补业务语义 · Android Performance
+                                </title><meta name="robots" content="noindex">
+                                
+<link rel="canonical" href="https://androidperformance.com/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">
+                                  <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/font/Oswald-Regular.woff2") format('woff2'),
+             url("/font/Oswald-Regular.ttf") format('truetype');
+        font-display: swap;
+    }
+
+    body {
+        margin: 0;
+    }
+
+    /* Removed initial hide to show content immediately */
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(
+            -45deg,
+            #444 0,
+            #444 80px,
+            #333 80px,
+            #333 160px
+        );
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+</style>
+
+                                    <link id="stylesheet-base" rel="stylesheet" href="/css/style.css">
+                                    <link id="stylesheet-mobile" rel="stylesheet" href="/css/mobile.css" media="screen and (max-width: 960px)">
+                                    <link id="stylesheet-theme-dark" rel="stylesheet" href="/css/dark.css">
+                                    <link id="stylesheet-custom" rel="stylesheet" href="/css/custom.css">
+                                    <link rel="preload" href="/lib/jquery.min.js" as="script">
+                                    <link rel="preload" href="/scripts/main.js" as="script">
+                                    <!-- algolia -->
+                                                    <!-- Hreflang Tags -->
+                                                    
+                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2026/05/04/Android-Perfetto-13-Track-Event-SDK/" />
+                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/" />
+                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/" />
+                  <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/atom.xml" title="Android Performance" type="application/atom+xml">
+</head>
+
+        <body class="post-body">
+        <!-- header -->
+        <header class="header header-mobile">
+    <!-- top read progress line -->
+    <div class="header-element">
+        <div class="read-progress"></div>
+    </div>
+    <!-- sidebar menu button -->
+    <div class="header-element">
+        <div
+            class="header-sidebar-menu">
+                    <div style="padding-left: 1px;">&#xe775;</div>
+        </div>
+    </div>
+    <!-- header actions -->
+    <div class="header-actions">
+        <!-- search button -->
+            <span class="header-search-btn header-element popup-trigger" role="button" aria-label="Search" data-tooltip="Search">
+                <span class="iconfont-archer search-icon" aria-hidden="true">&#xe627;</span>
+            </span>
+        <!-- theme mode switch button -->
+        <span class="header-theme-btn header-element" role="button" aria-label="Theme" data-tooltip="Theme">
+            <span aria-hidden="true">&#9680;</span>
+        </span>
+        <!-- language transition button -->
+        <span class="header-lang-btn header-element" data-tooltip="Language">
+            <a href="javascript:void(0)" onclick="toggleLanguage()" class="lang-text" aria-label="Language">EN</a>
+            <script>
+                // Update language button text based on current path
+                (function() {
+                    var path = window.location.pathname;
+                    var isEn = /^\/en(\/|$)/.test(path);
+                    var langBtn = document.querySelector('.header-lang-btn .lang-text');
+                    if (langBtn) {
+                        langBtn.textContent = isEn ? 'CN' : 'EN';
+                    }
+                })();
+                
+                function toggleLanguage() {
+                    var path = window.location.pathname;
+                    var isEn = /^\/en(\/|$)/.test(path);
+
+                    if (isEn) {
+                        var newPath = path.replace(/^\/en(\/|$)/, '/');
+                        if (newPath === '') newPath = '/';
+                        window.location.href = newPath;
+                    } else {
+                        var suffix = path;
+                        if (suffix === '/') suffix = '';
+                        window.location.href = '/en' + suffix;
+                    }
+                }
+            </script>
+        </span>
+        <!-- home button -->
+        <span class="home-link header-element">
+            <a href="/" aria-label="Home" data-tooltip="Home">
+                <svg class="home-icon" aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="m3 10.5 9-7 9 7"></path>
+                    <path d="M5 9.5V21h14V9.5"></path>
+                    <path d="M10 21v-6h4v6"></path>
+                </svg>
+            </a>
+        </span>
+    </div>
+    <!-- toggle banner -->
+                <div class="banner">
+                        <div class="blog-title header-element">
+                            <a href="/">
+                                Android Performance
+                            </a>
+                        </div>
+                        <div class="post-title header-element">
+                            <a href="#" class="post-name">Android Perfetto 系列 13：用 Track Event 给系统 Trace 补业务语义</a>
+                        </div>
+                </div>
+</header>
+
+        <!-- fixed footer -->
+        <footer class="footer-fixed">
+    <!-- donate button -->
+    <div class="donate-popup donate-popup--hidden">
+    <div class="donate-popup__title">Buy Me A Coffee</div>
+    <div class="donate-popup__content">
+        <div class="donate-popup__content-description">如果觉得文章还不错，打赏一杯咖啡吧.</div>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Wechat"
+            alt="Wechat"
+            src="/assets/donate-wechat.webp"
+        ></img>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Alipay"
+            alt="Alipay"
+            src="/assets/donate-alipay.png"
+        ></img>
+    </div>
+</div>
+
+    <div
+        title="Donate to the author"
+        class="footer-fixed-btn footer-fixed-btn--hidden donate-btn"
+    >
+        <span aria-hidden="true">&#165;</span>
+    </div>
+
+    <!-- back to top button -->
+    <div class="footer-fixed-btn footer-fixed-btn--hidden back-top">
+        <div>&#xe639;</div>
+    </div>
+</footer>
+
+        <!-- wrapper -->
+        <div class="wrapper">
+            <div class="site-intro" style="    height:50vh;
+">
+    <!-- 主页  -->
+    <!-- 404页  -->
+    <div class="site-intro-placeholder"></div>
+    <picture>
+            <source type="image/webp" srcset="/intro/post-bg.webp">
+        <img class="site-intro-img"
+             src="/intro/post-bg.jpg"
+             alt=""
+loading="lazy"             decoding="async"
+             fetchpriority="auto"
+             sizes="100vw">
+    </picture>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+                Android Perfetto 系列 13：用 Track Event 给系统 Trace 补业务语义
+            <!-- 404 -->
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            <!-- 404 -->
+        </p>
+        <!-- 文章页 meta -->
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                    <div class="post-intro-tags" >
+        <span class="post-category" data-categories="Android">
+            <span class="iconfont-archer post-category-icon" aria-hidden="true">&#xe666;</span>
+            <span class="post-category-text">
+                Android
+            </span>
+        </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="SDK">SDK</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="TraceEvent">TraceEvent</a>
+</div>
+
+                <!-- 文章字数统计 -->
+                    <div class="post-intro-read">
+                        <span>Word count: <span class="post-count word-count">7.2k</span>Reading time: <span class="post-count reading-time">31 min</span></span>
+                    </div>
+                <div class="post-intro-meta">
+                    <!-- 撰写日期 -->
+                    <span class="iconfont-archer post-intro-calander">&#xe676;</span>
+                    <span class="post-intro-time">2026/05/04</span>
+                    <!-- 文章分享 -->
+                    <span class="share-wrapper">
+                        <span class="iconfont-archer share-icon">&#xe71d;</span>
+                        <span class="share-text">Share</span>
+                        <ul class="share-list">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+    </div>
+</div>
+
+            
+            <script>
+  (function () {
+    var done = false
+
+    function fontLoaded() {
+      if (done) return
+      done = true
+
+      var introTitle = document.getElementsByClassName('intro-title')[0]
+      var introSubtitle = document.getElementsByClassName('intro-subtitle')[0]
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+
+      if (introTitle) introTitle.classList.add('intro-fade-in')
+      if (introSubtitle) introSubtitle.classList.add('intro-fade-in')
+      if (postIntros) postIntros.classList.add('post-fade-in')
+    }
+
+    function waitForLocalFont() {
+      if (document.fonts && document.fonts.load) {
+        Promise.race([
+          document.fonts.load('1em Oswald-Regular'),
+          new Promise(function (resolve) { setTimeout(resolve, 1000) })
+        ]).then(fontLoaded, fontLoaded)
+      } else {
+        fontLoaded()
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', waitForLocalFont, false)
+    } else {
+      waitForLocalFont()
+    }
+  })()
+</script>
+
+            <img class="loading" src="/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" alt="loading">
+            <div class="container container-unloaded">
+                <main class="main post-page">
+    <article class="article-entry">
+        <p>系统 Trace 能告诉你线程什么时候运行、CPU 跑在哪个核、FrameTimeline 哪一帧超时；在启用 Binder&#x2F;ftrace&#x2F;sched 证据时，也能还原 Binder 调用和等待线索。但它不知道播放器正在解哪一个 frame id，也不知道游戏引擎正在加载哪个 scene，更不知道一个业务任务在队列里排了多久。</p>
+<p>第 13 篇只回答一个问题：业务语义怎么进入 Trace。系统能告诉你主线程慢了，Track Event 负责告诉你当时在 decode 哪一帧、哪个队列堵住、哪个请求跨线程流转。两边合在一起，才能把“主线程慢了 18ms”缩小到 frame 1082 附近的纹理上传候选区间，再结合 RenderThread&#x2F;HWUI、GPU 和 FrameTimeline 继续验证。</p>
+<span id="more"></span>
+
+<h2 id="什么时候需要业务语义"><a href="#什么时候需要业务语义" class="headerlink" title="什么时候需要业务语义"></a>什么时候需要业务语义</h2><p>没有业务语义缺口时，不需要接 SDK。先按场景选工具：</p>
+<table>
+<thead>
+<tr>
+<th>场景</th>
+<th>建议</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Java&#x2F;Kotlin 层临时标记函数耗时</td>
+<td>用 <code>android.os.Trace</code> 或 AndroidX tracing，抓取时打开应用 atrace</td>
+</tr>
+<tr>
+<td>Android native &#x2F; C++ 模块要长期埋点</td>
+<td>用 Perfetto SDK 的 Track Event</td>
+</tr>
+<tr>
+<td>跨平台引擎、游戏、播放器、Camera pipeline</td>
+<td>用 Track Event，加稳定参数和 counter</td>
+</tr>
+<tr>
+<td>要输出复杂结构化状态，普通 slice&#x2F;counter 不够</td>
+<td>再考虑自定义 DataSource</td>
+</tr>
+<tr>
+<td>只想知道系统线程状态、Binder、频率</td>
+<td>先用系统数据源，没业务语义缺口时不用接 SDK</td>
+</tr>
+</tbody></table>
+<!-- DIAGRAM_SLOT: App Native 模块通过 Perfetto SDK 写入 Track Event，并和 ftrace/FrameTimeline 合并到同一 Trace 的示意图 -->
+
+<p>Android-only 场景里，如果 <code>android.os.Trace</code> 和 NDK <code>ATrace_*</code> 已经够用，官方也建议继续使用它们。SDK 仍然适合 Android 的 native、跨平台和结构化业务语义场景；简单 Android-only section 不必为了形式替换 ATrace。它们会进入 Perfetto 的 atrace 路径，适合普通 App 函数标记；抓取时要在 <code>linux.ftrace</code> 里配置 <code>atrace_apps: &quot;com.example.app&quot;</code> 或通过命令行 <code>-a com.example.app</code> 打开对应 App。</p>
+<p>Perfetto SDK 更适合 native 模块和跨平台模块。它直接产生 Track Event，支持 category、slice、counter、flow、参数、独立 track，也方便和系统 Trace 放在同一个时间轴上。</p>
+<p>App 侧 tracing 能力先按边界选：</p>
+<table>
+<thead>
+<tr>
+<th>能力</th>
+<th>典型用途</th>
+<th>版本和现场边界</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>android.os.Trace</code> &#x2F; AndroidX <code>Trace</code></td>
+<td>Java&#x2F;Kotlin 粗粒度 section</td>
+<td>走 atrace；Android 12&#x2F;API 31+ App tracing 默认对所有 App 可用，API 29&#x2F;30 非 debuggable App 依赖 <code>profileable</code>，更低版本或特殊场景可用 AndroidX <code>forceEnableAppTracing()</code>；采集侧仍要打开 <code>atrace_apps</code></td>
+</tr>
+<tr>
+<td>NDK <code>ATrace_*</code></td>
+<td>native 粗粒度 section</td>
+<td>begin&#x2F;end&#x2F;isEnabled 从 API 23 起可用，async&#x2F;counter 类能力有更高 API 边界；同样走 atrace</td>
+</tr>
+<tr>
+<td>AndroidX <code>tracing-perfetto</code></td>
+<td>App 自己的启动期&#x2F;本地 Perfetto 采集</td>
+<td>解决 App 内采集和初始化，不等同于系统冷启动全程分析</td>
+</tr>
+<tr>
+<td>Perfetto SDK <code>kSystemBackend</code></td>
+<td>native &#x2F; 跨平台模块写 Track Event 到系统 Trace</td>
+<td>Android 9+ 平台包含 tracing 服务，但 P&#x2F;Q 尤其非 Pixel 设备要验证 <code>traced</code> 是否启用和 producer socket 是否可达；Android 11+ 默认条件更稳定</td>
+</tr>
+</tbody></table>
+<p>ATrace 也有开销。热循环、每次锁尝试、每个对象都打 <code>android.os.Trace</code> &#x2F; <code>ATrace_*</code>，会让 JNI、trace_marker 和内核路径本身扰动结果。Java&#x2F;Kotlin 和 NDK ATrace 更适合粗粒度 section；高频业务状态优先用 SDK category gating、sampling，或者默认关闭的 debug category。</p>
+<h2 id="SDK-接入边界"><a href="#SDK-接入边界" class="headerlink" title="SDK 接入边界"></a>SDK 接入边界</h2><p>Perfetto SDK 里有两层能力：</p>
+<table>
+<thead>
+<tr>
+<th>能力</th>
+<th>适合表达</th>
+<th>代价</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Track Event</td>
+<td>函数耗时、业务阶段、队列长度、frame id、请求 id、跨线程关系</td>
+<td>接入成本低，Trace Processor 和 UI 原生支持</td>
+</tr>
+<tr>
+<td>Custom DataSource</td>
+<td>自定义 protobuf 状态、高频结构化数据、专用二进制格式</td>
+<td>需要维护 schema，通常还要给 Trace Processor 补解析</td>
+</tr>
+</tbody></table>
+<p>只要 slice、counter、flow 和参数能表达问题，优先用 Track Event。自定义 DataSource 的门槛更高，不适合作为第一版埋点方案。</p>
+<p>自定义 DataSource 适合两类情况：一类是普通 slice、counter 和 debug annotation 表达不了结构，比如要周期性转储一个子系统状态；另一类是数据量太大，需要强类型 schema 减少每条事件的体积。</p>
+<p>它的代价也更直接：Trace Processor 默认不知道你的 protobuf，后续要补解析、查询表或 Trace Summary 输出。第一版先用 Track Event，能少维护一整套数据格式。</p>
+<h2 id="业务阶段字典先于代码"><a href="#业务阶段字典先于代码" class="headerlink" title="业务阶段字典先于代码"></a>业务阶段字典先于代码</h2><p>Track Event 不是把宏塞进每个函数。先定义业务阶段字典，再写代码。字典要让后续 SQL、报告和看板知道：事件叫什么、属于哪个阶段、字段单位是什么、缺字段时怎么降级。</p>
+<table>
+<thead>
+<tr>
+<th><code>event_name</code></th>
+<th><code>category</code></th>
+<th><code>phase</code></th>
+<th>必填参数</th>
+<th>可选参数</th>
+<th>单位&#x2F;基数</th>
+<th>采样</th>
+<th>报告指标</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>DecodeFrame</code></td>
+<td><code>player</code></td>
+<td>decode</td>
+<td><code>frame_id</code>、<code>stream_id</code>、<code>codec</code></td>
+<td><code>width</code>、<code>height</code></td>
+<td><code>frame_id</code> 在 <code>stream_id</code> 内唯一</td>
+<td>每帧一次，debug 字段按需开</td>
+<td><code>decode_dur_ms</code>、<code>decode_max_ms</code></td>
+</tr>
+<tr>
+<td><code>UploadTexture</code></td>
+<td><code>rendering</code></td>
+<td>upload</td>
+<td><code>frame_id</code>、<code>texture_bytes</code></td>
+<td><code>surface_id</code></td>
+<td><code>texture_bytes</code> 用 bytes</td>
+<td>每帧最多一次</td>
+<td><code>upload_dur_ms</code>、<code>upload_bytes</code></td>
+</tr>
+<tr>
+<td><code>RenderSubmit</code></td>
+<td><code>rendering</code></td>
+<td>submit</td>
+<td><code>frame_id</code>、<code>surface_id</code></td>
+<td><code>queue_depth</code></td>
+<td><code>queue_depth</code> 用 items</td>
+<td>每帧一次</td>
+<td><code>submit_dur_ms</code>、<code>queue_depth_items</code></td>
+</tr>
+<tr>
+<td><code>WaitForBuffer</code></td>
+<td><code>camera</code></td>
+<td>wait</td>
+<td><code>request_id</code>、<code>buffer_queue</code></td>
+<td><code>producer</code></td>
+<td><code>request_id</code> 在 session 内唯一</td>
+<td>只在等待超过阈值时记录</td>
+<td><code>wait_for_buffer_ms</code></td>
+</tr>
+</tbody></table>
+<p>字段改名、删字段、改单位，都要提升 <code>arg_schema_version</code>。长期报告字段不要叫 <code>debug.frame_id</code>，而应叫业务 schema 里的 <code>frame_id</code> &#x2F; <code>request_id</code>，并记录 <code>frame_id_domain</code>、<code>nullable_policy</code> 和兼容策略。缺 <code>RenderSubmit</code> 时，报告只能输出 decode&#x2F;upload 阶段，不能写端到端结论；字段里应写 <code>missing_marker=RenderSubmit</code>、<code>evidence_grade=partial</code>。</p>
+<h2 id="两种-backend-解决不同问题"><a href="#两种-backend-解决不同问题" class="headerlink" title="两种 backend 解决不同问题"></a>两种 backend 解决不同问题</h2><p>Perfetto SDK 可以用 in-process backend，也可以用 system backend：</p>
+<table>
+<thead>
+<tr>
+<th>Backend</th>
+<th>谁控制 Trace</th>
+<th>适合场景</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>kInProcessBackend</code></td>
+<td>App 自己创建 tracing session</td>
+<td>单进程验证、离线测试、只看业务事件</td>
+</tr>
+<tr>
+<td><code>kSystemBackend</code></td>
+<td>外部 <code>perfetto</code> 命令或系统服务控制</td>
+<td>和 sched、freq、Binder、FrameTimeline 合并分析</td>
+</tr>
+</tbody></table>
+<p>Android 性能分析里更常用 system backend。App 在这里只是 producer，系统 tracing session 决定什么时候开始、什么时候停止。这个边界要写进设计：收集系统 Trace 时，App 不能自己读取整份系统 Trace，避免拿到其他进程的数据。</p>
+<p>Android 9(P) 虽然已有 Perfetto&#x2F;traced，但命令行文本配置 <code>--txt</code> 从 Android 10(Q) 起才更适合直接使用；P 设备通常要走二进制 TraceConfig。实验室和本地问题复现适合用 system backend，线上产品默认接入时还要单独评估兼容、包体和开关策略。</p>
+<h2 id="最小接入骨架"><a href="#最小接入骨架" class="headerlink" title="最小接入骨架"></a>最小接入骨架</h2><p>最小接入只解决三件事：稳定 category、system backend、可查询事件名。native 模块接入骨架如下。</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// tracing_categories.h</span></span><br><span class="line"><span class="meta">#<span class="keyword">pragma</span> once</span></span><br><span class="line"></span><br><span class="line"><span class="meta">#<span class="keyword">include</span> <span class="string">&lt;perfetto.h&gt;</span></span></span><br><span class="line"></span><br><span class="line"><span class="built_in">PERFETTO_DEFINE_CATEGORIES</span>(</span><br><span class="line">    perfetto::<span class="built_in">Category</span>(<span class="string">&quot;rendering&quot;</span>)</span><br><span class="line">        .<span class="built_in">SetDescription</span>(<span class="string">&quot;Rendering pipeline&quot;</span>),</span><br><span class="line">    perfetto::<span class="built_in">Category</span>(<span class="string">&quot;player&quot;</span>)</span><br><span class="line">        .<span class="built_in">SetDescription</span>(<span class="string">&quot;Media pipeline&quot;</span>),</span><br><span class="line">    perfetto::<span class="built_in">Category</span>(<span class="string">&quot;pipeline.debug&quot;</span>)</span><br><span class="line">        .<span class="built_in">SetDescription</span>(<span class="string">&quot;Verbose pipeline events&quot;</span>)</span><br><span class="line">        .<span class="built_in">SetTags</span>(<span class="string">&quot;debug&quot;</span>));</span><br></pre></td></tr></table></figure>
+
+<p>头文件只声明 category。category 名会进入 Trace 和后续 SQL，名字要稳定，不要把动态 id、页面实例号或请求号塞进 category 名里。</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// tracing_categories.cc</span></span><br><span class="line"><span class="meta">#<span class="keyword">include</span> <span class="string">&quot;tracing_categories.h&quot;</span></span></span><br><span class="line"></span><br><span class="line"><span class="built_in">PERFETTO_TRACK_EVENT_STATIC_STORAGE</span>();</span><br></pre></td></tr></table></figure>
+
+<p><code>PERFETTO_TRACK_EVENT_STATIC_STORAGE()</code> 给 Track Event 注册需要的静态存储留位置。它只应该出现在一个 <code>.cc</code> 文件里，避免多重定义。</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// tracing_init.cc</span></span><br><span class="line"><span class="meta">#<span class="keyword">include</span> <span class="string">&quot;tracing_categories.h&quot;</span></span></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">InitPerfetto</span><span class="params">()</span> </span>&#123;</span><br><span class="line">  perfetto::TracingInitArgs args;</span><br><span class="line">  args.backends |= perfetto::kSystemBackend;</span><br><span class="line">  perfetto::Tracing::<span class="built_in">Initialize</span>(args);</span><br><span class="line">  perfetto::TrackEvent::<span class="built_in">Register</span>();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>初始化阶段选择 backend，并把前面定义的 category 注册给 Track Event。Android 系统 Trace 场景里通常用 <code>kSystemBackend</code>，这样 App 事件才能和系统 sched、Binder、FrameTimeline 放在同一份 Trace 里。</p>
+<p>之后就能在业务代码里打点。这段用 slice 表示耗时，用参数记录 frame id：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">DecodeFrame</span><span class="params">(<span class="type">int</span> frame_id)</span> </span>&#123;</span><br><span class="line">  <span class="built_in">TRACE_EVENT</span>(<span class="string">&quot;player&quot;</span>, <span class="string">&quot;DecodeFrame&quot;</span>, <span class="string">&quot;frame_id&quot;</span>, frame_id);</span><br><span class="line">  <span class="built_in">DecodeFrameImpl</span>(frame_id);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p><code>TRACE_EVENT</code> 是作用域事件。进入当前作用域时开始，离开当前作用域时结束。它适合包住一段同步工作，例如 decode、layout、upload、submit。</p>
+<p>不跟随函数作用域的事件，用 <code>TRACE_EVENT_BEGIN</code> 和 <code>TRACE_EVENT_END</code>。这对跨多个函数的阶段有用，但不要把 begin&#x2F;end 分散到完全不相关的调用路径里，容易造成同线程 slice 嵌套混乱、闭合错配或 SQL 解释困难。</p>
+<p>接 SDK 时还要留一个构建层面的边界。官方 C++ SDK 是 C++17 库，发布包里常见形态是 <code>perfetto.h</code> 和 <code>perfetto.cc</code> 两个合并版源文件，适合塞进已有 native 构建系统。</p>
+<p>只放进 <code>perfetto.h</code> 还不够：要确认编译标准、线程库、符号裁剪、包体增量，以及 App 进程启动早期是否已经完成 <code>Tracing::Initialize()</code>。</p>
+<p>早期启动阶段也要谨慎。C++ SDK 只有在 tracing session 已经启用后才会记录普通 Track Event；AndroidX <code>tracing-perfetto</code> 提供了启动阶段初始化能力，但它解决的是 App 自己的启动期采集，不等于系统冷启动分析。冷启动仍要回到 ActivityTaskManager、zygote、Binder、主线程和首帧显示这些系统信号。</p>
+<h2 id="category-是线上开关"><a href="#category-是线上开关" class="headerlink" title="category 是线上开关"></a>category 是线上开关</h2><p>category 决定哪些事件会被打开。建议把它当成配置接口设计，不要随手起名。C++ API 里没有命中任何规则时，非 <code>debug</code>、非 <code>slow</code> category 默认会被打开；C API 的默认行为不同。</p>
+<p>线上 preset 的主规则很简单：显式 <code>disabled_categories: &quot;*&quot;</code>，再白名单打开需要的 category。这样可以避开 C&#x2F;C++ 默认差异，也能避免 debug category 在现场意外打开。<code>debug</code> 和 <code>slow</code> tag 默认关闭，专项分析时再显式打开。</p>
+<p>常见划分方式：</p>
+<ul>
+<li><code>player</code>：播放器主阶段，例如 prepare、decode、render。</li>
+<li><code>rendering</code>：渲染提交、纹理上传、场景切换。</li>
+<li><code>camera</code>：request、HAL callback、buffer queue。</li>
+<li><code>pipeline.debug</code>：调试用高频事件，定义 category 时加 <code>debug</code> tag。</li>
+<li><code>pipeline.slow</code>：开销较高的事件，定义 category 时加 <code>slow</code> tag。</li>
+</ul>
+<p>category 应按子系统和开关粒度设计，不按页面、实验组、请求类型命名；页面、实验组、请求类型放参数或 metadata，避免 category 数量膨胀。</p>
+<p>以下配置明确选择 category：</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line">buffers &#123;</span><br><span class="line">  size_kb: <span class="number">65536</span></span><br><span class="line">  fill_policy: RING_BUFFER</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;track_event&quot;</span></span><br><span class="line">    target_buffer: <span class="number">0</span></span><br><span class="line">    track_event_config &#123;</span><br><span class="line">      disabled_categories: <span class="string">&quot;*&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;player&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;rendering&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">  producer_name_filter: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>这样做的好处是，现场抓 Trace 时不必换包，只改配置就能决定打开哪些业务事件。system backend 下 <code>track_event</code> 可能来自多个 producer，现场或线上 preset 要用 <code>producer_name_filter</code> &#x2F; regex 把范围收住。示例里的 <code>com.example.app</code> 只是占位；先从 trace、data source 或 producer 列表确认实际 producer name，多进程 App 用多个 exact filter 或 regex filter。</p>
+<h2 id="和系统-Trace-一起抓"><a href="#和系统-Trace-一起抓" class="headerlink" title="和系统 Trace 一起抓"></a>和系统 Trace 一起抓</h2><p>业务事件只解释“业务正在做什么”。系统事件解释“这段业务为什么慢”。合抓时，一般把 <code>track_event</code> 和 ftrace 放在同一份配置里：</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br></pre></td><td class="code"><pre><span class="line">buffers &#123; size_kb: <span class="number">131072</span> fill_policy: RING_BUFFER &#125; # <span class="number">0</span>: sched / ftrace</span><br><span class="line">buffers &#123; size_kb: <span class="number">32768</span>  fill_policy: RING_BUFFER &#125; # <span class="number">1</span>: app track event</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    target_buffer: <span class="number">0</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/cpu_frequency&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/cpu_idle&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;gfx&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;view&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;binder_driver&quot;</span></span><br><span class="line">      atrace_apps: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;android.surfaceflinger.frametimeline&quot;</span></span><br><span class="line">    target_buffer: <span class="number">0</span></span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;track_event&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    track_event_config &#123;</span><br><span class="line">      disabled_categories: <span class="string">&quot;*&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;player&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;rendering&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">  producer_name_filter: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">duration_ms: <span class="number">10000</span></span><br></pre></td></tr></table></figure>
+
+<p>抓完后，用 SQL 确认事件进来了。这条 SQL 用第 11 篇讲过的 <code>thread_slice</code> 视图，直接把进程名、线程名和业务参数查出来。<code>thread_slice</code> 是 <code>slices.with_context</code> 提供的视图，已经把 slice、track、thread、process 关联好；单篇阅读时只要保留前面的 <code>INCLUDE</code> 即可。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> slices.with_context;</span><br><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> time.conversion;</span><br><span class="line"></span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  time_to_ms(ts) <span class="keyword">AS</span> ts_ms,</span><br><span class="line">  time_to_ms(dur) <span class="keyword">AS</span> dur_ms,</span><br><span class="line">  name,</span><br><span class="line">  thread_name,</span><br><span class="line">  process_name,</span><br><span class="line">  EXTRACT_ARG(arg_set_id, <span class="string">&#x27;debug.frame_id&#x27;</span>) <span class="keyword">AS</span> frame_id</span><br><span class="line"><span class="keyword">FROM</span> thread_slice</span><br><span class="line"><span class="keyword">WHERE</span> process_name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">  <span class="keyword">AND</span> name <span class="keyword">IN</span> (<span class="string">&#x27;DecodeFrame&#x27;</span>, <span class="string">&#x27;RenderScene&#x27;</span>, <span class="string">&#x27;UploadTexture&#x27;</span>)</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> ts;</span><br></pre></td></tr></table></figure>
+
+<p>这条查询适合默认线程 track 上的 Track Event 或 atrace slice。独立 track、process track 事件不一定有 <code>utid</code>，可能不会出现在 <code>thread_slice</code> 里；这类事件要改用 <code>process_slice</code>、<code>thread_or_process_slice</code>，或直接从 <code>slice JOIN track</code> 查，再按 <code>track.name/parent_id</code> 还原上下文。</p>
+<p>这条 SQL 的价值不止是“查到了事件”，它还能继续和 <code>thread_state</code>、CPU 频率、Binder 事件、FrameTimeline 做时间范围关联。TrackEvent slice 是业务时间轴证据，不等于 CPU 一直在执行这段业务；CPU 执行要再关联 <code>sched</code> &#x2F; <code>thread_state</code>，并区分默认 <code>ThreadTrack</code>、自定义 <code>Track</code> 和跨线程 flow。普通 key&#x2F;value 参数会作为 debug annotation 进入 args，SQL 用 <code>debug.&lt;key&gt;</code> 读取；typed TrackEvent 字段不走这个 <code>debug.*</code> args 口径，需要对应解析、表或专用字段。</p>
+<p>时间范围关联只是第一步。App 的 <code>frame_id</code> 是业务帧，FrameTimeline 的 frame&#x2F;vsync 是系统帧；只靠时间重叠容易把排队、预渲染、跨线程工作归到错误帧。最终要结合 Choreographer frame&#x2F;vsync、JankStats frame start、RenderThread&#x2F;HWUI slice、<code>actual_frame_timeline_slice</code> &#x2F; <code>expected_frame_timeline_slice</code> 再确认。</p>
+<p>这里的 <code>frame_id</code> 是 debug annotation，适合排查和临时 SQL。debug annotation 默认是调试字段；如果进入长期指标，要把字段名、类型、单位、缺省值和迁移策略当成接口冻结。只有能控制 Perfetto proto、解析和发布流程时，再考虑 typed TrackEvent 字段或自定义 DataSource。现场 preset 还可以用 <code>filter_debug_annotations</code> &#x2F; <code>filter_dynamic_event_names</code> 降低隐私和体积风险。</p>
+<p>业务阶段报告至少要把 marker 完整性写出来：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> slices.with_context;</span><br><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> time.conversion;</span><br><span class="line"></span><br><span class="line"><span class="keyword">WITH</span> app_events <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span></span><br><span class="line">    process_name,</span><br><span class="line">    thread_name,</span><br><span class="line">    name <span class="keyword">AS</span> phase,</span><br><span class="line">    ts,</span><br><span class="line">    dur,</span><br><span class="line">    EXTRACT_ARG(arg_set_id, <span class="string">&#x27;debug.frame_id&#x27;</span>) <span class="keyword">AS</span> frame_id</span><br><span class="line">  <span class="keyword">FROM</span> thread_slice</span><br><span class="line">  <span class="keyword">WHERE</span> process_name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">    <span class="keyword">AND</span> name <span class="keyword">IN</span> (<span class="string">&#x27;DecodeFrame&#x27;</span>, <span class="string">&#x27;UploadTexture&#x27;</span>, <span class="string">&#x27;RenderSubmit&#x27;</span>)</span><br><span class="line">),</span><br><span class="line">frame_quality <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span></span><br><span class="line">    frame_id,</span><br><span class="line">    <span class="keyword">CASE</span></span><br><span class="line">      <span class="keyword">WHEN</span> <span class="built_in">SUM</span>(<span class="keyword">CASE</span> <span class="keyword">WHEN</span> phase <span class="operator">=</span> <span class="string">&#x27;RenderSubmit&#x27;</span> <span class="keyword">THEN</span> <span class="number">1</span> <span class="keyword">ELSE</span> <span class="number">0</span> <span class="keyword">END</span>) <span class="operator">=</span> <span class="number">0</span></span><br><span class="line">        <span class="keyword">THEN</span> <span class="string">&#x27;partial&#x27;</span></span><br><span class="line">      <span class="keyword">ELSE</span> <span class="string">&#x27;complete&#x27;</span></span><br><span class="line">    <span class="keyword">END</span> <span class="keyword">AS</span> evidence_grade,</span><br><span class="line">    <span class="keyword">CASE</span></span><br><span class="line">      <span class="keyword">WHEN</span> <span class="built_in">SUM</span>(<span class="keyword">CASE</span> <span class="keyword">WHEN</span> phase <span class="operator">=</span> <span class="string">&#x27;RenderSubmit&#x27;</span> <span class="keyword">THEN</span> <span class="number">1</span> <span class="keyword">ELSE</span> <span class="number">0</span> <span class="keyword">END</span>) <span class="operator">=</span> <span class="number">0</span></span><br><span class="line">        <span class="keyword">THEN</span> <span class="string">&#x27;RenderSubmit&#x27;</span></span><br><span class="line">      <span class="keyword">ELSE</span> <span class="string">&#x27;&#x27;</span></span><br><span class="line">    <span class="keyword">END</span> <span class="keyword">AS</span> missing_marker</span><br><span class="line">  <span class="keyword">FROM</span> app_events</span><br><span class="line">  <span class="keyword">GROUP</span> <span class="keyword">BY</span> frame_id</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  e.frame_id,</span><br><span class="line">  e.phase,</span><br><span class="line">  <span class="built_in">MIN</span>(time_to_ms(e.ts)) <span class="keyword">AS</span> start_ms,</span><br><span class="line">  time_to_ms(<span class="built_in">SUM</span>(e.dur)) <span class="keyword">AS</span> phase_total_ms,</span><br><span class="line">  <span class="built_in">MAX</span>(e.thread_name) <span class="keyword">AS</span> sample_thread,</span><br><span class="line">  q.evidence_grade,</span><br><span class="line">  q.missing_marker</span><br><span class="line"><span class="keyword">FROM</span> app_events e</span><br><span class="line"><span class="keyword">JOIN</span> frame_quality q <span class="keyword">USING</span> (frame_id)</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> e.frame_id, e.phase, q.evidence_grade, q.missing_marker</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> frame_id, start_ms;</span><br></pre></td></tr></table></figure>
+
+<p>CSV 输出可以固定成这类字段：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">trace_name,scenario,frame_or_request_id,phase,start_ms,dur_ms,thread_name,frame_jank_type,evidence_grade,missing_marker</span><br><span class="line">run01.perfetto-trace,feed_scroll,1082,DecodeFrame,1240.2,5.8,decoder-1,jank,complete,</span><br><span class="line">run01.perfetto-trace,feed_scroll,1082,UploadTexture,1248.7,9.1,RenderThread,jank,complete,</span><br><span class="line">run01.perfetto-trace,feed_scroll,1082,RenderSubmit,,,,jank,partial,RenderSubmit</span><br></pre></td></tr></table></figure>
+
+<h2 id="跨线程任务用-flow-或独立-track"><a href="#跨线程任务用-flow-或独立-track" class="headerlink" title="跨线程任务用 flow 或独立 track"></a>跨线程任务用 flow 或独立 track</h2><p>很多业务慢不在单个函数里，而在队列之间。比如 UI 线程提交一个请求，decoder 线程处理，render 线程消费。只用同线程 slice，读者很难看出它们属于同一个 frame。</p>
+<p>可以用 flow 把相关事件连起来。不要直接把容易复用的业务 <code>frame_id</code> 当 flow id，先生成一次 Trace 内唯一的 token：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">uint64_t</span> <span class="title">MakeFlowId</span><span class="params">(<span class="type">uint64_t</span> session_id, <span class="type">uint64_t</span> stream_id, <span class="type">uint64_t</span> frame_id)</span> </span>&#123;</span><br><span class="line">  <span class="keyword">return</span> <span class="built_in">Hash64</span>(session_id, stream_id, frame_id);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">EnqueueFrame</span><span class="params">(<span class="type">uint64_t</span> session_id, <span class="type">uint64_t</span> stream_id, <span class="type">uint64_t</span> frame_id)</span> </span>&#123;</span><br><span class="line">  <span class="type">uint64_t</span> flow_id = <span class="built_in">MakeFlowId</span>(session_id, stream_id, frame_id);</span><br><span class="line">  <span class="built_in">TRACE_EVENT</span>(<span class="string">&quot;player&quot;</span>, <span class="string">&quot;EnqueueFrame&quot;</span>,</span><br><span class="line">              perfetto::Flow::<span class="built_in">ProcessScoped</span>(flow_id),</span><br><span class="line">              <span class="string">&quot;stream_id&quot;</span>, stream_id,</span><br><span class="line">              <span class="string">&quot;frame_id&quot;</span>, frame_id);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">DecodeFrame</span><span class="params">(<span class="type">uint64_t</span> session_id, <span class="type">uint64_t</span> stream_id, <span class="type">uint64_t</span> frame_id)</span> </span>&#123;</span><br><span class="line">  <span class="type">uint64_t</span> flow_id = <span class="built_in">MakeFlowId</span>(session_id, stream_id, frame_id);</span><br><span class="line">  <span class="built_in">TRACE_EVENT</span>(<span class="string">&quot;player&quot;</span>, <span class="string">&quot;DecodeFrame&quot;</span>,</span><br><span class="line">              perfetto::Flow::<span class="built_in">ProcessScoped</span>(flow_id),</span><br><span class="line">              <span class="string">&quot;stream_id&quot;</span>, stream_id,</span><br><span class="line">              <span class="string">&quot;frame_id&quot;</span>, frame_id);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">RenderFrame</span><span class="params">(<span class="type">uint64_t</span> session_id, <span class="type">uint64_t</span> stream_id, <span class="type">uint64_t</span> frame_id)</span> </span>&#123;</span><br><span class="line">  <span class="type">uint64_t</span> flow_id = <span class="built_in">MakeFlowId</span>(session_id, stream_id, frame_id);</span><br><span class="line">  <span class="built_in">TRACE_EVENT</span>(<span class="string">&quot;player&quot;</span>, <span class="string">&quot;RenderFrame&quot;</span>,</span><br><span class="line">              perfetto::TerminatingFlow::<span class="built_in">ProcessScoped</span>(flow_id),</span><br><span class="line">              <span class="string">&quot;stream_id&quot;</span>, stream_id,</span><br><span class="line">              <span class="string">&quot;frame_id&quot;</span>, frame_id);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>选中事件时，Perfetto UI 会用箭头展示关系。中间阶段继续使用 <code>Flow</code>，最终消费阶段再用 <code>TerminatingFlow</code>。</p>
+<p>这里用的是 <code>ProcessScoped(flow_id)</code>，所以 id 至少要在进程内、一次 trace 生命周期内稳定，不要直接拿容易复用的临时指针当 flow id；跨进程 flow 不要继续用 <code>ProcessScoped</code> 语义，至少要使用全局唯一 id，并明确 namespace 和来源进程。多阶段 pipeline 也可以给每条边单独分配 flow id，例如 <code>enqueue_to_decode_flow_id</code>、<code>decode_to_render_flow_id</code>，避免一条 flow 被多条路径复用。</p>
+<p>如果一个任务跨函数、跨线程持续很久，也可以放到独立 track 上：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">StartRequest</span><span class="params">(<span class="type">uint64_t</span> request_id)</span> </span>&#123;</span><br><span class="line">  <span class="function">perfetto::Track <span class="title">track</span><span class="params">(request_id)</span></span>;</span><br><span class="line">  <span class="keyword">auto</span> desc = track.<span class="built_in">Serialize</span>();</span><br><span class="line">  desc.<span class="built_in">set_name</span>(<span class="string">&quot;player.request&quot;</span>);</span><br><span class="line">  perfetto::TrackEvent::<span class="built_in">SetTrackDescriptor</span>(track, desc);</span><br><span class="line"></span><br><span class="line">  <span class="built_in">TRACE_EVENT_BEGIN</span>(<span class="string">&quot;player&quot;</span>, <span class="string">&quot;Request&quot;</span>, track,</span><br><span class="line">                    <span class="string">&quot;request_id&quot;</span>, request_id);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">FinishRequest</span><span class="params">(<span class="type">uint64_t</span> request_id)</span> </span>&#123;</span><br><span class="line">  <span class="built_in">TRACE_EVENT_END</span>(<span class="string">&quot;player&quot;</span>, perfetto::<span class="built_in">Track</span>(request_id));</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>这类事件适合任务队列、播放器 pipeline、异步加载、跨线程 GPU 提交。它比“每个函数都打点”更能解释业务路径。</p>
+<p><code>perfetto::Track(request_id)</code> 里的 id 要在一次 Trace 内对这个并发任务唯一。线上 request id、frame id 很容易复用，复用后不同任务会合到同一条 track，看起来像一个长任务或错误串行。更稳的做法是加 session&#x2F;pipeline namespace，或者生成专用 64-bit track id；需要长期阅读时，补 track descriptor &#x2F; name，让 UI 和 SQL 都能识别生命周期。descriptor &#x2F; interning 丢失时，要回到第 12 篇的 stats 检查。</p>
+<h2 id="Counter-只放状态，不放日志"><a href="#Counter-只放状态，不放日志" class="headerlink" title="Counter 只放状态，不放日志"></a>Counter 只放状态，不放日志</h2><p>counter 适合随时间变化的数值，例如队列长度、in-flight 请求数、buffer 占用。frame id 是标识符，不是可聚合指标；它更适合放在 slice 参数或 flow id 里。这个例子记录 decode 队列深度：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">ReportDecodeQueueDepth</span><span class="params">(<span class="type">int</span> depth)</span> </span>&#123;</span><br><span class="line">  <span class="built_in">TRACE_COUNTER</span>(<span class="string">&quot;player&quot;</span>,</span><br><span class="line">                perfetto::<span class="built_in">CounterTrack</span>(<span class="string">&quot;DecodeQueueDepth&quot;</span>, <span class="string">&quot;items&quot;</span>),</span><br><span class="line">                depth);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>counter 不适合承载日志文本，也不适合拿标识符做 avg&#x2F;max。日志放 logcat，Trace 里只保留能和时间轴关联、可以被解释为状态的数值。</p>
+<p>counter 要固定单位和聚合口径。<code>DecodeQueueDepth_items</code> 看峰值和窗口内均值，<code>InFlightRequests_count</code> 看峰值和持续时间，<code>BufferBytes_bytes</code> 看峰值、增长斜率和是否回落；不要对 <code>frame_id</code>、<code>request_id</code> 这类标识符求 avg&#x2F;max。</p>
+<h2 id="事件名是-SQL-接口"><a href="#事件名是-SQL-接口" class="headerlink" title="事件名是 SQL 接口"></a>事件名是 SQL 接口</h2><p>事件名一旦进了 SQL、看板和回归报告，就变成了接口。不要把动态 id 拼进事件名。</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 不建议：每个 frame 都会生成不同事件名，SQL 很难稳定统计。</span></span><br><span class="line"><span class="built_in">TRACE_EVENT</span>(<span class="string">&quot;player&quot;</span>, perfetto::DynamicString&#123;<span class="string">&quot;DecodeFrame_123&quot;</span>&#125;);</span><br><span class="line"></span><br><span class="line"><span class="comment">// 建议：事件名稳定，动态信息放参数。</span></span><br><span class="line"><span class="built_in">TRACE_EVENT</span>(<span class="string">&quot;player&quot;</span>, <span class="string">&quot;DecodeFrame&quot;</span>, <span class="string">&quot;frame_id&quot;</span>, frame_id);</span><br></pre></td></tr></table></figure>
+
+<p>更好的命名方式是“阶段 + 动作”：</p>
+<ul>
+<li><code>DecodeFrame</code>：解码一个业务帧，参数带 <code>frame_id</code>、<code>stream_id</code>、<code>codec</code>。</li>
+<li><code>UploadTexture</code>：上传纹理或 buffer，参数带 <code>frame_id</code>、<code>texture_bytes</code>。</li>
+<li><code>RenderScene</code>：提交一轮场景渲染，参数带 <code>scene_id</code> 或 <code>surface_id</code>。</li>
+<li><code>SubmitRequest</code>：提交一个跨线程请求，参数带 <code>request_id</code> 和 <code>queue_depth</code>。</li>
+<li><code>WaitForBuffer</code>：等待上游 buffer，可和 Binder、线程状态、buffer queue 证据关联。</li>
+</ul>
+<p>事件名稳定以后，后面的 SQL 才能稳定。这里顺手引入 <code>time.conversion</code>，让最大耗时的单位直接写在 SQL 里；平均值保留一位小数时仍然可以用 <code>/ 1e6</code>：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> slices.with_context;</span><br><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> time.conversion;</span><br><span class="line"></span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  process_name,</span><br><span class="line">  thread_name,</span><br><span class="line">  name,</span><br><span class="line">  <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> count,</span><br><span class="line">  ROUND(<span class="built_in">AVG</span>(dur) <span class="operator">/</span> <span class="number">1e6</span>, <span class="number">1</span>) <span class="keyword">AS</span> avg_ms,</span><br><span class="line">  time_to_ms(<span class="built_in">MAX</span>(dur)) <span class="keyword">AS</span> max_ms</span><br><span class="line"><span class="keyword">FROM</span> thread_slice</span><br><span class="line"><span class="keyword">WHERE</span> process_name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">  <span class="keyword">AND</span> name <span class="keyword">IN</span> (<span class="string">&#x27;DecodeFrame&#x27;</span>, <span class="string">&#x27;UploadTexture&#x27;</span>, <span class="string">&#x27;RenderScene&#x27;</span>)</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> process_name, thread_name, name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> max_ms <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure>
+
+<h2 id="控制写入量"><a href="#控制写入量" class="headerlink" title="控制写入量"></a>控制写入量</h2><p>Track Event 开销低，但不是免费。第 12 篇讲过 data loss，这里要先拆清两条路径：<code>android.os.Trace</code> &#x2F; ATrace 写太密会压 ftrace per-CPU buffer；Perfetto SDK Track Event 写太密主要压 producer shared memory、central buffer 和 incremental state。SDK Track Event 丢包时不要去调 ftrace buffer，ATrace 丢事件时也不要只盯 <code>track_event</code> stats。</p>
+<p>建议给每类埋点设一个预算：</p>
+<ul>
+<li>事件密度：按 <code>events/sec</code>、每帧事件数、参数字节数和目标 Trace 时长估算写入量。120Hz、多线程、多阶段和动态字符串叠加后，每帧一次也可能过密。</li>
+<li>数据形状：每个小对象、每次锁尝试、每个像素级循环都不适合默认开启；高频 debug category 默认关闭，专项 Trace 可用 1&#x2F;N 采样或触发后短窗口开启。</li>
+<li>参数开销：便宜标量可直接传；昂贵字符串、JSON、容器遍历、锁内状态快照放在 enabled 判断或 lambda 内。参数在宏调用前已经拼好时，category gating 救不了这部分开销。</li>
+<li>采集验收：长 Trace 里把业务 Track Event 放到独立 central buffer，抓完检查 <code>stats</code>、<code>event_count_by_category</code> 和 <code>track_event_loss_stats</code>；这只能隔离 central buffer 竞争，不能修复 producer shared memory burst loss。</li>
+<li>Ring Buffer 场景要关注 Track Event 的 descriptor &#x2F; string interning &#x2F; incremental state，可以配合 <code>incremental_state_config.clear_period_ms</code> 或低写入率 buffer，避免后半段事件缺名字和上下文。</li>
+</ul>
+<p>统一验收查询可以先从第 12 篇的 health check 开始，再补 Track Event 专用项：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> <span class="keyword">value</span> <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line">  <span class="keyword">AND</span> (</span><br><span class="line">    severity <span class="keyword">IN</span> (<span class="string">&#x27;error&#x27;</span>, <span class="string">&#x27;data_loss&#x27;</span>)</span><br><span class="line">    <span class="keyword">OR</span> name <span class="keyword">IN</span> (</span><br><span class="line">      <span class="string">&#x27;traced_buf_chunks_overwritten&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_buf_chunks_discarded&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_buf_trace_writer_packet_loss&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_buf_sequence_packet_loss&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_buf_incremental_sequences_dropped&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_buf_patches_failed&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;track_event_parser_errors&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;track_event_tokenizer_errors&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;track_hierarchy_missing_uuid&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;track_event_thread_invalid_end&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;track_event_missing_sequence_id&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;interned_data_tokenizer_errors&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;tokenizer_skipped_packets&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;packet_skipped_seq_needs_incremental_state_invalid&#x27;</span></span><br><span class="line">    )</span><br><span class="line">    <span class="keyword">OR</span> name GLOB <span class="string">&#x27;track_descriptor_*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name GLOB <span class="string">&#x27;track_event_skipped_*&#x27;</span></span><br><span class="line">  )</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> name, idx;</span><br></pre></td></tr></table></figure>
+
+<p>报告里单独给 <code>track_event_trust_level</code>。比如 packet loss 为 0，但 <code>track_event_tokenizer_errors</code> 或 <code>track_hierarchy_missing_uuid</code> 非 0，业务事件仍要降级。</p>
+<h2 id="App-侧现场-Trace-协议"><a href="#App-侧现场-Trace-协议" class="headerlink" title="App 侧现场 Trace 协议"></a>App 侧现场 Trace 协议</h2><p>App 侧接 Perfetto，最容易踩的坑是把 App 当成一个小型 <code>adb shell perfetto</code> 客户端。普通 App 没有随意启动系统 tracing 的权限，也不适合在线上动态下发高开销 TraceConfig。现场方案更适合拆成三层：</p>
+<ul>
+<li>平台侧：预置受控 TraceConfig，声明 trigger、Ring Buffer、文件路径、数据源白名单和采集上限。</li>
+<li>App 侧：记录业务埋点和页面状态，检测慢帧、卡死、超时等异常，按平台约定激活 trigger。</li>
+<li>服务端：接收 Trace package，跑 <code>stats</code>、摘要 SQL 和聚合索引，给人工分析留出可复查入口。</li>
+</ul>
+<p>Perfetto 的 STOP trigger 很适合这类场景：trace 先以 Ring Buffer 方式循环记录，App 检测到问题后触发一个已声明的名字，系统在 <code>stop_delay_ms</code> 之后收尾。这样能保留问题发生前的一段现场，也能把触发后的尾巴收进来。</p>
+<p>一个受控现场 UI 卡顿 preset 可以长这样。它适合灰度白名单、采样率受控、写入速率已实测、stats 可验收的实验室或现场排查；线上默认 preset 应减少 atrace category，必要时只保留 sched、FrameTimeline 和最小 Track Event。它不是“全量图形专项 preset”，但足够支持主线程、RenderThread&#x2F;HWUI、FrameTimeline、CPU 调度、SurfaceFlinger 侧 FrameTimeline&#x2F;线程调度线索和 App Track Event 的第一轮定位；涉及 Layer、Transaction、HWC、Display 归因时，切换图形专项 preset。</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br></pre></td><td class="code"><pre><span class="line">buffers &#123; size_kb: <span class="number">131072</span> fill_policy: RING_BUFFER &#125; # <span class="number">0</span>: sched / ftrace</span><br><span class="line">buffers &#123; size_kb: <span class="number">32768</span>  fill_policy: RING_BUFFER &#125; # <span class="number">1</span>: app track event / frame context</span><br><span class="line"></span><br><span class="line">incremental_state_config &#123;</span><br><span class="line">  clear_period_ms: <span class="number">5000</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">trigger_config &#123;</span><br><span class="line">  trigger_mode: STOP_TRACING</span><br><span class="line">  trigger_timeout_ms: <span class="number">1800000</span> # 最长等待 trigger 的窗口</span><br><span class="line">  triggers &#123;</span><br><span class="line">    name: <span class="string">&quot;app_ui_jank&quot;</span></span><br><span class="line">    stop_delay_ms: <span class="number">1000</span></span><br><span class="line">    max_per_24_h: <span class="number">8</span></span><br><span class="line">    skip_probability: <span class="number">0.8</span></span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    target_buffer: <span class="number">0</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_wakeup&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/cpu_frequency&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/cpu_idle&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;gfx&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;view&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;wm&quot;</span></span><br><span class="line">      atrace_apps: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;android.surfaceflinger.frametimeline&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;track_event&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    track_event_config &#123;</span><br><span class="line">      disabled_categories: <span class="string">&quot;*&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;player&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;rendering&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">  producer_name_filter: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>这里的 <code>max_per_24_h</code> 和 <code>skip_probability</code> 是兜底，实际产品仍要在平台侧做用户、设备、版本、trigger 和天维度限频。遇到 GPU、SurfaceFlinger、HWC 或功耗专项时，再切换更完整的图形&#x2F;功耗 preset。</p>
+<p>测试设备上可以用命令验证 trigger：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">/system/bin/trigger_perfetto app_ui_jank</span><br></pre></td></tr></table></figure>
+
+<p>Perfetto trigger 的模型是：有权限的 consumer 预先声明 trigger 名字，App 这类 producer 只能激活已声明的名字。接了 Perfetto SDK 的 native 模块也可以用 SDK 触发；产品上仍建议由平台接口统一控制权限和配额：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">perfetto::Tracing::<span class="built_in">ActivateTriggers</span>(&#123;<span class="string">&quot;app_ui_jank&quot;</span>&#125;, <span class="number">10000</span>);</span><br></pre></td></tr></table></figure>
+
+<p>第二个参数是触发请求的 TTL，避免 producer 还没连上 tracing service 时留下无限期的 pending trigger。</p>
+<p>线上 App 不应假设自己能执行 <code>/system/bin/trigger_perfetto</code>。更推荐由平台提供受控接口，例如系统服务、厂商 SDK、企业版设备管理组件或测试框架代理。App 只提交一个受限请求：</p>
+<figure class="highlight json"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="punctuation">&#123;</span></span><br><span class="line">  <span class="attr">&quot;preset&quot;</span><span class="punctuation">:</span> <span class="string">&quot;ui_jank_field_v3&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trigger&quot;</span><span class="punctuation">:</span> <span class="string">&quot;app_ui_jank&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;reason&quot;</span><span class="punctuation">:</span> <span class="string">&quot;three_jank_frames_in_2s&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;scenario_id&quot;</span><span class="punctuation">:</span> <span class="string">&quot;feed_scroll_120hz&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;session_id&quot;</span><span class="punctuation">:</span> <span class="string">&quot;s-20260504-001&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;action_id&quot;</span><span class="punctuation">:</span> <span class="string">&quot;scroll-42&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;page&quot;</span><span class="punctuation">:</span> <span class="string">&quot;Feed&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;action&quot;</span><span class="punctuation">:</span> <span class="string">&quot;scroll&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;elapsed_realtime_ns&quot;</span><span class="punctuation">:</span> <span class="number">123456789000000</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;jank_frames&quot;</span><span class="punctuation">:</span> <span class="punctuation">[</span></span><br><span class="line">    <span class="punctuation">&#123;</span></span><br><span class="line">      <span class="attr">&quot;frame_start_elapsed_realtime_ns&quot;</span><span class="punctuation">:</span> <span class="number">123456700000000</span><span class="punctuation">,</span></span><br><span class="line">      <span class="attr">&quot;duration_ns&quot;</span><span class="punctuation">:</span> <span class="number">32000000</span><span class="punctuation">,</span></span><br><span class="line">      <span class="attr">&quot;expected_duration_ns&quot;</span><span class="punctuation">:</span> <span class="number">8333333</span><span class="punctuation">,</span></span><br><span class="line">      <span class="attr">&quot;states&quot;</span><span class="punctuation">:</span> <span class="punctuation">&#123;</span></span><br><span class="line">        <span class="attr">&quot;page&quot;</span><span class="punctuation">:</span> <span class="string">&quot;Feed&quot;</span><span class="punctuation">,</span></span><br><span class="line">        <span class="attr">&quot;action&quot;</span><span class="punctuation">:</span> <span class="string">&quot;scroll&quot;</span></span><br><span class="line">      <span class="punctuation">&#125;</span></span><br><span class="line">    <span class="punctuation">&#125;</span></span><br><span class="line">  <span class="punctuation">]</span></span><br><span class="line"><span class="punctuation">&#125;</span></span><br></pre></td></tr></table></figure>
+
+<p>平台侧根据 preset 白名单、采样率、权限、设备状态和每日配额决定是否触发。这套接口约定比“App 自己拼 TraceConfig”更适合长期维护。服务端匹配时应输出 <code>trigger_event_ts</code>、<code>nearest_marker</code>、<code>marker_delta_ms</code>、<code>matched_by</code>，避免外部 JSON 和 trace 时间轴只靠人工猜。</p>
+<p>触发策略要靠近用户感知，而不是靠近内部实现细节：</p>
+<table>
+<thead>
+<tr>
+<th>触发</th>
+<th>典型信号</th>
+<th>Trace 里要看什么</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>UI 慢帧</td>
+<td>JankStats 连续慢帧、严重超预算</td>
+<td>主线程、RenderThread、FrameTimeline、CPU</td>
+</tr>
+<tr>
+<td>主线程卡死前兆</td>
+<td>2s &#x2F; 4s &#x2F; 8s watchdog</td>
+<td>主线程状态、Binder、锁、IO、系统服务</td>
+</tr>
+<tr>
+<td>业务 timeout</td>
+<td>Camera open、播放器 prepare、首屏 timeout</td>
+<td>App marker、Binder、HAL、线程状态</td>
+</tr>
+</tbody></table>
+<p>触发名进入平台 preset 后要保持稳定。改名会让服务端聚合、SQL 模板和历史数据断开。</p>
+<h2 id="Trace-package-要带上下文"><a href="#Trace-package-要带上下文" class="headerlink" title="Trace package 要带上下文"></a>Trace package 要带上下文</h2><p>一份现场包先分最小必需和平台化扩展。第 13 篇只要求最小必需：Trace 本体、业务 metadata、采集 preset、stats 可信度结果。上传策略、日志白名单和保留周期属于平台化后的规则，可以后续单独设计。</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">trace-package/</span><br><span class="line">  trace.perfetto-trace</span><br><span class="line">  app_metadata.json</span><br><span class="line">  app_events.jsonl</span><br><span class="line">  trace_preset.txt</span><br><span class="line">  trace_stats.json</span><br><span class="line">  upload_policy.json   # 平台化后再补</span><br><span class="line">  log_excerpt.txt      # 平台化后再补</span><br></pre></td></tr></table></figure>
+
+<p><code>app_metadata.json</code> 描述这次问题现场，字段要固定并带 schema 版本：</p>
+<figure class="highlight json"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="punctuation">&#123;</span></span><br><span class="line">  <span class="attr">&quot;schema_version&quot;</span><span class="punctuation">:</span> <span class="number">3</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;app_version&quot;</span><span class="punctuation">:</span> <span class="string">&quot;8.12.0&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;package_name&quot;</span><span class="punctuation">:</span> <span class="string">&quot;com.example.app&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;page&quot;</span><span class="punctuation">:</span> <span class="string">&quot;Feed&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;action&quot;</span><span class="punctuation">:</span> <span class="string">&quot;scroll&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trigger&quot;</span><span class="punctuation">:</span> <span class="string">&quot;app_ui_jank&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trigger_reason&quot;</span><span class="punctuation">:</span> <span class="string">&quot;three_jank_frames_in_2s&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trigger_elapsed_realtime_ns&quot;</span><span class="punctuation">:</span> <span class="number">123456789000000</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;scenario_id&quot;</span><span class="punctuation">:</span> <span class="string">&quot;feed_scroll_120hz&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;session_id&quot;</span><span class="punctuation">:</span> <span class="string">&quot;s-20260504-001&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;action_id&quot;</span><span class="punctuation">:</span> <span class="string">&quot;scroll-42&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;refresh_rate_hz&quot;</span><span class="punctuation">:</span> <span class="number">120</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;thermal_state&quot;</span><span class="punctuation">:</span> <span class="string">&quot;normal&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trace_preset&quot;</span><span class="punctuation">:</span> <span class="string">&quot;ui_jank_field_v3&quot;</span></span><br><span class="line"><span class="punctuation">&#125;</span></span><br></pre></td></tr></table></figure>
+
+<p>其他几个文件也要有最小字段：</p>
+<p><code>trace_stats.json</code> 至少保留第 12 篇 health check 的结果：</p>
+<figure class="highlight json"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="punctuation">&#123;</span></span><br><span class="line">  <span class="attr">&quot;trace_quality_status&quot;</span><span class="punctuation">:</span> <span class="string">&quot;partial&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;track_event_trust_level&quot;</span><span class="punctuation">:</span> <span class="string">&quot;weak&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;stats&quot;</span><span class="punctuation">:</span> <span class="punctuation">[</span></span><br><span class="line">    <span class="punctuation">&#123;</span></span><br><span class="line">      <span class="attr">&quot;name&quot;</span><span class="punctuation">:</span> <span class="string">&quot;traced_buf_chunks_overwritten&quot;</span><span class="punctuation">,</span></span><br><span class="line">      <span class="attr">&quot;idx&quot;</span><span class="punctuation">:</span> <span class="number">1</span><span class="punctuation">,</span></span><br><span class="line">      <span class="attr">&quot;idx_semantics&quot;</span><span class="punctuation">:</span> <span class="string">&quot;buffer&quot;</span><span class="punctuation">,</span></span><br><span class="line">      <span class="attr">&quot;severity&quot;</span><span class="punctuation">:</span> <span class="string">&quot;info&quot;</span><span class="punctuation">,</span></span><br><span class="line">      <span class="attr">&quot;source&quot;</span><span class="punctuation">:</span> <span class="string">&quot;trace&quot;</span><span class="punctuation">,</span></span><br><span class="line">      <span class="attr">&quot;value&quot;</span><span class="punctuation">:</span> <span class="number">12</span><span class="punctuation">,</span></span><br><span class="line">      <span class="attr">&quot;affected_evidence&quot;</span><span class="punctuation">:</span> <span class="string">&quot;track_event&quot;</span><span class="punctuation">,</span></span><br><span class="line">      <span class="attr">&quot;decision&quot;</span><span class="punctuation">:</span> <span class="string">&quot;degrade_app_marker_metrics&quot;</span></span><br><span class="line">    <span class="punctuation">&#125;</span></span><br><span class="line">  <span class="punctuation">]</span></span><br><span class="line"><span class="punctuation">&#125;</span></span><br></pre></td></tr></table></figure>
+
+<p><code>upload_policy.json</code> 说明这份现场包能不能上传、保留多久：</p>
+<figure class="highlight json"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="punctuation">&#123;</span></span><br><span class="line">  <span class="attr">&quot;policy_version&quot;</span><span class="punctuation">:</span> <span class="number">2</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;network&quot;</span><span class="punctuation">:</span> <span class="string">&quot;wifi_only&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;daily_device_quota&quot;</span><span class="punctuation">:</span> <span class="number">3</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;retention_days&quot;</span><span class="punctuation">:</span> <span class="number">14</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;encryption&quot;</span><span class="punctuation">:</span> <span class="string">&quot;required&quot;</span></span><br><span class="line"><span class="punctuation">&#125;</span></span><br></pre></td></tr></table></figure>
+
+<p><code>app_events.jsonl</code> 用一行一个 JSON 事件保存触发点和少量 App 侧状态，并和 Track Event 共享 <code>scenario_id/session_id/action_id</code>：</p>
+<figure class="highlight json"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="punctuation">&#123;</span><span class="attr">&quot;elapsed_realtime_ns&quot;</span><span class="punctuation">:</span><span class="number">123456789000000</span><span class="punctuation">,</span><span class="attr">&quot;event&quot;</span><span class="punctuation">:</span><span class="string">&quot;trigger&quot;</span><span class="punctuation">,</span><span class="attr">&quot;scenario_id&quot;</span><span class="punctuation">:</span><span class="string">&quot;feed_scroll_120hz&quot;</span><span class="punctuation">,</span><span class="attr">&quot;session_id&quot;</span><span class="punctuation">:</span><span class="string">&quot;s-20260504-001&quot;</span><span class="punctuation">,</span><span class="attr">&quot;action_id&quot;</span><span class="punctuation">:</span><span class="string">&quot;scroll-42&quot;</span><span class="punctuation">,</span><span class="attr">&quot;page&quot;</span><span class="punctuation">:</span><span class="string">&quot;Feed&quot;</span><span class="punctuation">,</span><span class="attr">&quot;action&quot;</span><span class="punctuation">:</span><span class="string">&quot;scroll&quot;</span><span class="punctuation">&#125;</span></span><br></pre></td></tr></table></figure>
+
+<p><code>log_excerpt.txt</code> 只放白名单 tag 的短窗口摘要，至少记录 tag、level、elapsed realtime 和脱敏后的 message。</p>
+<p>时间戳建议统一使用 <code>elapsedRealtimeNanos</code> &#x2F; <code>CLOCK_BOOTTIME</code> 语义，并在字段名里写清楚。Perfetto 能同步 trace packet 里带 <code>timestamp_clock_id</code> &#x2F; <code>ClockSnapshot</code> 的时间域，但外部 JSON 不会自动归一。metadata 里最好记录 trace start&#x2F;end 的 elapsed realtime，或者服务端使用明确 offset 把外部事件放回 Trace 窗口。Track Event 默认让 SDK 取时间；只有能保证 clock domain 和转换逻辑时才传显式 timestamp，并记录 clock source、offset 和单位。</p>
+<p>App 侧不要直接截断 <code>trace.perfetto-trace</code>。Perfetto trace 是 protobuf 流，粗暴二进制裁剪可能破坏 packet、时钟同步和增量状态。更稳的做法是在采集侧控制窗口：Ring Buffer 控制触发前窗口，<code>stop_delay_ms</code> 控制触发后窗口，trigger 限频控制重复抓取。</p>
+<p><code>max_file_size_bytes</code> 是文件大小硬上限，达到后会停止 tracing；长时间 flight recorder 如果 cap 太小，可能在 trigger 前就结束。它适合和 <code>write_into_file</code> &#x2F; <code>file_write_period_ms</code> 一起控制落盘风险，不是窗口裁剪工具。</p>
+<p>平台化后，上传策略再把配额、隐私和重试写进产品规则：</p>
+<ul>
+<li>设备侧配额：按用户、设备、版本、trigger 和天维度限频。</li>
+<li>网络条件：默认只在 Wi-Fi 或用户允许的网络上传，低电量、温度异常、后台受限时延后。</li>
+<li>内容白名单：metadata 字段固定，log 只允许白名单 tag，App trace section 禁止拼接用户输入。</li>
+<li>Trace 本体：最小化数据源，限制进程&#x2F;producer，避免默认 logcat；ftrace、sched、Binder、线程名、进程名本身也可能是敏感信息。</li>
+<li>传输和保留：加密上传，服务端访问审计，Trace、log 摘要、聚合结果设置独立 TTL，到期自动清理。</li>
+</ul>
+<p>App 提供业务阶段、异常触发和 metadata；平台提供受控 preset、trigger 和文件管理；服务端提供可信度检查、摘要和聚合。三部分配齐之后，Perfetto 才能从一次次手工抓取，进入可持续的线上问题排查流程。</p>
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>Perfetto SDK 的价值是补业务语义：系统知道线程在跑，SDK 告诉你这段时间在 decode 哪一帧、队列有多深、请求从哪里流到哪里。</p>
+<p>工程上建议按这个顺序做：Java&#x2F;Kotlin 层先用 <code>android.os.Trace</code>，native 长期埋点用 Track Event，复杂结构再考虑自定义 DataSource。事件名稳定、category 可控、counter 有单位、flow 有稳定 id，后面的 SQL 和报告才可长期复用。进入现场 Trace 后，App 还要把触发、metadata、证据包和上传策略一起设计好。</p>
+<h2 id="参考文档"><a href="#参考文档" class="headerlink" title="参考文档"></a>参考文档</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/instrumentation/tracing-sdk">Tracing SDK</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/instrumentation/track-events">Track events</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/getting-started/in-app-tracing">Recording In-App Traces with Perfetto</a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.android.com/reference/androidx/tracing/perfetto/package-summary">androidx.tracing.perfetto</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/concepts/config">Trace configuration - Triggers</a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.android.com/reference/android/os/Trace">android.os.Trace</a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.android.com/topic/performance/jankstats">JankStats Library</a></li>
+</ol>
+<h2 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h2><p>欢迎关注 <a target="_blank" rel="noopener" href="https://www.androidperformance.com/">Android Performance</a>。</p>
+<!-- flag of hidden posts -->
+    </article>
+    <!-- license -->
+        <div class="license-wrapper">
+            <p>Author：<a href="https://androidperformance.com">Gracker</a>
+            <p>Link：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">https://androidperformance.com/2026/05/04/Android-Perfetto-13-Track-Event-SDK/</a>
+            <p>Publish date：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">May 4th 2026, 10:13:00 am</a>
+            <p>Update date：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">May 11th 2026, 7:29:51 am</a>
+            <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
+        </div>
+    <!-- paginator -->
+    <ul class="post-paginator">
+        <li class="next">
+        </li>
+        <li class="previous">
+        </li>
+    </ul>
+    <!-- comment -->
+        <div class="post-comment">
+            <!-- 来必力 City 版安装代码 -->
+
+            
+            
+            
+            <!-- utteranc评论 -->
+
+            <!-- partial('_partial/comment/changyan') -->
+            <!--PC版-->
+
+            
+            
+            
+        </div>
+    <!-- timeliness note -->
+    <!-- idea from: https://hexo.fluid-dev.com/posts/hexo-injector/#%E6%96%87%E7%AB%A0%E6%97%B6%E6%95%88%E6%80%A7%E6%8F%90%E7%A4%BA -->
+    <!-- Mathjax -->
+</main>
+
+                <!-- profile -->
+            </div>
+            <footer class="footer footer-unloaded">
+    <!-- social  -->
+        <div class="social">
+                            <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title="email" ></a>
+                <a href="https://github.com/gracker" class="iconfont-archer github" target="_blank" title="github"></a>
+                <span class="iconfont-archer wechat" title="wechat">
+                        <img class="profile-qr" src="/assets/Wechat.jpeg" />
+                </span>
+                <span class="iconfont-archer qq" title="qq: 553000664">
+                </span>
+                <a href="https://weibo.com/gracker520" class="iconfont-archer weibo" target="_blank" title="weibo"></a>
+                <a href="https://www.zhihu.com/people/gracker" class="iconfont-archer zhihu" target="_blank" title="zhihu"></a>
+                <a href="https://twitter.com/Gracker_Gao" class="iconfont-archer twitter" target="_blank" title="twitter"></a>
+                <a href="https://juejin.im/user/557b0590e4b052e031453d76" class="iconfont-archer juejin" target="_blank" title="juejin"></a>
+                <a href="/atom.xml" class="iconfont-archer rss" target="_blank" title="rss"></a>
+
+        </div>
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- website approve for Chinese user -->
+        <div class="website-approve">
+                <span id="icp-approve" class="icp-approve">
+                    <a href="https://beian.miit.gov.cn/" target="_blank">蜀 ICP 备 20016190 号</a>
+                </span>
+        </div>
+</footer>
+
+        </div>
+        <!-- toc -->
+            <div class="toc-wrapper toc-wrapper-loding" style=    top:50vh;
+>
+                <div class="toc-catalog">
+                    <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+                </div>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BB%80%E4%B9%88%E6%97%B6%E5%80%99%E9%9C%80%E8%A6%81%E4%B8%9A%E5%8A%A1%E8%AF%AD%E4%B9%89"><span class="toc-number">1.</span> <span class="toc-text">什么时候需要业务语义</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#SDK-%E6%8E%A5%E5%85%A5%E8%BE%B9%E7%95%8C"><span class="toc-number">2.</span> <span class="toc-text">SDK 接入边界</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%9A%E5%8A%A1%E9%98%B6%E6%AE%B5%E5%AD%97%E5%85%B8%E5%85%88%E4%BA%8E%E4%BB%A3%E7%A0%81"><span class="toc-number">3.</span> <span class="toc-text">业务阶段字典先于代码</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%A4%E7%A7%8D-backend-%E8%A7%A3%E5%86%B3%E4%B8%8D%E5%90%8C%E9%97%AE%E9%A2%98"><span class="toc-number">4.</span> <span class="toc-text">两种 backend 解决不同问题</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%9C%80%E5%B0%8F%E6%8E%A5%E5%85%A5%E9%AA%A8%E6%9E%B6"><span class="toc-number">5.</span> <span class="toc-text">最小接入骨架</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#category-%E6%98%AF%E7%BA%BF%E4%B8%8A%E5%BC%80%E5%85%B3"><span class="toc-number">6.</span> <span class="toc-text">category 是线上开关</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%92%8C%E7%B3%BB%E7%BB%9F-Trace-%E4%B8%80%E8%B5%B7%E6%8A%93"><span class="toc-number">7.</span> <span class="toc-text">和系统 Trace 一起抓</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%B7%A8%E7%BA%BF%E7%A8%8B%E4%BB%BB%E5%8A%A1%E7%94%A8-flow-%E6%88%96%E7%8B%AC%E7%AB%8B-track"><span class="toc-number">8.</span> <span class="toc-text">跨线程任务用 flow 或独立 track</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Counter-%E5%8F%AA%E6%94%BE%E7%8A%B6%E6%80%81%EF%BC%8C%E4%B8%8D%E6%94%BE%E6%97%A5%E5%BF%97"><span class="toc-number">9.</span> <span class="toc-text">Counter 只放状态，不放日志</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BA%8B%E4%BB%B6%E5%90%8D%E6%98%AF-SQL-%E6%8E%A5%E5%8F%A3"><span class="toc-number">10.</span> <span class="toc-text">事件名是 SQL 接口</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%8E%A7%E5%88%B6%E5%86%99%E5%85%A5%E9%87%8F"><span class="toc-number">11.</span> <span class="toc-text">控制写入量</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#App-%E4%BE%A7%E7%8E%B0%E5%9C%BA-Trace-%E5%8D%8F%E8%AE%AE"><span class="toc-number">12.</span> <span class="toc-text">App 侧现场 Trace 协议</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Trace-package-%E8%A6%81%E5%B8%A6%E4%B8%8A%E4%B8%8B%E6%96%87"><span class="toc-number">13.</span> <span class="toc-text">Trace package 要带上下文</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%80%BB%E7%BB%93"><span class="toc-number">14.</span> <span class="toc-text">总结</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E6%96%87%E6%A1%A3"><span class="toc-number">15.</span> <span class="toc-text">参考文档</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number">16.</span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a></li></ol>
+            </div>
+        <!-- sidebar -->
+        <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+        <div class="sidebar-panel-archives">
+    <!-- 在 ejs 中将 archive 按照时间排序 -->
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 126
+        </div>
+    </div>
+    <div class="post-archive">
+            <div class="archive-year"> 2026 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/05</span>
+            <a class="archive-post-title" href="/2026/05/05/What-I-Am-Building/">「置顶」我做了什么</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/29</span>
+            <a class="archive-post-title" href="/2026/04/29/SmartPerfetto-Open-Source-Perfetto-AI-Assistant/">SmartPerfetto 开源：面向 Android Trace 分析的 Perfetto AI Assistant</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/28</span>
+            <a class="archive-post-title" href="/2026/04/28/Agent-OS-Task-Entry/">万字长文推演：手机不再从 App 开始，Agent OS 如何接管任务入口</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/10</span>
+            <a class="archive-post-title" href="/2026/04/10/SmartPerfetto-Architecture-Deep-Dive-QA/">SmartPerfetto 架构文章 Q&A：8 个深度技术问答</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/10</span>
+            <a class="archive-post-title" href="/2026/04/10/SmartPerfetto-Architecture-Deep-Dive/">从 Trace 到洞察：SmartPerfetto AI Agent 的 Harness Engineering 实战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/10</span>
+            <a class="archive-post-title" href="/2026/03/10/OpenClaw-FAQ/">OpenClaw 常见问题解答：Token 消耗、能干什么、本地模型、隐私安全、使用体验</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/08</span>
+            <a class="archive-post-title" href="/2026/03/08/OpenClaw-Local-Practice/">我把 OpenClaw 跑在本地三周后，发现它根本不是聊天机器人</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2025 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/16</span>
+            <a class="archive-post-title" href="/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto 系列 10 - Binder 调度与锁竞争</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 9 - CPU 信息解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/02</span>
+            <a class="archive-post-title" href="/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7 - MainThread 和 RenderThread 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/26</span>
+            <a class="archive-post-title" href="/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/26</span>
+            <a class="archive-post-title" href="/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto 系列 5：Android App 基于 Choreographer 的渲染流程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto 系列 4：使用命令行在本地打开超大 Trace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR 系列 3 ：ANR 案例分享</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR 系列 2 ：ANR 分析套路和关键 Log 介绍</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-01-ANR-Design/">Android ANR 系列 1 ：理解 Android ANR 设计思想</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2024 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto 系列 3：熟悉 Perfetto View</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto 系列 2：Perfetto Trace 抓取</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto 系列 1：Perfetto 工具简介</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/2024/03/27/Android-Perfetto-101/">Android Perfetto 系列目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/01</span>
+            <a class="archive-post-title" href="/2024/01/01/2023-review/">2023 年的方方面面</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2023 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/30</span>
+            <a class="archive-post-title" href="/2023/12/30/the-performance/">关于 The Android Performance 知识星球介绍</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/15</span>
+            <a class="archive-post-title" href="/2023/10/15/the-performance-design-of-os-en/">The Performance Design Of OS</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/2023/08/21/the-performance-design-of-os/">OS 设计之性能设计</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/2023/05/14/bad-android-app-with-system-permissions/">当 App 有了系统权限，真的可以为所欲为？</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2022 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/2022/03/27/the-performance-tea-part-01/">The Performance 星球茶话会 - 第一期</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/2022/03/13/android-systrace-cpu-state-running/">Systrace 线程 CPU 运行状态分析技巧 - Running 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/2022/01/21/android-systrace-cpu-state-runnable/">Systrace 线程 CPU 运行状态分析技巧 - Runnable 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/03</span>
+            <a class="archive-post-title" href="/2022/01/03/2021-Review/">回顾 2021</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2021 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/27</span>
+            <a class="archive-post-title" href="/2021/10/27/if-i-write-a-book-about-performance/">一本讲 Android 流畅性的书，应该有什么内容？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/26</span>
+            <a class="archive-post-title" href="/2021/10/26/build-android-12/">Android 系统开发系列（1）：Android 12 源代码下载、编译和刷机</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace 响应速度实战 3 ：响应速度延伸知识</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace 响应速度实战 2 ：响应速度实战分析-以启动速度为例</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace 响应速度实战 1 ：了解响应速度原理</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace 流畅性实战 3 ：卡顿分析过程中的一些疑问</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace 流畅性实战 2 ：案例分析 - MIUI 桌面滑动卡顿分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace 流畅性实战 1 ：了解卡顿原理</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2020 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span>
+            <a class="archive-post-title" href="/2020/08/20/weibo-imageload-opt-on-huawei/">华为手机刷微博体验更好？技术角度的一些分析和思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/2020/05/26/samsung_crash/">一个「闰」字引发的事故 - 三星系统重启分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/2020/05/07/Android-App-Chain-Wakeup/">Android App 链式唤醒分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/14</span>
+            <a class="archive-post-title" href="/2020/02/14/Android-Systrace-SurfaceFlinger/">Android Systrace 基础知识 - SurfaceFlinger 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/03</span>
+            <a class="archive-post-title" href="/2020/02/03/android-development-learning-path-2020-edition/">Android 开发者学习路线(2020 版本)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span>
+            <a class="archive-post-title" href="/2020/01/28/2020-read/">我的 2020 年读书单</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2019 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/21</span>
+            <a class="archive-post-title" href="/2019/12/21/Android-Systrace-CPU/">Android Systrace 基础知识 - CPU Info 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/15</span>
+            <a class="archive-post-title" href="/2019/12/15/Android-Systrace-Triple-Buffer/">Android Systrace 基础知识 - Triple Buffer 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/06</span>
+            <a class="archive-post-title" href="/2019/12/06/Android-Systrace-Binder/">Android Systrace 基础知识 - Binder 和锁竞争解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/2019/12/01/BlogMap/">「置顶」博客文章目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/2019/12/01/Android-Systrace-Vsync/">Android Systrace 基础知识 - Vsync 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/2019/11/18/Android-App-Lunch-Optimize/">Android App 启动优化全记录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/06</span>
+            <a class="archive-post-title" href="/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Android Systrace 基础知识 - MainThread 和 RenderThread 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/04</span>
+            <a class="archive-post-title" href="/2019/11/04/Android-Systrace-Input/">Android Systrace 基础知识 - Input 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/24</span>
+            <a class="archive-post-title" href="/2019/10/24/Android-Background-Animation/">Android 中的“后台无效动画“行为分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/22</span>
+            <a class="archive-post-title" href="/2019/10/22/Android-Choreographer/">Android 基于 Choreographer 的渲染机制详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/2019/09/18/Android-Jank-Due-To-Low-Memory/">Android 中的卡顿丢帧原因概述 - 低内存篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/17</span>
+            <a class="archive-post-title" href="/2019/09/17/Android-Kill-Background-App-Debug/">Android 桌面被杀问题分析案例</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Due-To-App/">Android 中的卡顿丢帧原因概述 - 应用篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Due-To-System/">Android 中的卡顿丢帧原因概述 - 系统篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Debug/">Android 中的卡顿丢帧原因概述 - 方法论</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/2019/09/01/Android-Activity-Lunch-Mode/">Android 中的 Activity Launch Mode 详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/2019/07/27/Android-Hardware-Layer/">Android 中的 Hardware Layer 详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/23</span>
+            <a class="archive-post-title" href="/2019/07/23/Android-Systrace-Pre/">Android Systrace 基础知识 -- 分析 Systrace 预备知识</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/29</span>
+            <a class="archive-post-title" href="/2019/06/29/Android-Systrace-SystemServer/">Android Systrace 基础知识 - SystemServer 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/2019/05/28/Android-Systrace-About/">Android Systrace 基础知识 -- Systrace 简介</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/27</span>
+            <a class="archive-post-title" href="/2019/05/27/why-60-fps/">Android Systrace 基础知识 -- Why 60 fps ？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/2019/05/26/Android_Systrace_0/">Android Systrace -- 系列文章目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/15</span>
+            <a class="archive-post-title" href="/2019/05/15/90hz-on-android/">Android 新的流畅体验，90Hz 漫谈</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/2019/04/07/liqi/">利器 - 高效工具推荐</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/2019/01/21/android-performance-case-jank-accessbility/">Android 无障碍服务导致的整机卡顿案例分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/12</span>
+            <a class="archive-post-title" href="/2019/01/12/recommend-of-2018/">2018 年度好物推荐 - 给辛勤工作的自己一点奖励</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2018 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span>
+            <a class="archive-post-title" href="/2018/11/01/android-system-develop-0/">Android 系统开发源码环境搭建</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/25</span>
+            <a class="archive-post-title" href="/2018/10/25/How-do-engineers-count-well/">陆奇：除了好代码，工程师怎样才算优秀？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/01</span>
+            <a class="archive-post-title" href="/2018/10/01/how-to-stop-sucking-and-be-awesome-instead-8/">程序员的修炼-08-阅读之美</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/30</span>
+            <a class="archive-post-title" href="/2018/09/30/how-to-stop-sucking-and-be-awesome-instead-7/">程序员的修炼-07-游戏与编程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/29</span>
+            <a class="archive-post-title" href="/2018/09/29/how-to-stop-sucking-and-be-awesome-instead-6/">程序员的修炼-06-互联网那些事</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/28</span>
+            <a class="archive-post-title" href="/2018/09/28/how-to-stop-sucking-and-be-awesome-instead-5/">程序员的修炼-05-了解你的用户</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/27</span>
+            <a class="archive-post-title" href="/2018/09/27/how-to-stop-sucking-and-be-awesome-instead-4/">程序员的修炼-04-关于测试的一些思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/26</span>
+            <a class="archive-post-title" href="/2018/09/26/how-to-stop-sucking-and-be-awesome-instead-3/">程序员的修炼-03-Web 设计原则</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/20</span>
+            <a class="archive-post-title" href="/2018/09/20/how-to-stop-sucking-and-be-awesome-instead-2/">程序员的修炼-02-编程之道</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/2018/09/19/how-to-stop-sucking-and-be-awesome-instead-1/">程序员的修炼-01-绝地反击之术</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2018/09/13/android-memory/">Android 系统不释放内存吗？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/13</span>
+            <a class="archive-post-title" href="/2018/08/13/Some-Thoughts-on-the-Fluency-of-Android/">关于 Android 系统流畅性的一些思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/20</span>
+            <a class="archive-post-title" href="/2018/05/20/zhihu-startingwindow/">知乎 救救你的 StartingWindow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/2018/05/07/Android-performance-optimization-skills-and-tools/">「置顶」Android 性能优化必知必会</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/2018/01/06/2017%E5%B9%B4%E5%BA%A6%E6%9C%80%E6%8E%A8%E8%8D%90/">2017 年度好物推荐 - 给辛勤工作的自己一点奖励</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2017 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/23</span>
+            <a class="archive-post-title" href="/2017/04/23/About-work/">2017</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2016 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/2016/04/05/android-bottom-bar-2/">Android Bottom navigation 规范二：样式、行为与规格</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/2016/04/05/android-bottom-bar-1/">Android Bottom Navigation 规范一：使用方法</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2015 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/31</span>
+            <a class="archive-post-title" href="/2015/12/31/How-to-calculation-android-app-lunch-time/">Android 中如何计算 App 的启动时间？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/29</span>
+            <a class="archive-post-title" href="/2015/12/29/Android%E5%BA%94%E7%94%A8%E5%90%AF%E5%8A%A8%E4%BC%98%E5%8C%96-%E4%B8%80%E7%A7%8DDelayLoad%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%92%8C%E5%8E%9F%E7%90%86-%E4%B8%8B%E7%AF%87/">Android 应用启动优化:一种 DelayLoad 的实现和原理(下篇)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/2015/11/18/Android-app-lunch-optimize-delay-load/">Android 应用启动优化 - 一种 DelayLoad 的实现和原理(上篇)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/12</span>
+            <a class="archive-post-title" href="/2015/08/12/AndroidL-hwui-RenderThread-workflow/">Android hwui 中 RenderThread 工作流程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/2015/08/05/HashMap/">Java7 HashMap 源码分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-onTrimMemory/">Android 代码内存优化建议 - OnTrimMemory 优化</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-AndroidResource/">Android 代码内存优化建议 - Android 资源篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-Google/">Android 代码内存优化建议 - Android 官方篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-Java/">Android 代码内存优化建议 - Java 官方篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/29</span>
+            <a class="archive-post-title" href="/2015/05/29/Nexus6-with-Android-M/">Nexus6 with Android M 开启多窗口模式</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/06</span>
+            <a class="archive-post-title" href="/2015/05/06/Java-Singleton/">细说 Java 单例模式</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-4/">Android 性能优化典范 - Profile GPU Rendering</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-3/">Android 性能优化典范 - Understanding VSYNC</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-2/">Android 性能优化典范之 Understanding Overdraw</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-1/">Android 性能优化典范 - Render Performance</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns/">Android 性能优化典范综述</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/">Android 内存优化之三 - 打开 MAT 中的 Bitmap 原图</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android 内存优化之二 - MAT使用进阶</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android 内存优化(1) - MAT 使用入门</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/31</span>
+            <a class="archive-post-title" href="/2015/03/31/android-performance-case-study-follow-up/">Android性能优化后续</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-5/">Android 小技巧 - 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-4/">Android 小技巧 - 4</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-3/">Android 小技巧 -3</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/04</span>
+            <a class="archive-post-title" href="/2015/02/04/build-rom-for-nexus5/">为 Nexus5 编译 AndroidL 固件</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/30</span>
+            <a class="archive-post-title" href="/2015/01/30/android-performance-tools-systrace-1/">Android 性能优化之 Systrace 工具介绍(一)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/16</span>
+            <a class="archive-post-title" href="/2015/01/16/view-android-source-code-with-androidstudio/">使用 Android Studio 查看 Android Lollipop 源码</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/13</span>
+            <a class="archive-post-title" href="/2015/01/13/android-performance-optimization-overdraw-2/">Android 性能优化之过渡绘制 - 实战篇</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2014 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/2014/10/20/android-performance-optimization-overdraw-1/">Android 性能优化之过渡绘制 - 理论篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/03</span>
+            <a class="archive-post-title" href="/2014/06/03/android-edittext-do-not-auto-get-focus/">Android 小技巧 - 如何让EditText不自动获取焦点</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/31</span>
+            <a class="archive-post-title" href="/2014/05/31/android-tips-round-up-2/">Android 小技巧 -2</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/2014/05/28/android-tips-round-up-1/">Android 小技巧 - 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/02</span>
+            <a class="archive-post-title" href="/2014/05/02/android_log_to_file/">Android Tools - Log2File</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/01</span>
+            <a class="archive-post-title" href="/2014/04/01/android-service-build-your-own-notification-servers-app/">Android Service：开发自己的通知中心(2):辅助性服务实战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/25</span>
+            <a class="archive-post-title" href="/2014/03/25/ubuntu-adb-can-not-find-devices/">Android:Ubuntu 下执行 Adb 命令找不到设备</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/17</span>
+            <a class="archive-post-title" href="/2014/03/17/android-build-your-own-android-notification-service-app/">Android Service：开发自己的通知中心(1):辅助性服务介绍</a>
+        </li>
+            </ul>
+    </div>
+</div>
+
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="年度推荐">
+                <span class="iconfont-archer">&#xe606;</span>
+                年度推荐
+            </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="年终总结">
+                <span class="iconfont-archer">&#xe606;</span>
+                年终总结
+            </span>
+            <span class="sidebar-tag-name" data-tags="知识星球">
+                <span class="iconfont-archer">&#xe606;</span>
+                知识星球
+            </span>
+            <span class="sidebar-tag-name" data-tags="随笔">
+                <span class="iconfont-archer">&#xe606;</span>
+                随笔
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="Agent OS">
+                <span class="iconfont-archer">&#xe606;</span>
+                Agent OS
+            </span>
+            <span class="sidebar-tag-name" data-tags="AI">
+                <span class="iconfont-archer">&#xe606;</span>
+                AI
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenAI">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenAI
+            </span>
+            <span class="sidebar-tag-name" data-tags="Mobile OS">
+                <span class="iconfont-archer">&#xe606;</span>
+                Mobile OS
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="BlastBufferQueue">
+                <span class="iconfont-archer">&#xe606;</span>
+                BlastBufferQueue
+            </span>
+            <span class="sidebar-tag-name" data-tags="性能优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                性能优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="线程优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                线程优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="电量优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                电量优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR分析">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR分析
+            </span>
+            <span class="sidebar-tag-name" data-tags="页面响应">
+                <span class="iconfont-archer">&#xe606;</span>
+                页面响应
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
+            <span class="sidebar-tag-name" data-tags="程序员">
+                <span class="iconfont-archer">&#xe606;</span>
+                程序员
+            </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenClaw">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenClaw
+            </span>
+            <span class="sidebar-tag-name" data-tags="效率工具">
+                <span class="iconfont-archer">&#xe606;</span>
+                效率工具
+            </span>
+            <span class="sidebar-tag-name" data-tags="本地模型">
+                <span class="iconfont-archer">&#xe606;</span>
+                本地模型
+            </span>
+            <span class="sidebar-tag-name" data-tags="AI Agent">
+                <span class="iconfont-archer">&#xe606;</span>
+                AI Agent
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="SmartPerfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                SmartPerfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="MCP">
+                <span class="iconfont-archer">&#xe606;</span>
+                MCP
+            </span>
+            <span class="sidebar-tag-name" data-tags="Open Source">
+                <span class="iconfont-archer">&#xe606;</span>
+                Open Source
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计规范">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计规范
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Gracker">
+                <span class="iconfont-archer">&#xe606;</span>
+                Gracker
+            </span>
+            <span class="sidebar-tag-name" data-tags="Kotlin">
+                <span class="iconfont-archer">&#xe606;</span>
+                Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="读书笔记">
+                <span class="iconfont-archer">&#xe606;</span>
+                读书笔记
+            </span>
+            <span class="sidebar-tag-name" data-tags="程序员的修炼">
+                <span class="iconfont-archer">&#xe606;</span>
+                程序员的修炼
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计原则">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计原则
+            </span>
+            <span class="sidebar-tag-name" data-tags="了解你的用户">
+                <span class="iconfont-archer">&#xe606;</span>
+                了解你的用户
+            </span>
+            <span class="sidebar-tag-name" data-tags="测试">
+                <span class="iconfont-archer">&#xe606;</span>
+                测试
+            </span>
+            <span class="sidebar-tag-name" data-tags="互联网那些事">
+                <span class="iconfont-archer">&#xe606;</span>
+                互联网那些事
+            </span>
+            <span class="sidebar-tag-name" data-tags="游戏与编程">
+                <span class="iconfont-archer">&#xe606;</span>
+                游戏与编程
+            </span>
+            <span class="sidebar-tag-name" data-tags="利器">
+                <span class="iconfont-archer">&#xe606;</span>
+                利器
+            </span>
+            <span class="sidebar-tag-name" data-tags="阅读之美">
+                <span class="iconfont-archer">&#xe606;</span>
+                阅读之美
+            </span>
+            <span class="sidebar-tag-name" data-tags="iOS">
+                <span class="iconfont-archer">&#xe606;</span>
+                iOS
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design
+            </span>
+            <span class="sidebar-tag-name" data-tags="用户体验">
+                <span class="iconfont-archer">&#xe606;</span>
+                用户体验
+            </span>
+            <span class="sidebar-tag-name" data-tags="Smooth">
+                <span class="iconfont-archer">&#xe606;</span>
+                Smooth
+            </span>
+            <span class="sidebar-tag-name" data-tags="体验优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                体验优化
+            </span>
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+        缺失模块，请参考主题文档进行安装配置：https://github.com/fi3ework/hexo-theme-archer#%E5%AE%89%E8%A3%85%E4%B8%BB%E9%A2%98
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="随笔">
+            <span class="iconfont-archer">&#xe60a;</span>
+            随笔
+        </span>
+        <span class="sidebar-category-name" data-categories="读书笔记">
+            <span class="iconfont-archer">&#xe60a;</span>
+            读书笔记
+        </span>
+        <span class="sidebar-category-name" data-categories="Android">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android
+        </span>
+        <span class="sidebar-category-name" data-categories="AI">
+            <span class="iconfont-archer">&#xe60a;</span>
+            AI
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
+        </span>
+        <span class="sidebar-category-name" data-categories="iOS">
+            <span class="iconfont-archer">&#xe60a;</span>
+            iOS
+        </span>
+        <span class="sidebar-category-name" data-categories="Android性能优化">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android性能优化
+        </span>
+        <span class="sidebar-category-name" data-categories="个人页">
+            <span class="iconfont-archer">&#xe60a;</span>
+            个人页
+        </span>
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+
+    </div>
+</div>
+
+        <!-- site-meta -->
+        <script>
+    var siteMetaRoot = "/"
+    if (siteMetaRoot === "undefined") {
+        siteMetaRoot = '/'
+    }
+    var siteMeta = {
+        url: "https://androidperformance.com",
+        root: siteMetaRoot,
+        author: "Gracker"
+    }
+</script>
+
+        <!-- import experimental options here -->
+        <!-- Custom Font -->
+
+        <!-- jquery (must load before main.js) -->
+        <script src="/lib/jquery.min.js" defer></script>
+        <!-- main func (depends on jQuery) -->
+        <script src="/scripts/main.js" defer></script>
+        <script>
+    (function () {
+      function scheduleAfterLoad(task, delay, idleTimeout) {
+        function run() {
+          window.setTimeout(function () {
+            if (window.requestIdleCallback) {
+              window.requestIdleCallback(task, { timeout: idleTimeout || 3000 })
+            } else {
+              task()
+            }
+          }, delay || 0)
+        }
+
+        if (document.readyState === 'complete') {
+          run()
+        } else {
+          window.addEventListener('load', run, { once: true })
+        }
+      }
+
+      function loadScript(src, options) {
+        options = options || {}
+        if (options.id && document.getElementById(options.id)) return
+
+        var done = false
+        var script = document.createElement('script')
+        script.src = src
+        script.async = true
+        if (options.id) script.id = options.id
+        if (options.crossOrigin) script.crossOrigin = options.crossOrigin
+        if (options.referrerPolicy) script.referrerPolicy = options.referrerPolicy
+        script.onload = function () {
+          done = true
+          if (options.onload) options.onload()
+        }
+        script.onerror = function () {
+          done = true
+          if (script.parentNode) script.parentNode.removeChild(script)
+        }
+        if (options.timeout) {
+          window.setTimeout(function () {
+            if (done) return
+            script.onload = null
+            script.onerror = null
+            if (script.parentNode) script.parentNode.removeChild(script)
+          }, options.timeout)
+        }
+        document.head.appendChild(script)
+      }
+
+      function loadStyle(href, id) {
+        if (id && document.getElementById(id)) return
+        var link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = href
+        if (id) link.id = id
+        document.head.appendChild(link)
+      }
+
+      scheduleAfterLoad(function () {
+        if (!document.querySelector('[data-fancybox]')) return
+        loadStyle('/lib/fancybox/fancybox.css', 'fancybox-css')
+        loadScript('/lib/fancybox/fancybox.umd.js', {
+          id: 'fancybox-js',
+          timeout: 4000,
+          onload: function () {
+            if (window.Fancybox) window.Fancybox.bind('[data-fancybox]')
+          },
+        })
+      }, 1000, 3000)
+
+
+
+
+      scheduleAfterLoad(function () {
+        window.dataLayer = window.dataLayer || []
+        window.gtag = window.gtag || function () { window.dataLayer.push(arguments) }
+        window.gtag('js', new Date())
+        loadScript('https://www.googletagmanager.com/gtag/js?id=UA-50993302-2', {
+          id: 'gtag-js',
+          timeout: 4000,
+          onload: function () {
+            window.gtag('config', 'UA-50993302-2')
+          },
+        })
+      }, 4000, 3000)
+    })();
+</script>
+
+        <!-- search -->
+            <div class="site-search site-search-loading local-search-shell">
+    <div class="algolia-popup popup local-search-popup" role="dialog" aria-modal="true" aria-label="Search posts">
+        <div class="algolia-search local-search-header">
+            <div class="algolia-search-input-icon">
+                <i class="iconfont-archer">&#xe627;</i>
+            </div>
+            <div class="algolia-search-input local-search-input">
+                <input id="local-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="搜索文章">
+            </div>
+            <button class="popup-btn-close local-search-close" type="button" aria-label="Close search">
+                <i class="iconfont-archer" aria-hidden="true">&#xe609;</i>
+            </button>
+        </div>
+
+        <div class="algolia-results local-search-results">
+            <div
+                id="local-search-config"
+                data-path="/search.xml"
+                data-per-page="10"
+                data-empty="没有找到与「${query}」相关的文章"
+                data-stats="找到 ${hits} 个结果"
+                data-loading="正在加载搜索索引..."
+                data-error="搜索索引加载失败，请稍后重试"></div>
+            <div id="local-search-stats" class="algolia-stats"></div>
+            <div id="local-search-hits"></div>
+        </div>
+    </div>
+</div>
+
+            <script src="/scripts/local-search.js" async></script>
+        <!-- async load share.js on first click -->
+            <script>
+                (function(){
+                  var loaded = false
+                  function loadShare(){
+                    if (loaded) return
+                    loaded = true
+                    var s = document.createElement('script')
+                    s.src = '/scripts/share.js'
+                    s.async = true
+                    document.head.appendChild(s)
+                  }
+                  document.addEventListener('click', function(e){
+                    var t = e.target
+                    if (!t) return
+                    if (t.closest && t.closest('.share-wrapper')) { loadShare() }
+                    else if (t.classList && t.classList.contains('share-wrapper')) { loadShare() }
+                  }, true)
+                })();
+            </script>
+        <!-- mermaid -->
+    </body>
+</html>

@@ -1,0 +1,1833 @@
+<!DOCTYPE html>
+<html lang="zh,en">
+    <!-- title -->
+            <!-- keywords -->
+
+                  <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <meta name="author" content="Gracker">
+                    <meta name="renderer" content="webkit">
+                    <meta name="copyright" content="Gracker">
+                      <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,启动优化,Startup,Perfetto,Systrace,RenderThread,Java">
+                          <meta name="description" content="Focus On Android Performance">
+                          <meta name="description" content="内存问题最麻烦的地方在于：数字涨了，不代表马上能知道谁在涨。dumpsys meminfo 能告诉你 RSS&#x2F;PSS，Java heap dump 能告诉你对象保留关系，但 JNI&#x2F;C++、Skia&#x2F;Bitmap 的 CPU 侧分配、播放器里的 native wrapper 这些问题，经常还需要知道“哪个调用栈发起了 malloc&#x2F;new”。 第 14 篇讲">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Android Perfetto 系列 14：用 heapprofd 找 native 分配调用栈">
+<meta property="og:url" content="https://androidperformance.com/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/index.html">
+<meta property="og:site_name" content="Android Performance">
+<meta property="og:description" content="内存问题最麻烦的地方在于：数字涨了，不代表马上能知道谁在涨。dumpsys meminfo 能告诉你 RSS&#x2F;PSS，Java heap dump 能告诉你对象保留关系，但 JNI&#x2F;C++、Skia&#x2F;Bitmap 的 CPU 侧分配、播放器里的 native wrapper 这些问题，经常还需要知道“哪个调用栈发起了 malloc&#x2F;new”。 第 14 篇讲">
+<meta property="og:locale">
+<meta property="article:published_time" content="2026-05-04T02:14:00.000Z">
+<meta property="article:modified_time" content="2026-05-10T23:29:51.639Z">
+<meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Memory">
+<meta property="article:tag" content="Android">
+<meta property="article:tag" content="Perfetto">
+<meta property="article:tag" content="Performance">
+<meta property="article:tag" content="heapprofd">
+<meta name="twitter:card" content="summary">
+                            <meta http-equiv="Cache-control" content="no-cache">
+                            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+                            <link rel="icon" href="/assets/favicon.ico">
+                                <title>
+                                  Android Perfetto 系列 14：用 heapprofd 找 native 分配调用栈 · Android Performance
+                                </title><meta name="robots" content="noindex">
+                                
+<link rel="canonical" href="https://androidperformance.com/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">
+                                  <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/font/Oswald-Regular.woff2") format('woff2'),
+             url("/font/Oswald-Regular.ttf") format('truetype');
+        font-display: swap;
+    }
+
+    body {
+        margin: 0;
+    }
+
+    /* Removed initial hide to show content immediately */
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(
+            -45deg,
+            #444 0,
+            #444 80px,
+            #333 80px,
+            #333 160px
+        );
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+</style>
+
+                                    <link id="stylesheet-base" rel="stylesheet" href="/css/style.css">
+                                    <link id="stylesheet-mobile" rel="stylesheet" href="/css/mobile.css" media="screen and (max-width: 960px)">
+                                    <link id="stylesheet-theme-dark" rel="stylesheet" href="/css/dark.css">
+                                    <link id="stylesheet-custom" rel="stylesheet" href="/css/custom.css">
+                                    <link rel="preload" href="/lib/jquery.min.js" as="script">
+                                    <link rel="preload" href="/scripts/main.js" as="script">
+                                    <!-- algolia -->
+                                                    <!-- Hreflang Tags -->
+                                                    
+                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/" />
+                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/" />
+                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/" />
+                  <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/atom.xml" title="Android Performance" type="application/atom+xml">
+</head>
+
+        <body class="post-body">
+        <!-- header -->
+        <header class="header header-mobile">
+    <!-- top read progress line -->
+    <div class="header-element">
+        <div class="read-progress"></div>
+    </div>
+    <!-- sidebar menu button -->
+    <div class="header-element">
+        <div
+            class="header-sidebar-menu">
+                    <div style="padding-left: 1px;">&#xe775;</div>
+        </div>
+    </div>
+    <!-- header actions -->
+    <div class="header-actions">
+        <!-- search button -->
+            <span class="header-search-btn header-element popup-trigger" role="button" aria-label="Search" data-tooltip="Search">
+                <span class="iconfont-archer search-icon" aria-hidden="true">&#xe627;</span>
+            </span>
+        <!-- theme mode switch button -->
+        <span class="header-theme-btn header-element" role="button" aria-label="Theme" data-tooltip="Theme">
+            <span aria-hidden="true">&#9680;</span>
+        </span>
+        <!-- language transition button -->
+        <span class="header-lang-btn header-element" data-tooltip="Language">
+            <a href="javascript:void(0)" onclick="toggleLanguage()" class="lang-text" aria-label="Language">EN</a>
+            <script>
+                // Update language button text based on current path
+                (function() {
+                    var path = window.location.pathname;
+                    var isEn = /^\/en(\/|$)/.test(path);
+                    var langBtn = document.querySelector('.header-lang-btn .lang-text');
+                    if (langBtn) {
+                        langBtn.textContent = isEn ? 'CN' : 'EN';
+                    }
+                })();
+                
+                function toggleLanguage() {
+                    var path = window.location.pathname;
+                    var isEn = /^\/en(\/|$)/.test(path);
+
+                    if (isEn) {
+                        var newPath = path.replace(/^\/en(\/|$)/, '/');
+                        if (newPath === '') newPath = '/';
+                        window.location.href = newPath;
+                    } else {
+                        var suffix = path;
+                        if (suffix === '/') suffix = '';
+                        window.location.href = '/en' + suffix;
+                    }
+                }
+            </script>
+        </span>
+        <!-- home button -->
+        <span class="home-link header-element">
+            <a href="/" aria-label="Home" data-tooltip="Home">
+                <svg class="home-icon" aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="m3 10.5 9-7 9 7"></path>
+                    <path d="M5 9.5V21h14V9.5"></path>
+                    <path d="M10 21v-6h4v6"></path>
+                </svg>
+            </a>
+        </span>
+    </div>
+    <!-- toggle banner -->
+                <div class="banner">
+                        <div class="blog-title header-element">
+                            <a href="/">
+                                Android Performance
+                            </a>
+                        </div>
+                        <div class="post-title header-element">
+                            <a href="#" class="post-name">Android Perfetto 系列 14：用 heapprofd 找 native 分配调用栈</a>
+                        </div>
+                </div>
+</header>
+
+        <!-- fixed footer -->
+        <footer class="footer-fixed">
+    <!-- donate button -->
+    <div class="donate-popup donate-popup--hidden">
+    <div class="donate-popup__title">Buy Me A Coffee</div>
+    <div class="donate-popup__content">
+        <div class="donate-popup__content-description">如果觉得文章还不错，打赏一杯咖啡吧.</div>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Wechat"
+            alt="Wechat"
+            src="/assets/donate-wechat.webp"
+        ></img>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Alipay"
+            alt="Alipay"
+            src="/assets/donate-alipay.png"
+        ></img>
+    </div>
+</div>
+
+    <div
+        title="Donate to the author"
+        class="footer-fixed-btn footer-fixed-btn--hidden donate-btn"
+    >
+        <span aria-hidden="true">&#165;</span>
+    </div>
+
+    <!-- back to top button -->
+    <div class="footer-fixed-btn footer-fixed-btn--hidden back-top">
+        <div>&#xe639;</div>
+    </div>
+</footer>
+
+        <!-- wrapper -->
+        <div class="wrapper">
+            <div class="site-intro" style="    height:50vh;
+">
+    <!-- 主页  -->
+    <!-- 404页  -->
+    <div class="site-intro-placeholder"></div>
+    <picture>
+            <source type="image/webp" srcset="/intro/post-bg.webp">
+        <img class="site-intro-img"
+             src="/intro/post-bg.jpg"
+             alt=""
+loading="lazy"             decoding="async"
+             fetchpriority="auto"
+             sizes="100vw">
+    </picture>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+                Android Perfetto 系列 14：用 heapprofd 找 native 分配调用栈
+            <!-- 404 -->
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            <!-- 404 -->
+        </p>
+        <!-- 文章页 meta -->
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                    <div class="post-intro-tags" >
+        <span class="post-category" data-categories="Android">
+            <span class="iconfont-archer post-category-icon" aria-hidden="true">&#xe666;</span>
+            <span class="post-category-text">
+                Android
+            </span>
+        </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Memory">Memory</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="heapprofd">heapprofd</a>
+</div>
+
+                <!-- 文章字数统计 -->
+                    <div class="post-intro-read">
+                        <span>Word count: <span class="post-count word-count">5.3k</span>Reading time: <span class="post-count reading-time">22 min</span></span>
+                    </div>
+                <div class="post-intro-meta">
+                    <!-- 撰写日期 -->
+                    <span class="iconfont-archer post-intro-calander">&#xe676;</span>
+                    <span class="post-intro-time">2026/05/04</span>
+                    <!-- 文章分享 -->
+                    <span class="share-wrapper">
+                        <span class="iconfont-archer share-icon">&#xe71d;</span>
+                        <span class="share-text">Share</span>
+                        <ul class="share-list">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+    </div>
+</div>
+
+            
+            <script>
+  (function () {
+    var done = false
+
+    function fontLoaded() {
+      if (done) return
+      done = true
+
+      var introTitle = document.getElementsByClassName('intro-title')[0]
+      var introSubtitle = document.getElementsByClassName('intro-subtitle')[0]
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+
+      if (introTitle) introTitle.classList.add('intro-fade-in')
+      if (introSubtitle) introSubtitle.classList.add('intro-fade-in')
+      if (postIntros) postIntros.classList.add('post-fade-in')
+    }
+
+    function waitForLocalFont() {
+      if (document.fonts && document.fonts.load) {
+        Promise.race([
+          document.fonts.load('1em Oswald-Regular'),
+          new Promise(function (resolve) { setTimeout(resolve, 1000) })
+        ]).then(fontLoaded, fontLoaded)
+      } else {
+        fontLoaded()
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', waitForLocalFont, false)
+    } else {
+      waitForLocalFont()
+    }
+  })()
+</script>
+
+            <img class="loading" src="/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" alt="loading">
+            <div class="container container-unloaded">
+                <main class="main post-page">
+    <article class="article-entry">
+        <p>内存问题最麻烦的地方在于：数字涨了，不代表马上能知道谁在涨。<code>dumpsys meminfo</code> 能告诉你 RSS&#x2F;PSS，Java heap dump 能告诉你对象保留关系，但 JNI&#x2F;C++、Skia&#x2F;Bitmap 的 CPU 侧分配、播放器里的 native wrapper 这些问题，经常还需要知道“哪个调用栈发起了 malloc&#x2F;new”。</p>
+<p>第 14 篇讲 heapprofd。它的价值是把 native allocation、free 和调用栈放进 Perfetto trace，再和业务事件、线程调度、Binder 放到同一个时间轴里看。</p>
+<p>heapprofd 适合放在趋势确认之后。先用 RSS&#x2F;PSS、meminfo 或线上监控确认趋势，再用 heapprofd 找 malloc&#x2F;new 调用栈；这篇不解决 Java 对象引用和图形 backing 内存。</p>
+<span id="more"></span>
+
+<h2 id="内存问题要分几张账"><a href="#内存问题要分几张账" class="headerlink" title="内存问题要分几张账"></a>内存问题要分几张账</h2><p>开始抓 heapprofd 前，先把内存数据分成几类。很多误判都来自把它们混在一起。</p>
+<table>
+<thead>
+<tr>
+<th>数据</th>
+<th>常见来源</th>
+<th>回答什么问题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>进程 RSS &#x2F; swap 趋势</td>
+<td><code>linux.process_stats</code></td>
+<td>目标进程 RSS、anon&#x2F;file RSS、swap、<code>oom_score_adj</code> 有没有变化</td>
+</tr>
+<tr>
+<td>进程 PSS &#x2F; Private Dirty</td>
+<td><code>dumpsys meminfo</code>、<code>/proc/&lt;pid&gt;/smaps_rollup</code>、<code>process_stats_config.scan_smaps_rollup</code></td>
+<td>PSS、Private Dirty、SwapPss 是否上涨；<code>scan_smaps_rollup</code> 受权限和目标进程限制</td>
+</tr>
+<tr>
+<td>系统内存压力</td>
+<td><code>linux.sys_stats</code></td>
+<td><code>MemAvailable</code>、Cached、ZRAM、vmstat、PSI 是否说明系统在回收或承压</td>
+</tr>
+<tr>
+<td>native allocation 调用栈</td>
+<td><code>android.heapprofd</code></td>
+<td>哪些 malloc&#x2F;new 调用栈贡献了分配，哪些还没释放</td>
+</tr>
+<tr>
+<td>Java 对象保留关系</td>
+<td><code>android.java_hprof</code>、MAT、Android Studio Profiler</td>
+<td>哪些 Java 对象还被谁持有</td>
+</tr>
+</tbody></table>
+<p>heapprofd 默认统计的是目标进程向 libc malloc&#x2F;free、new&#x2F;delete 这类 allocator 请求的字节数。它不等于 RSS，也不覆盖所有 native backing。</p>
+<p>GraphicBuffer、dma-buf、GPU texture、驱动侧分配、直接 mmap&#x2F;memfd&#x2F;ashmem 或绕过 libc malloc 的 allocator 不在默认 malloc 账里。基于 malloc 的 arena 可能只看到 arena 大块，看不到内部对象。图形内存要先看 meminfo Graphics&#x2F;GL、dmabuf、GPU&#x2F;graphics 计数、SurfaceFlinger &#x2F; BufferQueue 关系。</p>
+<p>heapprofd 只补充 App&#x2F;HWUI&#x2F;Skia&#x2F;JNI 路径上的 malloc&#x2F;new 证据。</p>
+<p>先用这张表决定下一步：</p>
+<table>
+<thead>
+<tr>
+<th>现象</th>
+<th>优先工具</th>
+<th>heapprofd 角色</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Java heap 上涨，对象保留明显</td>
+<td>HPROF &#x2F; MAT &#x2F; Android Studio</td>
+<td>不作为第一入口</td>
+</tr>
+<tr>
+<td>Native Heap &#x2F; malloc wrapper 上涨</td>
+<td>heapprofd</td>
+<td>找 malloc&#x2F;new 调用栈</td>
+</tr>
+<tr>
+<td>Graphics &#x2F; GL &#x2F; dmabuf &#x2F; Surface buffer 上涨</td>
+<td>meminfo、dmabuf、GPU&#x2F;graphics、SurfaceFlinger</td>
+<td>只用于排除 App&#x2F;native wrapper 是否也在分配</td>
+</tr>
+<tr>
+<td>RSS&#x2F;PSS 上涨但 heapprofd 不高</td>
+<td>smaps_rollup、maps、mmap&#x2F;syscall、dmabuf&#x2F;graphics</td>
+<td>先拆账，不要直接判 heapprofd 抓错</td>
+</tr>
+<tr>
+<td>PSS 不涨但 RSS 涨</td>
+<td>smaps &#x2F; file mapping &#x2F; allocator cache</td>
+<td>先不要下泄漏结论</td>
+</tr>
+</tbody></table>
+<p>allocator 线程缓存、碎片、ZRAM、page 粒度都会让 RSS 和 heapprofd 对不上。看到 RSS 高而 heapprofd 不高时，要先考虑这些边界，不要立刻判成 heapprofd 抓错了。</p>
+<p>反过来也一样：heapprofd 里某条调用栈累计分配很高，不代表进程 RSS 会同幅度上涨。它可能是分配 churn：频繁申请、很快释放，<code>Total malloc size</code> 高，但 <code>Unreleased malloc size</code> 不高。内存问题要先分清“占住不放”和“反复制造临时对象”。</p>
+<p>怀疑 mmap&#x2F;native heap 之外的大块分配时，改查 smaps 的 <code>Private_Dirty/Rss/Pss</code>、maps 区间、Android 14+ syscall <code>sys_mmap/sys_munmap/sys_madvise</code>，或者 perf&#x2F;simpleperf 的 mmap syscall callstack。heapprofd 只用于确认 malloc wrapper 是否也在贡献。</p>
+<!-- DIAGRAM_SLOT: heapprofd 将目标进程 allocation sample 写入 trace，并在 Perfetto UI 形成 Heap Profile diamond 的示意图 -->
+
+<h2 id="什么时候用-heapprofd"><a href="#什么时候用-heapprofd" class="headerlink" title="什么时候用 heapprofd"></a>什么时候用 heapprofd</h2><p>Java heap dump 看不到增长来源时，先看增长落在哪张账。只有 native heap 或 native wrapper 明显可疑时，再进入 heapprofd。</p>
+<p>heapprofd 适合这些问题：</p>
+<ul>
+<li>Native Heap &#x2F; malloc wrapper 持续上涨，但 Java heap dump 看不出明显对象保留。</li>
+<li>Bitmap、Skia、播放器 buffer、JNI&#x2F;C++ 模块怀疑有 libc malloc&#x2F;new 路径上的 native backing 占用。</li>
+<li>C++ 模块、native service、daemon 的 malloc&#x2F;new 异常。</li>
+<li>想知道某次业务操作后未释放分配是否增加。</li>
+<li>想把内存增长和线程运行、Binder、业务 Track Event 关联起来。</li>
+</ul>
+<p>这些问题不该优先用 heapprofd：</p>
+<ul>
+<li>只想看 Java 对象引用关系。用 Java heap dump。</li>
+<li>想把每一次小分配都精确记成账本。heapprofd 默认是采样 profiler。</li>
+<li>目标 App 在 user build 上没有 <code>debuggable</code> 或 <code>profileable</code>。这类进程通常不能被 shell profile。</li>
+<li>GraphicBuffer、dma-buf、GPU driver memory、Surface buffer 数量上涨。先走 meminfo Graphics&#x2F;GL、dmabuf、GPU&#x2F;graphics、SurfaceFlinger 的证据链，heapprofd 只用来排除或定位 malloc&#x2F;new 包装层。</li>
+</ul>
+<p>目标资格也要分开看。user build 主要面向 debuggable&#x2F;profileable Java apps；userdebug&#x2F;eng 可抓大多数 App 和 system services，但少量 critical services 可能被 SELinux <code>never_profile_heap</code> 之类策略禁止。system process 不靠 <code>&lt;profileable&gt;</code> 解锁。</p>
+<h2 id="快速抓一份-native-heap-profile"><a href="#快速抓一份-native-heap-profile" class="headerlink" title="快速抓一份 native heap profile"></a>快速抓一份 native heap profile</h2><p>官方更推荐先用 <code>tools/heap_profile</code> 脚本。它会处理很多设备侧细节，适合单进程快速定位。</p>
+<p>这条命令按进程名抓 15 秒，采样间隔 4096 bytes，每 5 秒产生一个 continuous dump：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">tools/heap_profile android \</span><br><span class="line">  -n com.example.app \</span><br><span class="line">  -d 15000 \</span><br><span class="line">  -i 4096 \</span><br><span class="line">  -c 5000 \</span><br><span class="line">  -o /tmp/heapprofd-com-example-app</span><br></pre></td></tr></table></figure>
+
+<p>输出目录里会有 <code>raw-trace</code> 和转换后的 profile 文件。把 <code>raw-trace</code> 拖到 Perfetto UI，就能看到 Heap Profile diamond。</p>
+<p>按进程名抓和按 PID 抓差别很大。<code>-n com.example.app</code> 会命中已经运行的同名进程，也会等待后续启动的新进程；目标从 zygote specialize 到 App 进程时，heapprofd 可以尽早接上。多进程 App 要分别写多个 <code>-n</code> &#x2F; <code>process_cmdline</code>，例如 <code>com.example.app</code>、<code>com.example.app:remote</code>、<code>com.example.app:player</code>；否则 remote&#x2F;native 子进程的 malloc 不会进入 profile。按 PID 抓更适合已经稳定运行的现场，但会错过启动早期分配。官方也提醒，哪怕按进程名抓，zygote specialize 最早的一小段分配仍可能没记到。</p>
+<p>如果要在 user build 上用 adb &#x2F; shell 抓 App，需要 manifest 里允许 shell profiling：</p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">application</span> <span class="attr">...</span>&gt;</span></span><br><span class="line">  <span class="tag">&lt;<span class="name">profileable</span> <span class="attr">android:shell</span>=<span class="string">&quot;true&quot;</span> /&gt;</span></span><br><span class="line"><span class="tag">&lt;/<span class="name">application</span>&gt;</span></span><br></pre></td></tr></table></figure>
+
+<p>这条路径只解决本地 shell profiling 权限，不等于线上可以远程抓任意用户进程。</p>
+<p>Android 15 API 35 起，App 可以通过 <code>ProfilingManager</code> 请求 heap profile；Android 16 的 Profiling module 面向 public devices field profiling，但结果会脱敏、只包含请求进程相关信息，并且受系统限流，不保证每次请求都会满足。线上方案要把它和 adb&#x2F;<code>profileable</code> 的实验室路径分开设计。</p>
+<h2 id="和系统-trace-合在一起抓"><a href="#和系统-trace-合在一起抓" class="headerlink" title="和系统 trace 合在一起抓"></a>和系统 trace 合在一起抓</h2><p>脚本适合快速定位，手写 TraceConfig 适合把 heapprofd 和系统数据源合并。先看最小 heapprofd 配置：<code>android.heapprofd</code>、<code>process_cmdline</code>、采样间隔、continuous dump、shared memory 和阻塞策略。</p>
+<p>系统上下文是增强项：<code>process_stats</code> 看 RSS&#x2F;PSS 趋势，<code>sys_stats</code> 看系统内存压力，<code>ftrace</code> 关联线程和时间窗，<code>track_event</code> 关联业务动作。allocation-heavy 场景里，heapprofd + ftrace 会互相增加扰动；heap+system-context preset 只适合短窗口实验室复现，并且要记录 ftrace&#x2F;heapprofd stats、目标场景耗时是否被 profiler 改变。</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br></pre></td><td class="code"><pre><span class="line">duration_ms: <span class="number">15000</span></span><br><span class="line"></span><br><span class="line">buffers &#123; size_kb: <span class="number">131072</span> fill_policy: DISCARD &#125; # <span class="number">0</span>: heapprofd</span><br><span class="line">buffers &#123; size_kb: <span class="number">32768</span>  fill_policy: RING_BUFFER &#125; # <span class="number">1</span>: system context</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    process_stats_config &#123;</span><br><span class="line">      scan_all_processes_on_start: <span class="literal">true</span></span><br><span class="line">      proc_stats_poll_ms: <span class="number">1000</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.sys_stats&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    sys_stats_config &#123;</span><br><span class="line">      meminfo_period_ms: <span class="number">1000</span></span><br><span class="line">      meminfo_counters: MEMINFO_MEM_AVAILABLE</span><br><span class="line">      meminfo_counters: MEMINFO_CACHED</span><br><span class="line">      meminfo_counters: MEMINFO_SWAP_FREE</span><br><span class="line">      meminfo_counters: MEMINFO_ZRAM</span><br><span class="line">      vmstat_period_ms: <span class="number">1000</span></span><br><span class="line">      vmstat_counters: VMSTAT_PGFAULT</span><br><span class="line">      vmstat_counters: VMSTAT_PGMAJFAULT</span><br><span class="line">      vmstat_counters: VMSTAT_OOM_KILL</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;am&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;view&quot;</span></span><br><span class="line">      atrace_apps: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;track_event&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    track_event_config &#123;</span><br><span class="line">      enabled_categories: <span class="string">&quot;memory&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;app&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">  producer_name_filter: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;android.heapprofd&quot;</span></span><br><span class="line">    target_buffer: <span class="number">0</span></span><br><span class="line">    heapprofd_config &#123;</span><br><span class="line">      sampling_interval_bytes: <span class="number">4096</span></span><br><span class="line">      process_cmdline: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">      continuous_dump_config &#123;</span><br><span class="line">        dump_phase_ms: <span class="number">5000</span></span><br><span class="line">        dump_interval_ms: <span class="number">5000</span></span><br><span class="line">      &#125;</span><br><span class="line">      shmem_size_bytes: <span class="number">8388608</span></span><br><span class="line">      block_client: <span class="literal">false</span></span><br><span class="line">      # Android <span class="number">11</span>+ / matching Perfetto builds only.</span><br><span class="line">      max_heapprofd_memory_kb: <span class="number">262144</span></span><br><span class="line">      max_heapprofd_cpu_secs: <span class="number">30</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>这仍然是 native heap 模板，不是图形内存模板。排查 GraphicBuffer、dma-buf、GPU texture、Surface buffer 时，要额外对照 dmabuf、GPU&#x2F;graphics 计数、<code>dumpsys meminfo</code> Graphics&#x2F;GL、SurfaceFlinger layer &#x2F; buffer 信息；heapprofd 只能回答 malloc&#x2F;new 侧有没有对应贡献。</p>
+<p>heapprofd buffer 使用 <code>DISCARD</code> 时，buffer 必须足够大。heap profile 常在 dump 点集中写入，DISCARD 满后会丢新数据，对末尾 diamond 和未释放大头很危险。抓完必须检查 <code>traced_buf_chunks_discarded</code>、<code>heapprofd_*</code> stats；长 Trace 或写入量不确定时，优先给 heapprofd 独立大 buffer，必要时改 RING 并在报告里说明旧 dump 可能被覆盖。</p>
+<p>临时排查时，直接把 PBTX 通过 stdin 传给 <code>perfetto</code> 最稳。输出路径在 Android 上放到 <code>/data/misc/perfetto-traces/</code>：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">adb push config.pbtx /data/local/tmp/config.pbtx</span><br><span class="line">adb shell <span class="string">&#x27;cat /data/local/tmp/config.pbtx | perfetto -c - --txt -o /data/misc/perfetto-traces/heap.pftrace&#x27;</span></span><br><span class="line">adb pull /data/misc/perfetto-traces/heap.pftrace .</span><br></pre></td></tr></table></figure>
+
+<p>手写 <code>HeapprofdConfig</code> 和 <code>tools/heap_profile</code> 的默认行为不完全一样。<code>block_client</code> 可以在 heapprofd shared memory 满时阻塞目标进程，换取数据完整性；脚本的 <code>--block-client</code> 是默认行为，但手写配置需要自己决定。</p>
+<p>实验室 leak 复现可以设 <code>block_client: true</code> 并配 <code>block_client_timeout_us</code>，用目标进程 malloc 路径的阻塞换完整性；交互性能分析不要默认开，因为它可能反向影响 jank&#x2F;latency。交互场景通常用 <code>block_client: false</code>，再通过更高采样间隔、更大 <code>shmem_size_bytes</code> 和 stats 检查接受不完整风险：必须检查 <code>heapprofd_buffer_overran</code>、<code>heapprofd_non_finalized_profile</code>、<code>heapprofd_last_profile_timestamp</code> 是否覆盖目标窗口。</p>
+<p>把 heapprofd 放进系统 trace 时，建议同时保留少量业务 marker。App 内用 <code>android.os.Trace</code> &#x2F; AndroidX Trace 会落到 atrace；Perfetto SDK Track Event 需要单独启用 <code>track_event</code> data source。</p>
+<p>比如播放器场景至少要有 <code>operation_start</code>、<code>steady_state</code>、<code>operation_end</code>、<code>release_done/gc_idle_done</code> 四类 marker。没有 release marker 时，结论只能写“操作后保留增加”，不能写“泄漏”。<code>android.log</code> 数据源只支持 userdebug；user build 上不要把 logcat 当成这份配置默认能抓到的证据。</p>
+<h2 id="UI-怎么看-Heap-Profile"><a href="#UI-怎么看-Heap-Profile" class="headerlink" title="UI 怎么看 Heap Profile"></a>UI 怎么看 Heap Profile</h2><p>导入 trace 后，在目标进程下找 <code>Heap Profile</code> 轨道。轨道上的 diamond 代表一次 dump。点击 diamond 后，底部会展示 flamegraph。</p>
+<p>continuous dump 的每个 diamond 都是从记录开始到该时间点的累计结果。先看未释放量判断占住不放，再看总分配量判断 churn。读图时按这个顺序走：</p>
+<ol>
+<li>看连续几个 diamond 的 <code>Unreleased malloc size</code> 是否持续增加。</li>
+<li>看 <code>Total malloc size</code>，判断是不是分配 churn 很高但释放也快。</li>
+<li>用 Left Heavy 视图找最大的调用栈。</li>
+<li>先找 allocator &#x2F; ART glue 之上的第一个 App、SDK 或业务帧。</li>
+<li>回到时间轴，关联触发操作、业务 Track Event、线程运行。</li>
+</ol>
+<!-- DIAGRAM_SLOT: Heap Profile diamond、flamegraph、Unreleased Malloc 的标注截图占位 -->
+
+<p>不要用单个 diamond 判泄漏。泄漏判断至少要看“操作前、操作后、回收后”几个点。如果操作后上涨，回收后仍然不降，再看未释放调用栈。</p>
+<p>实验室里可以用 <code>adb shell killall -USR1 heapprofd</code> 额外触发一次 snapshot。比如“进入页面前、页面稳定后、退出页面并完成 release&#x2F;close&#x2F;析构后”各触发一次，比只靠固定 5 秒间隔更容易把业务动作和 diamond 对上。</p>
+<p>只有 native backing 由 Java wrapper、<code>NativeAllocationRegistry</code> 或 Cleaner&#x2F;finalizer 持有时，才把等待 idle、finalizer、GC 放进这个状态点。allocator cache 和碎片还可能导致 heapprofd 下降，但 RSS 不立刻下降。缓存不是“不释放”的委婉说法，必须有容量上限、命中&#x2F;复用证据、退出或压力下回收策略；否则只能写“疑似长期保留”。</p>
+<h2 id="SQL-怎么查未释放分配"><a href="#SQL-怎么查未释放分配" class="headerlink" title="SQL 怎么查未释放分配"></a>SQL 怎么查未释放分配</h2><p>heapprofd 会写入调用栈相关表：</p>
+<table>
+<thead>
+<tr>
+<th>表</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>heap_profile_allocation</code></td>
+<td>allocation&#x2F;free 的样本和大小</td>
+</tr>
+<tr>
+<td><code>stack_profile_callsite</code></td>
+<td>调用栈节点</td>
+</tr>
+<tr>
+<td><code>stack_profile_frame</code></td>
+<td>函数帧</td>
+</tr>
+<tr>
+<td><code>stack_profile_mapping</code></td>
+<td>so、apk、jar、binary 映射</td>
+</tr>
+<tr>
+<td><code>stack_profile_symbol</code></td>
+<td>离线符号化结果</td>
+</tr>
+</tbody></table>
+<p>单目标 profile 快速读图时，优先用官方标准库里的 summary tree。它会沿着 <code>stack_profile_callsite.parent_id</code> 聚合整条调用栈，结果更接近 flamegraph 里的 cumulative view：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.memory.heap_profile.summary_tree;</span><br><span class="line"></span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  name,</span><br><span class="line">  mapping_name <span class="keyword">AS</span> map_name,</span><br><span class="line">  cumulative_size <span class="operator">/</span> <span class="number">1024.0</span> <span class="operator">/</span> <span class="number">1024.0</span> <span class="keyword">AS</span> unreleased_mb</span><br><span class="line"><span class="keyword">FROM</span> android_heap_profile_summary_tree</span><br><span class="line"><span class="keyword">WHERE</span> cumulative_size <span class="operator">&gt;</span> <span class="number">0</span></span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cumulative_size <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">50</span>;</span><br></pre></td></tr></table></figure>
+
+<p>summary tree 适合单目标 profile 的快速读图。它没有进程列，不要直接用于多进程回归统计。多进程 App、<code>:remote</code> 进程或同名进程重启时，要回到原始表按 <code>upid</code>、PID、进程名和 diamond 时间点过滤，避免把别的进程归到目标进程。</p>
+<p>如果要按进程、diamond 时间点和 leaf frame 做粗查，再回到原始表。这条 SQL 只看末尾一个 dump 时间点，重点看 <code>SUM(a.size)</code>：allocation 是正数，free 是负数，求和后更接近该 diamond 上的 <code>Unreleased malloc size</code>。它不用于最终归因，最终报告必须回到 summary tree 或 flamegraph 取完整调用栈。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> target_process <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> upid, pid, name, cmdline</span><br><span class="line">  <span class="keyword">FROM</span> process</span><br><span class="line">  <span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">  <span class="keyword">ORDER</span> <span class="keyword">BY</span> start_ts <span class="keyword">DESC</span></span><br><span class="line">  LIMIT <span class="number">1</span></span><br><span class="line">),</span><br><span class="line">target_dump <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> <span class="built_in">MAX</span>(ts) <span class="keyword">AS</span> dump_ts</span><br><span class="line">  <span class="keyword">FROM</span> heap_profile_allocation</span><br><span class="line">  <span class="keyword">WHERE</span> upid <span class="operator">=</span> (<span class="keyword">SELECT</span> upid <span class="keyword">FROM</span> target_process)</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  a.ts <span class="keyword">AS</span> dump_ts,</span><br><span class="line">  p.upid,</span><br><span class="line">  p.pid,</span><br><span class="line">  p.name <span class="keyword">AS</span> process_name,</span><br><span class="line">  p.cmdline <span class="keyword">AS</span> process_cmdline,</span><br><span class="line">  a.callsite_id,</span><br><span class="line">  f.name <span class="keyword">AS</span> frame_name,</span><br><span class="line">  m.name <span class="keyword">AS</span> mapping_name,</span><br><span class="line">  <span class="built_in">SUM</span>(a.size) <span class="operator">/</span> <span class="number">1024.0</span> <span class="operator">/</span> <span class="number">1024.0</span> <span class="keyword">AS</span> leaf_unreleased_mb,</span><br><span class="line">  <span class="built_in">SUM</span>(a.count) <span class="keyword">AS</span> unreleased_count</span><br><span class="line"><span class="keyword">FROM</span> heap_profile_allocation a</span><br><span class="line"><span class="keyword">JOIN</span> target_process p <span class="keyword">USING</span> (upid)</span><br><span class="line"><span class="keyword">JOIN</span> target_dump d <span class="keyword">ON</span> a.ts <span class="operator">=</span> d.dump_ts</span><br><span class="line"><span class="keyword">JOIN</span> stack_profile_callsite c <span class="keyword">ON</span> a.callsite_id <span class="operator">=</span> c.id</span><br><span class="line"><span class="keyword">JOIN</span> stack_profile_frame f <span class="keyword">ON</span> c.frame_id <span class="operator">=</span> f.id</span><br><span class="line"><span class="keyword">JOIN</span> stack_profile_mapping m <span class="keyword">ON</span> f.mapping <span class="operator">=</span> m.id</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> a.ts, p.upid, p.pid, p.name, p.cmdline, a.callsite_id, f.name, m.name</span><br><span class="line"><span class="keyword">HAVING</span> leaf_unreleased_mb <span class="operator">&gt;</span> <span class="number">0</span></span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> dump_ts <span class="keyword">DESC</span>, leaf_unreleased_mb <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">50</span>;</span><br></pre></td></tr></table></figure>
+
+<p>SQL 只能帮你快速找大头。原始表查询把调用栈拆成了 frame 行，容易只看到 <code>malloc</code>、<code>realloc</code> 这类 leaf frame；summary tree 和 UI flamegraph 更适合读完整归因。写稳定脚本前，先用 <code>PRAGMA table_info(heap_profile_allocation);</code> 确认字段，避免不同 Perfetto 版本导致查询失效。</p>
+<p>泄漏判断要做三点对比：操作前、操作后、释放后。这段是报告查询骨架，<code>baseline_dump_ts</code>、<code>after_action_dump_ts</code>、<code>after_release_dump_ts</code> 可以来自业务 marker 最近的 heap dump：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> target_process <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> upid, pid, name</span><br><span class="line">  <span class="keyword">FROM</span> process</span><br><span class="line">  <span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">  <span class="keyword">ORDER</span> <span class="keyword">BY</span> start_ts <span class="keyword">DESC</span></span><br><span class="line">  LIMIT <span class="number">1</span></span><br><span class="line">),</span><br><span class="line">selected_dumps(label, dump_ts) <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">VALUES</span></span><br><span class="line">    (<span class="string">&#x27;baseline&#x27;</span>, <span class="number">100000000000</span>),</span><br><span class="line">    (<span class="string">&#x27;after_action&#x27;</span>, <span class="number">120000000000</span>),</span><br><span class="line">    (<span class="string">&#x27;after_release&#x27;</span>, <span class="number">150000000000</span>)</span><br><span class="line">),</span><br><span class="line">alloc_by_dump <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span></span><br><span class="line">    d.label,</span><br><span class="line">    a.callsite_id,</span><br><span class="line">    <span class="built_in">SUM</span>(a.size) <span class="operator">/</span> <span class="number">1024.0</span> <span class="operator">/</span> <span class="number">1024.0</span> <span class="keyword">AS</span> unreleased_mb,</span><br><span class="line">    <span class="built_in">SUM</span>(a.count) <span class="keyword">AS</span> unreleased_count</span><br><span class="line">  <span class="keyword">FROM</span> heap_profile_allocation a</span><br><span class="line">  <span class="keyword">JOIN</span> selected_dumps d <span class="keyword">ON</span> a.ts <span class="operator">=</span> d.dump_ts</span><br><span class="line">  <span class="keyword">WHERE</span> a.upid <span class="operator">=</span> (<span class="keyword">SELECT</span> upid <span class="keyword">FROM</span> target_process)</span><br><span class="line">  <span class="keyword">GROUP</span> <span class="keyword">BY</span> d.label, a.callsite_id</span><br><span class="line">),</span><br><span class="line">pivot <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span></span><br><span class="line">    callsite_id,</span><br><span class="line">    <span class="built_in">SUM</span>(<span class="keyword">CASE</span> <span class="keyword">WHEN</span> label <span class="operator">=</span> <span class="string">&#x27;baseline&#x27;</span> <span class="keyword">THEN</span> unreleased_mb <span class="keyword">ELSE</span> <span class="number">0</span> <span class="keyword">END</span>) <span class="keyword">AS</span> baseline_unreleased_mb,</span><br><span class="line">    <span class="built_in">SUM</span>(<span class="keyword">CASE</span> <span class="keyword">WHEN</span> label <span class="operator">=</span> <span class="string">&#x27;after_action&#x27;</span> <span class="keyword">THEN</span> unreleased_mb <span class="keyword">ELSE</span> <span class="number">0</span> <span class="keyword">END</span>) <span class="keyword">AS</span> after_action_unreleased_mb,</span><br><span class="line">    <span class="built_in">SUM</span>(<span class="keyword">CASE</span> <span class="keyword">WHEN</span> label <span class="operator">=</span> <span class="string">&#x27;after_release&#x27;</span> <span class="keyword">THEN</span> unreleased_mb <span class="keyword">ELSE</span> <span class="number">0</span> <span class="keyword">END</span>) <span class="keyword">AS</span> after_release_unreleased_mb</span><br><span class="line">  <span class="keyword">FROM</span> alloc_by_dump</span><br><span class="line">  <span class="keyword">GROUP</span> <span class="keyword">BY</span> callsite_id</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  callsite_id,</span><br><span class="line">  baseline_unreleased_mb,</span><br><span class="line">  after_action_unreleased_mb,</span><br><span class="line">  after_release_unreleased_mb,</span><br><span class="line">  after_action_unreleased_mb <span class="operator">-</span> baseline_unreleased_mb <span class="keyword">AS</span> action_delta_mb,</span><br><span class="line">  after_release_unreleased_mb <span class="operator">-</span> baseline_unreleased_mb <span class="keyword">AS</span> retained_delta_mb,</span><br><span class="line">  after_action_unreleased_mb <span class="operator">-</span> after_release_unreleased_mb <span class="keyword">AS</span> released_delta_mb,</span><br><span class="line">  <span class="keyword">CASE</span></span><br><span class="line">    <span class="keyword">WHEN</span> after_release_unreleased_mb <span class="operator">-</span> baseline_unreleased_mb <span class="operator">&gt;</span> <span class="number">1</span> <span class="keyword">THEN</span> <span class="string">&#x27;leak_candidate&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> after_action_unreleased_mb <span class="operator">&gt;</span> baseline_unreleased_mb</span><br><span class="line">      <span class="keyword">AND</span> after_release_unreleased_mb <span class="operator">&lt;=</span> baseline_unreleased_mb <span class="keyword">THEN</span> <span class="string">&#x27;peak&#x27;</span></span><br><span class="line">    <span class="keyword">ELSE</span> <span class="string">&#x27;unknown&#x27;</span></span><br><span class="line">  <span class="keyword">END</span> <span class="keyword">AS</span> conclusion_type</span><br><span class="line"><span class="keyword">FROM</span> pivot</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> retained_delta_mb <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">50</span>;</span><br></pre></td></tr></table></figure>
+
+<p>释放后仍保留才偏泄漏；操作中升高但释放后回落是峰值；长期保留但有容量上限、复用证据和压力回收策略，才可能写成缓存。</p>
+<p>报告字段可以固定成这一组：</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">trace_name,process_name,upid,pid,scenario,dump_phase,dump_ts_ms,sampling_interval_bytes,dump_interval_ms,top_stack_frame,mapping_name,unreleased_mb,retained_delta_mb,total_malloc_mb,allocation_count,symbol_status,profileable_state,data_loss_status,evidence_grade,conclusion_type,next_action</span><br><span class="line">heap-run01,com.example.app,42,1234,player_open,after_release,150000,4096,5000,PlayerBuffer::Alloc,libplayer.so,8.4,6.9,42.1,128,strong,profileable,clean,strong,leak_candidate,inspect_owner_module</span><br></pre></td></tr></table></figure>
+
+<h2 id="采样间隔怎么理解"><a href="#采样间隔怎么理解" class="headerlink" title="采样间隔怎么理解"></a>采样间隔怎么理解</h2><p>heapprofd 不是默认记录每一次分配。<code>sampling_interval_bytes: 4096</code> 的含义是：平均每分配 4096 bytes 采一个样本，再按采样概率归因到调用栈。足够大的 allocation 可能按真实大小记录，但不要把采样间隔理解成“低于它就估算，高于它就精确”的硬分界；不同 Android 版本和 heap 配置还会影响实际行为。</p>
+<p>怎么选：</p>
+<ul>
+<li>4096 bytes 是常用起点，适合大多数本地分析。</li>
+<li>怀疑大量小对象 native 分配时，可以降低间隔，但开销会上升。</li>
+<li>分配速率太高导致 buffer overrun 时，先增大 shared memory 或提高采样间隔。</li>
+<li>手写 <code>HeapprofdConfig</code> 必须显式设置非 0 的采样间隔；想接近精确可以设 1，但开销很高。0 是无效配置，Android 12 之前还可能让目标进程崩溃。</li>
+</ul>
+<p>报告里不要把采样结果写成“精确分配了 12.34MB”。更合适的写法是：“在 4096 bytes 采样间隔下，未释放分配主要集中在 A&#x2F;B&#x2F;C 三条调用栈，A 调用栈占比最高”。采样 profiler 的价值是找方向和排序，不是替代 allocator 账本。</p>
+<p>小对象密集、样本少、窗口短、调用栈分散时，top stack 排名会不稳定。before&#x2F;after 比较必须保持同一采样间隔、相近负载和同一目标窗口；不要比较 1% 或 2% 这类小差异，除非多次复现。报告里的 <code>evidence_grade</code> 可以按这个规则写：样本充足、连续 dump 趋势一致、符号完整为 <code>strong</code>；命中 data loss、profile incomplete、unknown symbols、样本少或只复现一次为 <code>weak</code>。<code>weak</code> 时写“候选调用栈”，不要写“根因调用栈”。</p>
+<h2 id="Java-heap-dump-和-Java-allocation-sampling"><a href="#Java-heap-dump-和-Java-allocation-sampling" class="headerlink" title="Java heap dump 和 Java allocation sampling"></a>Java heap dump 和 Java allocation sampling</h2><p>这部分是对开头几张内存账的补充：heapprofd 能看 native malloc&#x2F;new，也能在 Android 12 或更高版本上切到 Java allocation sampling，但它仍不替代 Java heap dump。</p>
+<table>
+<thead>
+<tr>
+<th>能力</th>
+<th>输出</th>
+<th>适合问题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>heapprofd native profiling</td>
+<td>malloc&#x2F;new 调用栈</td>
+<td>谁分配了 native 内存</td>
+</tr>
+<tr>
+<td>Java heap dump</td>
+<td>对象保留图</td>
+<td>谁持有 Java 对象</td>
+</tr>
+<tr>
+<td>Java allocation sampling</td>
+<td>Java 创建对象的调用栈</td>
+<td>哪些代码制造了大量 Java allocation churn</td>
+</tr>
+</tbody></table>
+<p>Java allocation sampling 可以通过 heapprofd 配置 <code>heaps: &quot;com.android.art&quot;</code> 打开，也可以用脚本参数 <code>--heaps com.android.art</code>。它需要 Android 12 或更高版本。它记录对象创建时的调用栈，不记录对象什么时候被 GC，也不等价于 Java heap dump 的保留关系。</p>
+<h2 id="符号化和可信度"><a href="#符号化和可信度" class="headerlink" title="符号化和可信度"></a>符号化和可信度</h2><p>如果 flamegraph 里都是地址、<code>unknown</code> 或混淆后的 Java&#x2F;Kotlin 名字，先处理符号化和反混淆。官方推荐对 collected trace 运行 <code>traceconv bundle</code> 生成带符号信息的归档，再按符号化文档补 native symbols 和 ProGuard&#x2F;R8 mapping。</p>
+<p>报告里要记录 APK&#x2F;build id、native symbols 版本、ProGuard&#x2F;R8 mapping 版本；Build ID mismatch 时降级为地址级证据。第三方 SDK 或 stripped so 只剩地址时，下一步是补对应 build 的 unstripped symbols &#x2F; mapping，而不是直接改业务代码。</p>
+<p>读调用栈时也不要盲目过滤 <code>libart.so</code>、allocator glue 或系统库。ART 帧有时正是 Java 调 native、<code>NativeAllocationRegistry</code> 或对象创建路径的关键上下文。</p>
+<p>先找 allocator&#x2F;ART glue 之上的第一个 App、SDK 或业务帧；只有确认某类帧只是重复胶水层时再过滤。看到 <code>DEDUPED</code>、ICF 造成的函数折叠、Build ID mismatch、只有一帧等情况，要先按符号化问题处理。</p>
+<p>unwind 可信度也要看：未知帧比例、单帧栈比例、Build ID 是否匹配、Java frame 是否可用、目标 ABI &#x2F; Android 版本 known issues。缺符号会改变归因可信度；报告里要区分“已符号化可归因”和“只能定位到 so &#x2F; allocator glue”。</p>
+<p>报告里要写清楚三件事：</p>
+<ul>
+<li>目标进程是否 profileable&#x2F;debuggable。</li>
+<li><code>sampling_interval_bytes</code> 和 continuous dump 间隔。</li>
+<li><code>stats</code> 里是否出现 heapprofd buffer overrun、client error、profile incomplete、<code>heapprofd_unwind_time_us</code>、<code>heapprofd_client_spinlock_blocked</code>、<code>heapprofd_sampling_interval_adjusted</code> 或 data loss。</li>
+</ul>
+<p>出现 data loss 或 heapprofd buffer overrun 时，不要把数字写成精确账本。更合适的说法是“该调用栈是未释放分配的大头，采样条件如下”。</p>
+<p>heapprofd 专用 health check 要单独跑：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> <span class="keyword">value</span> <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line">  <span class="keyword">AND</span> (</span><br><span class="line">    name GLOB <span class="string">&#x27;heapprofd_*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name GLOB <span class="string">&#x27;stackprofile_*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name GLOB <span class="string">&#x27;symbolization_*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name <span class="keyword">IN</span> (</span><br><span class="line">      <span class="string">&#x27;symbolization_tmp_build_id_not_found&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_buffer_overran&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_buffer_corrupted&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_client_error&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_missing_packet&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_non_finalized_profile&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_rejected_concurrent&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_hit_guardrail&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_sampling_interval_adjusted&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_client_spinlock_blocked&#x27;</span></span><br><span class="line">    )</span><br><span class="line">  )</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> name, idx;</span><br></pre></td></tr></table></figure>
+
+<h2 id="发布报告前检查"><a href="#发布报告前检查" class="headerlink" title="发布报告前检查"></a>发布报告前检查</h2><p>采集条件：</p>
+<ul>
+<li>heapprofd 需要 Android 10 或更高版本；Java allocation sampling 需要 Android 12 或更高版本。</li>
+<li>user build 上用 adb &#x2F; shell 抓目标 App，通常需要 <code>debuggable</code> 或 <code>&lt;profileable android:shell=&quot;true&quot;/&gt;</code>。</li>
+<li>按 PID 抓运行中进程可能错过启动早期分配；按进程名等待启动能覆盖更多启动阶段。</li>
+<li>runtime profiling 不是立刻生效，目标进程很空闲时，下一波分配前可能还没启用。</li>
+<li>同一个目标进程同时只能被一个相关 session profile；冲突时先确认是否有旧 <code>perfetto</code> session。</li>
+</ul>
+<p>数据可信度：</p>
+<ul>
+<li>32-bit 程序在部分旧 Android 版本上有限制，遇到空 profile 要回到官方 Known Issues 查版本差异。</li>
+<li>heapprofd stats、stackprofile stats、symbolization stats 必须过一遍；命中 overrun、non-finalized、unknown symbols 时降级。</li>
+<li>heapprofd 数字和 RSS 对不上很常见，碎片、线程缓存、allocator cache、ZRAM 都会造成差异。</li>
+</ul>
+<p>结论边界：</p>
+<ul>
+<li><code>Total malloc size</code> 高不等于泄漏，先和 <code>Unreleased malloc size</code>、连续 diamond、业务操作时间点一起看。</li>
+<li>图形 backing 高不等于 heapprofd 一定高。Graphics&#x2F;GL、dmabuf、GPU、Surface buffer 要单独成账。</li>
+<li>把结论归类为 <code>leak / peak / cache / churn / out-of-scope graphics memory / evidence insufficient</code>，每类对应不同下一步动作。</li>
+</ul>
+<h2 id="把内存趋势落到调用栈"><a href="#把内存趋势落到调用栈" class="headerlink" title="把内存趋势落到调用栈"></a>把内存趋势落到调用栈</h2><p>heapprofd 解决的是 native allocation 调用栈问题。它不替代 Java heap dump，也不替代 RSS&#x2F;PSS 趋势；它补上的是“谁分配了 libc malloc&#x2F;new 管辖的 native heap 内存”。GraphicBuffer、dma-buf、GPU texture 和 Surface buffer 要走另一张图形内存账，heapprofd 只能辅助看 App&#x2F;native wrapper 是否也在制造 malloc&#x2F;new 压力。</p>
+<p>实战里可以按这个顺序走：</p>
+<ol>
+<li>用 process stats、meminfo、smaps 或线上监控确认内存趋势。</li>
+<li>如果增长落在 Native Heap &#x2F; malloc wrapper &#x2F; heapprofd 可见 allocator 路径，进入 heapprofd；如果只是 RSS&#x2F;PSS 涨，先用 smaps_rollup、meminfo 分类、mmap&#x2F;syscall 或 dmabuf&#x2F;graphics 证据拆账。</li>
+<li>在 UI 里看 Unreleased malloc size 和 flamegraph。</li>
+<li>用 SQL 找大头，再回到 flamegraph 看完整调用栈。</li>
+<li>补符号化、写清采样条件和可信度。</li>
+<li>把结论归类为 leak、peak、cache、churn、图形内存账外问题或证据不足。</li>
+</ol>
+<h2 id="参考文档"><a href="#参考文档" class="headerlink" title="参考文档"></a>参考文档</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/native-heap-profiler">Memory: Callstack-based Allocation Profiling</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/java-heap-profiler">Memory: Java heap dumps</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/memory-counters">Memory counters and events</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/design-docs/heapprofd-design">heapprofd design</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/reference/trace-config-proto">TraceConfig reference</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/instrumentation/track-events">Track Events</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/android-log">Android Log data source</a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.android.com/reference/android/os/ProfilingManager">ProfilingManager</a></li>
+<li><a target="_blank" rel="noopener" href="https://source.android.com/docs/core/ota/modular-system/profiling">Android Profiling module</a></li>
+</ol>
+<h2 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h2><p>欢迎关注 <a target="_blank" rel="noopener" href="https://www.androidperformance.com/">Android Performance</a>。</p>
+<!-- flag of hidden posts -->
+    </article>
+    <!-- license -->
+        <div class="license-wrapper">
+            <p>Author：<a href="https://androidperformance.com">Gracker</a>
+            <p>Link：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">https://androidperformance.com/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/</a>
+            <p>Publish date：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">May 4th 2026, 10:14:00 am</a>
+            <p>Update date：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">May 11th 2026, 7:29:51 am</a>
+            <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
+        </div>
+    <!-- paginator -->
+    <ul class="post-paginator">
+        <li class="next">
+        </li>
+        <li class="previous">
+        </li>
+    </ul>
+    <!-- comment -->
+        <div class="post-comment">
+            <!-- 来必力 City 版安装代码 -->
+
+            
+            
+            
+            <!-- utteranc评论 -->
+
+            <!-- partial('_partial/comment/changyan') -->
+            <!--PC版-->
+
+            
+            
+            
+        </div>
+    <!-- timeliness note -->
+    <!-- idea from: https://hexo.fluid-dev.com/posts/hexo-injector/#%E6%96%87%E7%AB%A0%E6%97%B6%E6%95%88%E6%80%A7%E6%8F%90%E7%A4%BA -->
+    <!-- Mathjax -->
+</main>
+
+                <!-- profile -->
+            </div>
+            <footer class="footer footer-unloaded">
+    <!-- social  -->
+        <div class="social">
+                            <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title="email" ></a>
+                <a href="https://github.com/gracker" class="iconfont-archer github" target="_blank" title="github"></a>
+                <span class="iconfont-archer wechat" title="wechat">
+                        <img class="profile-qr" src="/assets/Wechat.jpeg" />
+                </span>
+                <span class="iconfont-archer qq" title="qq: 553000664">
+                </span>
+                <a href="https://weibo.com/gracker520" class="iconfont-archer weibo" target="_blank" title="weibo"></a>
+                <a href="https://www.zhihu.com/people/gracker" class="iconfont-archer zhihu" target="_blank" title="zhihu"></a>
+                <a href="https://twitter.com/Gracker_Gao" class="iconfont-archer twitter" target="_blank" title="twitter"></a>
+                <a href="https://juejin.im/user/557b0590e4b052e031453d76" class="iconfont-archer juejin" target="_blank" title="juejin"></a>
+                <a href="/atom.xml" class="iconfont-archer rss" target="_blank" title="rss"></a>
+
+        </div>
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- website approve for Chinese user -->
+        <div class="website-approve">
+                <span id="icp-approve" class="icp-approve">
+                    <a href="https://beian.miit.gov.cn/" target="_blank">蜀 ICP 备 20016190 号</a>
+                </span>
+        </div>
+</footer>
+
+        </div>
+        <!-- toc -->
+            <div class="toc-wrapper toc-wrapper-loding" style=    top:50vh;
+>
+                <div class="toc-catalog">
+                    <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+                </div>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%86%85%E5%AD%98%E9%97%AE%E9%A2%98%E8%A6%81%E5%88%86%E5%87%A0%E5%BC%A0%E8%B4%A6"><span class="toc-number">1.</span> <span class="toc-text">内存问题要分几张账</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BB%80%E4%B9%88%E6%97%B6%E5%80%99%E7%94%A8-heapprofd"><span class="toc-number">2.</span> <span class="toc-text">什么时候用 heapprofd</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%BF%AB%E9%80%9F%E6%8A%93%E4%B8%80%E4%BB%BD-native-heap-profile"><span class="toc-number">3.</span> <span class="toc-text">快速抓一份 native heap profile</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%92%8C%E7%B3%BB%E7%BB%9F-trace-%E5%90%88%E5%9C%A8%E4%B8%80%E8%B5%B7%E6%8A%93"><span class="toc-number">4.</span> <span class="toc-text">和系统 trace 合在一起抓</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#UI-%E6%80%8E%E4%B9%88%E7%9C%8B-Heap-Profile"><span class="toc-number">5.</span> <span class="toc-text">UI 怎么看 Heap Profile</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#SQL-%E6%80%8E%E4%B9%88%E6%9F%A5%E6%9C%AA%E9%87%8A%E6%94%BE%E5%88%86%E9%85%8D"><span class="toc-number">6.</span> <span class="toc-text">SQL 怎么查未释放分配</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E9%87%87%E6%A0%B7%E9%97%B4%E9%9A%94%E6%80%8E%E4%B9%88%E7%90%86%E8%A7%A3"><span class="toc-number">7.</span> <span class="toc-text">采样间隔怎么理解</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Java-heap-dump-%E5%92%8C-Java-allocation-sampling"><span class="toc-number">8.</span> <span class="toc-text">Java heap dump 和 Java allocation sampling</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%AC%A6%E5%8F%B7%E5%8C%96%E5%92%8C%E5%8F%AF%E4%BF%A1%E5%BA%A6"><span class="toc-number">9.</span> <span class="toc-text">符号化和可信度</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%91%E5%B8%83%E6%8A%A5%E5%91%8A%E5%89%8D%E6%A3%80%E6%9F%A5"><span class="toc-number">10.</span> <span class="toc-text">发布报告前检查</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%8A%8A%E5%86%85%E5%AD%98%E8%B6%8B%E5%8A%BF%E8%90%BD%E5%88%B0%E8%B0%83%E7%94%A8%E6%A0%88"><span class="toc-number">11.</span> <span class="toc-text">把内存趋势落到调用栈</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E6%96%87%E6%A1%A3"><span class="toc-number">12.</span> <span class="toc-text">参考文档</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number">13.</span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a></li></ol>
+            </div>
+        <!-- sidebar -->
+        <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+        <div class="sidebar-panel-archives">
+    <!-- 在 ejs 中将 archive 按照时间排序 -->
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 126
+        </div>
+    </div>
+    <div class="post-archive">
+            <div class="archive-year"> 2026 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/05</span>
+            <a class="archive-post-title" href="/2026/05/05/What-I-Am-Building/">「置顶」我做了什么</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/29</span>
+            <a class="archive-post-title" href="/2026/04/29/SmartPerfetto-Open-Source-Perfetto-AI-Assistant/">SmartPerfetto 开源：面向 Android Trace 分析的 Perfetto AI Assistant</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/28</span>
+            <a class="archive-post-title" href="/2026/04/28/Agent-OS-Task-Entry/">万字长文推演：手机不再从 App 开始，Agent OS 如何接管任务入口</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/10</span>
+            <a class="archive-post-title" href="/2026/04/10/SmartPerfetto-Architecture-Deep-Dive-QA/">SmartPerfetto 架构文章 Q&A：8 个深度技术问答</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/10</span>
+            <a class="archive-post-title" href="/2026/04/10/SmartPerfetto-Architecture-Deep-Dive/">从 Trace 到洞察：SmartPerfetto AI Agent 的 Harness Engineering 实战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/10</span>
+            <a class="archive-post-title" href="/2026/03/10/OpenClaw-FAQ/">OpenClaw 常见问题解答：Token 消耗、能干什么、本地模型、隐私安全、使用体验</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/08</span>
+            <a class="archive-post-title" href="/2026/03/08/OpenClaw-Local-Practice/">我把 OpenClaw 跑在本地三周后，发现它根本不是聊天机器人</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2025 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/16</span>
+            <a class="archive-post-title" href="/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto 系列 10 - Binder 调度与锁竞争</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 9 - CPU 信息解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/02</span>
+            <a class="archive-post-title" href="/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7 - MainThread 和 RenderThread 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/26</span>
+            <a class="archive-post-title" href="/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/26</span>
+            <a class="archive-post-title" href="/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto 系列 5：Android App 基于 Choreographer 的渲染流程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto 系列 4：使用命令行在本地打开超大 Trace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR 系列 3 ：ANR 案例分享</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR 系列 2 ：ANR 分析套路和关键 Log 介绍</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/2025/02/08/Android-ANR-01-ANR-Design/">Android ANR 系列 1 ：理解 Android ANR 设计思想</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2024 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto 系列 3：熟悉 Perfetto View</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto 系列 2：Perfetto Trace 抓取</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto 系列 1：Perfetto 工具简介</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/2024/03/27/Android-Perfetto-101/">Android Perfetto 系列目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/01</span>
+            <a class="archive-post-title" href="/2024/01/01/2023-review/">2023 年的方方面面</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2023 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/30</span>
+            <a class="archive-post-title" href="/2023/12/30/the-performance/">关于 The Android Performance 知识星球介绍</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/15</span>
+            <a class="archive-post-title" href="/2023/10/15/the-performance-design-of-os-en/">The Performance Design Of OS</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/2023/08/21/the-performance-design-of-os/">OS 设计之性能设计</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/2023/05/14/bad-android-app-with-system-permissions/">当 App 有了系统权限，真的可以为所欲为？</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2022 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/2022/03/27/the-performance-tea-part-01/">The Performance 星球茶话会 - 第一期</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/2022/03/13/android-systrace-cpu-state-running/">Systrace 线程 CPU 运行状态分析技巧 - Running 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/2022/01/21/android-systrace-cpu-state-runnable/">Systrace 线程 CPU 运行状态分析技巧 - Runnable 篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/03</span>
+            <a class="archive-post-title" href="/2022/01/03/2021-Review/">回顾 2021</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2021 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/27</span>
+            <a class="archive-post-title" href="/2021/10/27/if-i-write-a-book-about-performance/">一本讲 Android 流畅性的书，应该有什么内容？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/26</span>
+            <a class="archive-post-title" href="/2021/10/26/build-android-12/">Android 系统开发系列（1）：Android 12 源代码下载、编译和刷机</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace 响应速度实战 3 ：响应速度延伸知识</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace 响应速度实战 2 ：响应速度实战分析-以启动速度为例</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace 响应速度实战 1 ：了解响应速度原理</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace 流畅性实战 3 ：卡顿分析过程中的一些疑问</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace 流畅性实战 2 ：案例分析 - MIUI 桌面滑动卡顿分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace 流畅性实战 1 ：了解卡顿原理</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2020 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span>
+            <a class="archive-post-title" href="/2020/08/20/weibo-imageload-opt-on-huawei/">华为手机刷微博体验更好？技术角度的一些分析和思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/2020/05/26/samsung_crash/">一个「闰」字引发的事故 - 三星系统重启分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/2020/05/07/Android-App-Chain-Wakeup/">Android App 链式唤醒分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/14</span>
+            <a class="archive-post-title" href="/2020/02/14/Android-Systrace-SurfaceFlinger/">Android Systrace 基础知识 - SurfaceFlinger 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/03</span>
+            <a class="archive-post-title" href="/2020/02/03/android-development-learning-path-2020-edition/">Android 开发者学习路线(2020 版本)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span>
+            <a class="archive-post-title" href="/2020/01/28/2020-read/">我的 2020 年读书单</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2019 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/21</span>
+            <a class="archive-post-title" href="/2019/12/21/Android-Systrace-CPU/">Android Systrace 基础知识 - CPU Info 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/15</span>
+            <a class="archive-post-title" href="/2019/12/15/Android-Systrace-Triple-Buffer/">Android Systrace 基础知识 - Triple Buffer 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/06</span>
+            <a class="archive-post-title" href="/2019/12/06/Android-Systrace-Binder/">Android Systrace 基础知识 - Binder 和锁竞争解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/2019/12/01/BlogMap/">「置顶」博客文章目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/2019/12/01/Android-Systrace-Vsync/">Android Systrace 基础知识 - Vsync 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/2019/11/18/Android-App-Lunch-Optimize/">Android App 启动优化全记录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/06</span>
+            <a class="archive-post-title" href="/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Android Systrace 基础知识 - MainThread 和 RenderThread 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/04</span>
+            <a class="archive-post-title" href="/2019/11/04/Android-Systrace-Input/">Android Systrace 基础知识 - Input 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/24</span>
+            <a class="archive-post-title" href="/2019/10/24/Android-Background-Animation/">Android 中的“后台无效动画“行为分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/22</span>
+            <a class="archive-post-title" href="/2019/10/22/Android-Choreographer/">Android 基于 Choreographer 的渲染机制详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/2019/09/18/Android-Jank-Due-To-Low-Memory/">Android 中的卡顿丢帧原因概述 - 低内存篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/17</span>
+            <a class="archive-post-title" href="/2019/09/17/Android-Kill-Background-App-Debug/">Android 桌面被杀问题分析案例</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Due-To-App/">Android 中的卡顿丢帧原因概述 - 应用篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Due-To-System/">Android 中的卡顿丢帧原因概述 - 系统篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/2019/09/05/Android-Jank-Debug/">Android 中的卡顿丢帧原因概述 - 方法论</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/2019/09/01/Android-Activity-Lunch-Mode/">Android 中的 Activity Launch Mode 详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/2019/07/27/Android-Hardware-Layer/">Android 中的 Hardware Layer 详解</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/23</span>
+            <a class="archive-post-title" href="/2019/07/23/Android-Systrace-Pre/">Android Systrace 基础知识 -- 分析 Systrace 预备知识</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/29</span>
+            <a class="archive-post-title" href="/2019/06/29/Android-Systrace-SystemServer/">Android Systrace 基础知识 - SystemServer 解读</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/2019/05/28/Android-Systrace-About/">Android Systrace 基础知识 -- Systrace 简介</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/27</span>
+            <a class="archive-post-title" href="/2019/05/27/why-60-fps/">Android Systrace 基础知识 -- Why 60 fps ？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/2019/05/26/Android_Systrace_0/">Android Systrace -- 系列文章目录</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/15</span>
+            <a class="archive-post-title" href="/2019/05/15/90hz-on-android/">Android 新的流畅体验，90Hz 漫谈</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/2019/04/07/liqi/">利器 - 高效工具推荐</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/2019/01/21/android-performance-case-jank-accessbility/">Android 无障碍服务导致的整机卡顿案例分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/12</span>
+            <a class="archive-post-title" href="/2019/01/12/recommend-of-2018/">2018 年度好物推荐 - 给辛勤工作的自己一点奖励</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2018 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span>
+            <a class="archive-post-title" href="/2018/11/01/android-system-develop-0/">Android 系统开发源码环境搭建</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/25</span>
+            <a class="archive-post-title" href="/2018/10/25/How-do-engineers-count-well/">陆奇：除了好代码，工程师怎样才算优秀？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/01</span>
+            <a class="archive-post-title" href="/2018/10/01/how-to-stop-sucking-and-be-awesome-instead-8/">程序员的修炼-08-阅读之美</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/30</span>
+            <a class="archive-post-title" href="/2018/09/30/how-to-stop-sucking-and-be-awesome-instead-7/">程序员的修炼-07-游戏与编程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/29</span>
+            <a class="archive-post-title" href="/2018/09/29/how-to-stop-sucking-and-be-awesome-instead-6/">程序员的修炼-06-互联网那些事</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/28</span>
+            <a class="archive-post-title" href="/2018/09/28/how-to-stop-sucking-and-be-awesome-instead-5/">程序员的修炼-05-了解你的用户</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/27</span>
+            <a class="archive-post-title" href="/2018/09/27/how-to-stop-sucking-and-be-awesome-instead-4/">程序员的修炼-04-关于测试的一些思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/26</span>
+            <a class="archive-post-title" href="/2018/09/26/how-to-stop-sucking-and-be-awesome-instead-3/">程序员的修炼-03-Web 设计原则</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/20</span>
+            <a class="archive-post-title" href="/2018/09/20/how-to-stop-sucking-and-be-awesome-instead-2/">程序员的修炼-02-编程之道</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/2018/09/19/how-to-stop-sucking-and-be-awesome-instead-1/">程序员的修炼-01-绝地反击之术</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/2018/09/13/android-memory/">Android 系统不释放内存吗？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/13</span>
+            <a class="archive-post-title" href="/2018/08/13/Some-Thoughts-on-the-Fluency-of-Android/">关于 Android 系统流畅性的一些思考</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/20</span>
+            <a class="archive-post-title" href="/2018/05/20/zhihu-startingwindow/">知乎 救救你的 StartingWindow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/2018/05/07/Android-performance-optimization-skills-and-tools/">「置顶」Android 性能优化必知必会</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/2018/01/06/2017%E5%B9%B4%E5%BA%A6%E6%9C%80%E6%8E%A8%E8%8D%90/">2017 年度好物推荐 - 给辛勤工作的自己一点奖励</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2017 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/23</span>
+            <a class="archive-post-title" href="/2017/04/23/About-work/">2017</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2016 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/2016/04/05/android-bottom-bar-2/">Android Bottom navigation 规范二：样式、行为与规格</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/2016/04/05/android-bottom-bar-1/">Android Bottom Navigation 规范一：使用方法</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2015 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/31</span>
+            <a class="archive-post-title" href="/2015/12/31/How-to-calculation-android-app-lunch-time/">Android 中如何计算 App 的启动时间？</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/29</span>
+            <a class="archive-post-title" href="/2015/12/29/Android%E5%BA%94%E7%94%A8%E5%90%AF%E5%8A%A8%E4%BC%98%E5%8C%96-%E4%B8%80%E7%A7%8DDelayLoad%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%92%8C%E5%8E%9F%E7%90%86-%E4%B8%8B%E7%AF%87/">Android 应用启动优化:一种 DelayLoad 的实现和原理(下篇)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/2015/11/18/Android-app-lunch-optimize-delay-load/">Android 应用启动优化 - 一种 DelayLoad 的实现和原理(上篇)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/12</span>
+            <a class="archive-post-title" href="/2015/08/12/AndroidL-hwui-RenderThread-workflow/">Android hwui 中 RenderThread 工作流程</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/2015/08/05/HashMap/">Java7 HashMap 源码分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-onTrimMemory/">Android 代码内存优化建议 - OnTrimMemory 优化</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-AndroidResource/">Android 代码内存优化建议 - Android 资源篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-Google/">Android 代码内存优化建议 - Android 官方篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/2015/07/20/Android-Performance-Memory-Java/">Android 代码内存优化建议 - Java 官方篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/29</span>
+            <a class="archive-post-title" href="/2015/05/29/Nexus6-with-Android-M/">Nexus6 with Android M 开启多窗口模式</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/06</span>
+            <a class="archive-post-title" href="/2015/05/06/Java-Singleton/">细说 Java 单例模式</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-4/">Android 性能优化典范 - Profile GPU Rendering</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-3/">Android 性能优化典范 - Understanding VSYNC</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-2/">Android 性能优化典范之 Understanding Overdraw</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns-1/">Android 性能优化典范 - Render Performance</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/2015/04/19/Android-Performance-Patterns/">Android 性能优化典范综述</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/">Android 内存优化之三 - 打开 MAT 中的 Bitmap 原图</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android 内存优化之二 - MAT使用进阶</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android 内存优化(1) - MAT 使用入门</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/31</span>
+            <a class="archive-post-title" href="/2015/03/31/android-performance-case-study-follow-up/">Android性能优化后续</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-5/">Android 小技巧 - 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-4/">Android 小技巧 - 4</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/2015/03/15/android-tips-round-up-3/">Android 小技巧 -3</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/04</span>
+            <a class="archive-post-title" href="/2015/02/04/build-rom-for-nexus5/">为 Nexus5 编译 AndroidL 固件</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/30</span>
+            <a class="archive-post-title" href="/2015/01/30/android-performance-tools-systrace-1/">Android 性能优化之 Systrace 工具介绍(一)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/16</span>
+            <a class="archive-post-title" href="/2015/01/16/view-android-source-code-with-androidstudio/">使用 Android Studio 查看 Android Lollipop 源码</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/13</span>
+            <a class="archive-post-title" href="/2015/01/13/android-performance-optimization-overdraw-2/">Android 性能优化之过渡绘制 - 实战篇</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2014 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/2014/10/20/android-performance-optimization-overdraw-1/">Android 性能优化之过渡绘制 - 理论篇</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/03</span>
+            <a class="archive-post-title" href="/2014/06/03/android-edittext-do-not-auto-get-focus/">Android 小技巧 - 如何让EditText不自动获取焦点</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/31</span>
+            <a class="archive-post-title" href="/2014/05/31/android-tips-round-up-2/">Android 小技巧 -2</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/2014/05/28/android-tips-round-up-1/">Android 小技巧 - 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/02</span>
+            <a class="archive-post-title" href="/2014/05/02/android_log_to_file/">Android Tools - Log2File</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/01</span>
+            <a class="archive-post-title" href="/2014/04/01/android-service-build-your-own-notification-servers-app/">Android Service：开发自己的通知中心(2):辅助性服务实战</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/25</span>
+            <a class="archive-post-title" href="/2014/03/25/ubuntu-adb-can-not-find-devices/">Android:Ubuntu 下执行 Adb 命令找不到设备</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/17</span>
+            <a class="archive-post-title" href="/2014/03/17/android-build-your-own-android-notification-service-app/">Android Service：开发自己的通知中心(1):辅助性服务介绍</a>
+        </li>
+            </ul>
+    </div>
+</div>
+
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="年度推荐">
+                <span class="iconfont-archer">&#xe606;</span>
+                年度推荐
+            </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="年终总结">
+                <span class="iconfont-archer">&#xe606;</span>
+                年终总结
+            </span>
+            <span class="sidebar-tag-name" data-tags="知识星球">
+                <span class="iconfont-archer">&#xe606;</span>
+                知识星球
+            </span>
+            <span class="sidebar-tag-name" data-tags="随笔">
+                <span class="iconfont-archer">&#xe606;</span>
+                随笔
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="Agent OS">
+                <span class="iconfont-archer">&#xe606;</span>
+                Agent OS
+            </span>
+            <span class="sidebar-tag-name" data-tags="AI">
+                <span class="iconfont-archer">&#xe606;</span>
+                AI
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenAI">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenAI
+            </span>
+            <span class="sidebar-tag-name" data-tags="Mobile OS">
+                <span class="iconfont-archer">&#xe606;</span>
+                Mobile OS
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="BlastBufferQueue">
+                <span class="iconfont-archer">&#xe606;</span>
+                BlastBufferQueue
+            </span>
+            <span class="sidebar-tag-name" data-tags="性能优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                性能优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="线程优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                线程优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="电量优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                电量优化
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR分析">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR分析
+            </span>
+            <span class="sidebar-tag-name" data-tags="页面响应">
+                <span class="iconfont-archer">&#xe606;</span>
+                页面响应
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
+            <span class="sidebar-tag-name" data-tags="程序员">
+                <span class="iconfont-archer">&#xe606;</span>
+                程序员
+            </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenClaw">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenClaw
+            </span>
+            <span class="sidebar-tag-name" data-tags="效率工具">
+                <span class="iconfont-archer">&#xe606;</span>
+                效率工具
+            </span>
+            <span class="sidebar-tag-name" data-tags="本地模型">
+                <span class="iconfont-archer">&#xe606;</span>
+                本地模型
+            </span>
+            <span class="sidebar-tag-name" data-tags="AI Agent">
+                <span class="iconfont-archer">&#xe606;</span>
+                AI Agent
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="SmartPerfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                SmartPerfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="MCP">
+                <span class="iconfont-archer">&#xe606;</span>
+                MCP
+            </span>
+            <span class="sidebar-tag-name" data-tags="Open Source">
+                <span class="iconfont-archer">&#xe606;</span>
+                Open Source
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计规范">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计规范
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Gracker">
+                <span class="iconfont-archer">&#xe606;</span>
+                Gracker
+            </span>
+            <span class="sidebar-tag-name" data-tags="Kotlin">
+                <span class="iconfont-archer">&#xe606;</span>
+                Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="卡顿">
+                <span class="iconfont-archer">&#xe606;</span>
+                卡顿
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="读书笔记">
+                <span class="iconfont-archer">&#xe606;</span>
+                读书笔记
+            </span>
+            <span class="sidebar-tag-name" data-tags="程序员的修炼">
+                <span class="iconfont-archer">&#xe606;</span>
+                程序员的修炼
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计原则">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计原则
+            </span>
+            <span class="sidebar-tag-name" data-tags="了解你的用户">
+                <span class="iconfont-archer">&#xe606;</span>
+                了解你的用户
+            </span>
+            <span class="sidebar-tag-name" data-tags="测试">
+                <span class="iconfont-archer">&#xe606;</span>
+                测试
+            </span>
+            <span class="sidebar-tag-name" data-tags="互联网那些事">
+                <span class="iconfont-archer">&#xe606;</span>
+                互联网那些事
+            </span>
+            <span class="sidebar-tag-name" data-tags="游戏与编程">
+                <span class="iconfont-archer">&#xe606;</span>
+                游戏与编程
+            </span>
+            <span class="sidebar-tag-name" data-tags="利器">
+                <span class="iconfont-archer">&#xe606;</span>
+                利器
+            </span>
+            <span class="sidebar-tag-name" data-tags="阅读之美">
+                <span class="iconfont-archer">&#xe606;</span>
+                阅读之美
+            </span>
+            <span class="sidebar-tag-name" data-tags="iOS">
+                <span class="iconfont-archer">&#xe606;</span>
+                iOS
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design
+            </span>
+            <span class="sidebar-tag-name" data-tags="用户体验">
+                <span class="iconfont-archer">&#xe606;</span>
+                用户体验
+            </span>
+            <span class="sidebar-tag-name" data-tags="Smooth">
+                <span class="iconfont-archer">&#xe606;</span>
+                Smooth
+            </span>
+            <span class="sidebar-tag-name" data-tags="体验优化">
+                <span class="iconfont-archer">&#xe606;</span>
+                体验优化
+            </span>
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+        缺失模块，请参考主题文档进行安装配置：https://github.com/fi3ework/hexo-theme-archer#%E5%AE%89%E8%A3%85%E4%B8%BB%E9%A2%98
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="随笔">
+            <span class="iconfont-archer">&#xe60a;</span>
+            随笔
+        </span>
+        <span class="sidebar-category-name" data-categories="读书笔记">
+            <span class="iconfont-archer">&#xe60a;</span>
+            读书笔记
+        </span>
+        <span class="sidebar-category-name" data-categories="Android">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android
+        </span>
+        <span class="sidebar-category-name" data-categories="AI">
+            <span class="iconfont-archer">&#xe60a;</span>
+            AI
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
+        </span>
+        <span class="sidebar-category-name" data-categories="iOS">
+            <span class="iconfont-archer">&#xe60a;</span>
+            iOS
+        </span>
+        <span class="sidebar-category-name" data-categories="Android性能优化">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android性能优化
+        </span>
+        <span class="sidebar-category-name" data-categories="个人页">
+            <span class="iconfont-archer">&#xe60a;</span>
+            个人页
+        </span>
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+
+    </div>
+</div>
+
+        <!-- site-meta -->
+        <script>
+    var siteMetaRoot = "/"
+    if (siteMetaRoot === "undefined") {
+        siteMetaRoot = '/'
+    }
+    var siteMeta = {
+        url: "https://androidperformance.com",
+        root: siteMetaRoot,
+        author: "Gracker"
+    }
+</script>
+
+        <!-- import experimental options here -->
+        <!-- Custom Font -->
+
+        <!-- jquery (must load before main.js) -->
+        <script src="/lib/jquery.min.js" defer></script>
+        <!-- main func (depends on jQuery) -->
+        <script src="/scripts/main.js" defer></script>
+        <script>
+    (function () {
+      function scheduleAfterLoad(task, delay, idleTimeout) {
+        function run() {
+          window.setTimeout(function () {
+            if (window.requestIdleCallback) {
+              window.requestIdleCallback(task, { timeout: idleTimeout || 3000 })
+            } else {
+              task()
+            }
+          }, delay || 0)
+        }
+
+        if (document.readyState === 'complete') {
+          run()
+        } else {
+          window.addEventListener('load', run, { once: true })
+        }
+      }
+
+      function loadScript(src, options) {
+        options = options || {}
+        if (options.id && document.getElementById(options.id)) return
+
+        var done = false
+        var script = document.createElement('script')
+        script.src = src
+        script.async = true
+        if (options.id) script.id = options.id
+        if (options.crossOrigin) script.crossOrigin = options.crossOrigin
+        if (options.referrerPolicy) script.referrerPolicy = options.referrerPolicy
+        script.onload = function () {
+          done = true
+          if (options.onload) options.onload()
+        }
+        script.onerror = function () {
+          done = true
+          if (script.parentNode) script.parentNode.removeChild(script)
+        }
+        if (options.timeout) {
+          window.setTimeout(function () {
+            if (done) return
+            script.onload = null
+            script.onerror = null
+            if (script.parentNode) script.parentNode.removeChild(script)
+          }, options.timeout)
+        }
+        document.head.appendChild(script)
+      }
+
+      function loadStyle(href, id) {
+        if (id && document.getElementById(id)) return
+        var link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = href
+        if (id) link.id = id
+        document.head.appendChild(link)
+      }
+
+      scheduleAfterLoad(function () {
+        if (!document.querySelector('[data-fancybox]')) return
+        loadStyle('/lib/fancybox/fancybox.css', 'fancybox-css')
+        loadScript('/lib/fancybox/fancybox.umd.js', {
+          id: 'fancybox-js',
+          timeout: 4000,
+          onload: function () {
+            if (window.Fancybox) window.Fancybox.bind('[data-fancybox]')
+          },
+        })
+      }, 1000, 3000)
+
+
+
+
+      scheduleAfterLoad(function () {
+        window.dataLayer = window.dataLayer || []
+        window.gtag = window.gtag || function () { window.dataLayer.push(arguments) }
+        window.gtag('js', new Date())
+        loadScript('https://www.googletagmanager.com/gtag/js?id=UA-50993302-2', {
+          id: 'gtag-js',
+          timeout: 4000,
+          onload: function () {
+            window.gtag('config', 'UA-50993302-2')
+          },
+        })
+      }, 4000, 3000)
+    })();
+</script>
+
+        <!-- search -->
+            <div class="site-search site-search-loading local-search-shell">
+    <div class="algolia-popup popup local-search-popup" role="dialog" aria-modal="true" aria-label="Search posts">
+        <div class="algolia-search local-search-header">
+            <div class="algolia-search-input-icon">
+                <i class="iconfont-archer">&#xe627;</i>
+            </div>
+            <div class="algolia-search-input local-search-input">
+                <input id="local-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="搜索文章">
+            </div>
+            <button class="popup-btn-close local-search-close" type="button" aria-label="Close search">
+                <i class="iconfont-archer" aria-hidden="true">&#xe609;</i>
+            </button>
+        </div>
+
+        <div class="algolia-results local-search-results">
+            <div
+                id="local-search-config"
+                data-path="/search.xml"
+                data-per-page="10"
+                data-empty="没有找到与「${query}」相关的文章"
+                data-stats="找到 ${hits} 个结果"
+                data-loading="正在加载搜索索引..."
+                data-error="搜索索引加载失败，请稍后重试"></div>
+            <div id="local-search-stats" class="algolia-stats"></div>
+            <div id="local-search-hits"></div>
+        </div>
+    </div>
+</div>
+
+            <script src="/scripts/local-search.js" async></script>
+        <!-- async load share.js on first click -->
+            <script>
+                (function(){
+                  var loaded = false
+                  function loadShare(){
+                    if (loaded) return
+                    loaded = true
+                    var s = document.createElement('script')
+                    s.src = '/scripts/share.js'
+                    s.async = true
+                    document.head.appendChild(s)
+                  }
+                  document.addEventListener('click', function(e){
+                    var t = e.target
+                    if (!t) return
+                    if (t.closest && t.closest('.share-wrapper')) { loadShare() }
+                    else if (t.classList && t.classList.contains('share-wrapper')) { loadShare() }
+                  }, true)
+                })();
+            </script>
+        <!-- mermaid -->
+    </body>
+</html>

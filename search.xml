@@ -4,6 +4,43 @@
   
     
     <entry>
+      <title>SmartPerfetto 2026.05.17-06.04 更新：Smart 模式、证据规则和四条 Runtime</title>
+      <link href="/2026/06/04/SmartPerfetto-Three-Week-Update/"/>
+      <url>/2026/06/04/SmartPerfetto-Three-Week-Update/</url>
+      
+        <content type="html"><![CDATA[<p><img src="/images/SmartPerfetto-Three-Week-Update/smartperfetto-three-week-cover.png" alt="SmartPerfetto 2026.05.17-06.04 更新封面"></p><p>5 月 17 日写上一篇 SmartPerfetto 更新时，重点已经从“Perfetto UI 里的 AI Assistant”转向“可复用的 Trace 分析平台”。到 6 月 4 日，新增内容主要集中在五块：Smart 模式、选区快问、CLI 采集、Power &#x2F; ANR &#x2F; Input &#x2F; IO &#x2F; Network 证据规则，以及四条 Agent runtime。</p><p>本文基于 2026 年 6 月 4 日的 SmartPerfetto 主分支状态，公开发布版本是 <code>v1.0.28</code>。读者看完应该能知道三件事：5 月 17 日之后新增了什么、现在的运行时和证据来源怎么处理、反馈问题时该给哪些信息。</p><p>项目地址：</p><ul><li>SmartPerfetto 主仓库：<a href="https://github.com/Gracker/SmartPerfetto">https://github.com/Gracker/SmartPerfetto</a></li><li>上一篇更新：<a href="https://www.androidperformance.com/2026/05/17/SmartPerfetto-Two-Week-Update/">https://www.androidperformance.com/2026/05/17/SmartPerfetto-Two-Week-Update/</a></li></ul><span id="more"></span><h2 id="2026-05-17-06-04-变化概览"><a href="#2026-05-17-06-04-变化概览" class="headerlink" title="2026.05.17-06.04 变化概览"></a>2026.05.17-06.04 变化概览</h2><p>上篇文章里的功能图还是 <code>SmartPerfetto v1.0.7</code>。当前公开版本已经到 <code>v1.0.28</code>，仓库里有 230 个 <code>*.skill.yaml</code>，去掉 <code>_template</code> 后是 226 个功能性 Skill 文件；<code>backend/strategies/</code> 里有 20 个 <code>.strategy.md</code> 和 35 个 <code>.template.md</code>。</p><p>数量变化不算夸张，变化集中在六类用户能感知到的地方：</p><table><thead><tr><th>方向</th><th>5 月 17 日状态</th><th>现在的状态</th></tr></thead><tbody><tr><td>分析入口</td><td>Perfetto UI 里直接问 trace，支持 fast &#x2F; full &#x2F; auto</td><td>Smart 模式先做 scene inventory，选区快问可以只分析当前范围，CLI 也能复用分析核心</td></tr><tr><td>CLI 和采集</td><td>CLI &#x2F; API 已进入文档和发布流程</td><td><code>smp capture</code>、<code>smp analyze</code>、compare workflow、CLI turn files 和 npm 包验证进入常规发布流程</td></tr><tr><td>场景覆盖</td><td>startup、scrolling、ANR、interaction、touch、memory、power、network 等已有策略</td><td>新增 <code>smart.strategy.md</code>、<code>io.strategy.md</code>，Power &#x2F; ANR &#x2F; Input &#x2F; Display &#x2F; IO &#x2F; Network &#x2F; Observability 的证据要求被写进策略和测试</td></tr><tr><td>证据可靠性</td><td>SQL guardrail、证据 ID、逐句数据引用已经成型</td><td>失败 SQL 不再进入前端证据；最终报告检查、claim verifier 和按场景区分的证据规则覆盖更多场景</td></tr><tr><td>模型接入</td><td>Claude Agent SDK 与 OpenAI Agents SDK 是一等 runtime</td><td><code>claude-agent-sdk</code>、<code>openai-agents-sdk</code>、<code>pi-agent-core</code>、<code>opencode</code> 四条 runtime 共用一组输出规则</td></tr><tr><td>发布验证</td><td>Docker、portable、source、CLI 都已进入发布说明</td><td><code>v1.0.28</code> 发布前跑过四 runtime startup &#x2F; scrolling strict E2E、6 条 canonical scene trace regression、npm &#x2F; portable &#x2F; Docker 验证</td></tr></tbody></table><p>这轮更新的主线是把更多场景做成可验证的分析流程。模型仍然负责解释和排序，性能数字仍然来自 <code>trace_processor_shell</code>、SQL、Skill 表格和报告里的结构化证据。</p><h2 id="当前功能地图"><a href="#当前功能地图" class="headerlink" title="当前功能地图"></a>当前功能地图</h2><p><img src="/images/SmartPerfetto-Three-Week-Update/feature-map.png" alt="SmartPerfetto v1.0.28 功能地图"></p><p>SmartPerfetto 现在可以按“入口、分析、证据、runtime、分发”五层理解。</p><table><thead><tr><th>功能面</th><th>当前能力</th><th>适合场景</th></tr></thead><tbody><tr><td>Perfetto UI &#x2F; Smart Mode</td><td>加载 <code>.pftrace</code> &#x2F; <code>.perfetto-trace</code> 后可以直接提问，也可以先让 Smart 模式识别 startup、scrolling、click、navigation、ANR、device-state 等范围</td><td>混合 trace 里先找值得分析的片段，避免一上来把整条 trace 交给 full analysis</td></tr><tr><td>选区快问</td><td>Perfetto area selection &#x2F; track event selection 会带上 <code>selectionContext</code>，后端用 bounded scope 跑 quick analysis</td><td>只看某段时间、某一帧、某个 slice 前后发生了什么</td></tr><tr><td>CLI &#x2F; Capture</td><td><code>smp</code> &#x2F; <code>smartperfetto</code> 入口复用后端 runtime、MCP 工具、Skill、report 和 session snapshot</td><td>在终端、脚本、CI 或远程环境里采集和分析 trace</td></tr><tr><td>Skills + Strategies</td><td>226 个功能性 Skill 文件、20 个场景策略、35 个模板，覆盖 startup、scrolling、ANR、interaction、memory、power、network、pipeline、IO、smart 等场景</td><td>把自然语言问题路由到确定性的 SQL、Skill 和输出要求</td></tr><tr><td>Reports + Evidence</td><td>HTML report、Result ID、analysis-result snapshot、claim refs、data source narration、CLI turn files 一起保留</td><td>把“AI 说了什么”回到“哪条 SQL &#x2F; 哪个 Skill &#x2F; 哪行证据”</td></tr><tr><td>Agent Runtimes</td><td>Claude、OpenAI、Pi Agent Core、OpenCode 四条 runtime 由 Provider 或 env 显式选择</td><td>同一条 trace 分析可以接不同 SDK &#x2F; server 编排方式</td></tr><tr><td>Runtime Guardrails</td><td>Provider Manager、request-scoped MCP tools、session snapshot、<code>/health</code> runtime diagnostics 共同约束 runtime 行为</td><td>排查“连接测试过了，但分析 runtime 没切过去”这类问题</td></tr><tr><td>发布方式</td><td>Docker Hub、Windows &#x2F; macOS &#x2F; Linux portable、源码 <code>./start.sh</code>、npm CLI 都有发布验证</td><td>普通用户试用、开发者调试、团队部署和脚本接入</td></tr></tbody></table><p>这里要先写清一条规则：SmartPerfetto 没有把整条 trace 直接塞进 prompt。模型看到的是后端工具返回的 SQL 结果、Skill 输出、scene context、报告摘要和结构化证据。新增 runtime 也不能绕开这条规则。</p><h2 id="新功能一：Smart-模式、选区快问和-CLI-入口共用分析核心"><a href="#新功能一：Smart-模式、选区快问和-CLI-入口共用分析核心" class="headerlink" title="新功能一：Smart 模式、选区快问和 CLI 入口共用分析核心"></a>新功能一：Smart 模式、选区快问和 CLI 入口共用分析核心</h2><p><img src="/images/SmartPerfetto-Three-Week-Update/smart-mode-cli.png" alt="Smart Mode 与 CLI 共享分析核心"></p><p>上篇文章里已经有 fast &#x2F; full &#x2F; auto 三种分析模式。5 月 17 日之后，SmartPerfetto 又补了两条入口：Smart scene selection 和 range-scoped quick analysis。</p><p>Smart 模式先做 scene inventory。对混合 trace 来说，启动、滑动、点击、页面跳转、ANR、设备状态变化可能混在一条文件里。SmartPerfetto 会先识别可分析范围，给出每个 scene 的 eligibility、confidence、context、verification 和 report id，再让用户选择深挖全部 scene，或者只分析 startup、scrolling、click、navigation、device-state、ANR 中的一类。</p><p>选区快问解决的是另一个问题。Perfetto UI 里选中一段时间或一个 track event 后，用户常问的是“就这段为什么慢”“这个 slice 前后发生了什么”。现在后端会把范围上下文传入分析请求，quick path 只围绕这段时间拿证据，不必把整条 trace 都走 full analysis。</p><p>CLI 入口也从“能调用后端接口”变成了独立的终端产品。<code>smp capture</code> 面向采集，<code>smp analyze</code> 面向分析，compare workflow、session 文件、报告输出和 Provider&#x2F;runtime 选择规则都复用 Web 侧逻辑。CLI 不启动 Web UI，也不会另起一套分析逻辑。</p><p>用户层面的变化很直接：</p><table><thead><tr><th>使用场景</th><th>之前</th><th>现在</th></tr></thead><tbody><tr><td>混合 trace 初筛</td><td>手动看 timeline，再问某个场景</td><td>Smart 模式先列 scene，再点选深挖范围</td></tr><tr><td>选中一段卡顿</td><td>复制时间戳或手写范围</td><td>选区上下文进入后端，quick analysis 只看当前范围</td></tr><tr><td>远程机器采集</td><td>先靠系统工具采 trace，再搬到 UI</td><td><code>smp capture</code> 负责采集，<code>smp analyze</code> 继续使用同一组 Skill &#x2F; report</td></tr><tr><td>回归对比</td><td>UI 里选 reference 或 Result ID</td><td>CLI compare workflow 和 analysis result snapshot 可以接脚本</td></tr></tbody></table><p>这也是后面四 runtime 能成立的前提。入口可以是 UI、CLI 或 API，底层都要回到 <code>AgentAnalyzeSessionService</code>、Skill、MCP 工具和 report 检查。</p><h2 id="新功能二：证据规则从启动和滑动扩到更多场景"><a href="#新功能二：证据规则从启动和滑动扩到更多场景" class="headerlink" title="新功能二：证据规则从启动和滑动扩到更多场景"></a>新功能二：证据规则从启动和滑动扩到更多场景</h2><p><img src="/images/SmartPerfetto-Three-Week-Update/evidence-contracts.png" alt="场景证据规则"></p><p>SmartPerfetto 前几轮最重的场景是 startup 和 scrolling。5 月底这轮新增的重点，是把“报告必须证明什么”写到更多策略里。</p><p>这批改动覆盖了几类场景：</p><table><thead><tr><th>场景</th><th>新增或加强的证据要求</th><th>用户能得到什么</th></tr></thead><tbody><tr><td>Power</td><td>battery drain、power rails、wakelock、CPU freq &#x2F; idle、JobScheduler、modem &#x2F; network 相关 Skill</td><td>不只看 CPU 热点，还能把后台耗电、rail 能耗、唤醒频率和调度事件放到同一份报告里</td></tr><tr><td>ANR</td><td><code>anr_context_in_range</code>、main thread states &#x2F; slices、futex wait、logcat、ANR detail 的要求被加强</td><td>区分主线程运行、等待、futex、Binder、logcat 信号，减少“看到卡住就写 ANR 根因”的误判</td></tr><tr><td>Input &#x2F; Interaction</td><td>input events、scroll response latency、click response analysis &#x2F; detail 进入 Skill 和 strategy</td><td>从触摸输入到响应延迟有独立证据，不把所有卡顿都归到渲染线程</td></tr><tr><td>Display &#x2F; Pipeline</td><td>fence wait decomposition、pipeline strategy 里的 display 证据要求</td><td>把 producer、SurfaceFlinger、HWC、fence 等证据和报告结论绑定</td></tr><tr><td>IO &#x2F; Network</td><td><code>io.strategy.md</code>、network request-stage evidence template</td><td>IO 等待、网络请求阶段和场景结论之间有明确证据入口</td></tr><tr><td>Observability</td><td>diagnostics evidence template、missing signal policy、trace completeness prober</td><td>trace 缺少必要表或 category 时，报告应写缺失信号，而不是补一个确定结论</td></tr></tbody></table><p>这里的变化比加几个 SQL 更大。以前报告质量主要靠 prompt 要求模型“引用证据”；现在策略 frontmatter、Skill 证据边界、最终报告检查和 claim verifier 一起工作。报告里出现关键数值、线程、进程、帧数、百分比时，需要能回到对应的证据来源。</p><p>这也解释了为什么“failed SQL diagnostics”不能直接进入前端证据。失败 SQL 可以帮助维护者排错，但不能被用户当作 trace 事实。现在会把已验证的数据、诊断信息、报告可见文本和 snapshot provenance 分开保存。</p><h2 id="新功能三：四条-runtime-共用同一套输出规则"><a href="#新功能三：四条-runtime-共用同一套输出规则" class="headerlink" title="新功能三：四条 runtime 共用同一套输出规则"></a>新功能三：四条 runtime 共用同一套输出规则</h2><p><img src="/images/SmartPerfetto-Three-Week-Update/runtime-contract.png" alt="四 Runtime 输出规则"></p><p>上篇文章写到 Claude Agent SDK 和 OpenAI Agents SDK。<code>v1.0.28</code> 之后，SmartPerfetto 有四条 runtime：</p><table><thead><tr><th>Runtime</th><th>适合的 Provider</th><th>限制</th></tr></thead><tbody><tr><td><code>claude-agent-sdk</code></td><td>Anthropic、Bedrock、Vertex、DeepSeek、Anthropic-compatible gateway、本机 Claude Code 配置</td><td>默认路径，继续支持 in-process MCP server、verifier、sub-agent 和 SDK resume</td></tr><tr><td><code>openai-agents-sdk</code></td><td>OpenAI、Ollama、OpenAI-compatible gateway</td><td>通过 function tools 复用同一份 SmartPerfetto MCP tool registry</td></tr><tr><td><code>pi-agent-core</code></td><td>custom provider</td><td>可选 public runtime，复用 SmartPerfetto 的 prompt、tool、report 管线；不启用 <code>.pi</code> discovery、package extension、shell &#x2F; file tools</td></tr><tr><td><code>opencode</code></td><td>custom provider 或显式 OpenAI-compatible 配置</td><td>使用 request-scoped SmartPerfetto MCP bridge，不读取用户自己的 OpenCode 登录态、project state，也不启用内建 file &#x2F; shell &#x2F; web &#x2F; edit tools</td></tr></tbody></table><p>Provider Manager 和 env 不会用“哪个 key 存在”去猜 runtime。选择优先级是请求 &#x2F; session 里的 <code>providerId</code>、Provider Manager active provider、<code>SMARTPERFETTO_AGENT_RUNTIME</code>，再退回默认 <code>claude-agent-sdk</code>。已经创建的分析 session 会固定当时的 credential source；恢复旧 session 时不会因为后来切换 active provider 就静默换模型。</p><p>四条 runtime 的内部机制差异很大。Claude runtime 暴露 in-process MCP server；OpenAI runtime 把同一份工具 descriptor 适配成 function tools；Pi Agent Core 使用 request-scoped native tools；OpenCode 通过隔离的 server 和 MCP bridge 调用当前分析请求可见的 SmartPerfetto 工具。</p><p>对外输出只有一套：</p><figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">runtime result</span><br><span class="line">  -&gt; agentResultNormalizer</span><br><span class="line">  -&gt; finalReportContractGate</span><br><span class="line">  -&gt; evidence rules / claim verification / identity resolutions</span><br><span class="line">  -&gt; HTML report / CLI turn files / analysis-result snapshot</span><br><span class="line">  -&gt; frontend visible projection</span><br></pre></td></tr></table></figure><p>发布前的验证也按这套输出做。<code>v1.0.28</code> 发布前，Claude、OpenAI、Pi Agent Core、OpenCode 四条 runtime 都跑过 startup &#x2F; scrolling strict E2E；8 条 E2E 都要求 claim verifier 通过、12 个 checked claims、0 unsupported &#x2F; issues、非 partial final report。除此之外，还跑了 6 条 canonical scene trace regression、前端预构建检查、CLI pack check、npm fresh install smoke、portable package、GitHub Release 和 Docker Hub manifest 验证。</p><p>这不是说四条 runtime 的输出会逐字一致。不同 SDK 的工具调用节奏、流式事件、上下文恢复、成本和超时语义都不同。SmartPerfetto 约束的是公共输出：SSE 事件、HTML report、CLI turn files、analysis-result snapshot、claim verification 和 session resume 不能因为 runtime 换了就换一套语义。</p><h2 id="新功能四：报告质量和排错信息更具体"><a href="#新功能四：报告质量和排错信息更具体" class="headerlink" title="新功能四：报告质量和排错信息更具体"></a>新功能四：报告质量和排错信息更具体</h2><p>这三周里还有一批改动看起来不如 runtime 显眼，但对真实使用更关键。</p><p>第一类是报告完整性。<code>ensure complete agent final reports</code>、final report presentation hardening、evidence table readability、analysis quality rules 这些改动处理的是同一个问题：模型跑了很多工具，不等于交给用户的报告完整。现在报告需要满足场景定义的最终报告规则，结论里的断言要能通过 claim verifier，前端可见文本可以清理噪音，但不能把报告、CLI、snapshot 需要的 provenance 删掉。</p><p>第二类是 SQL 和诊断分开。raw SQL artifact、failed SQL diagnostics、trace processor startup failures 都做了更明确的处理。失败的 SQL 诊断可以进日志和调试材料，不应该混进“本次 trace 的证据表”。<code>trace_processor_shell</code> 启动失败、预编译产物缺失、加载 trace 出错，也要在健康检查或错误信息里直接暴露，不能让用户把它当成 AI 结论质量问题。</p><p>第三类是 codebase-aware 分析。SmartPerfetto 可以把本地代码库上下文接进分析任务，但它不能替代 trace 证据本身。代码定位只能补充解释和修复方向，性能判断仍要回到 trace 数据。</p><p>这类改动会让 bug 反馈更具体。以前用户可能只能说“AI 结论不对”；现在可以贴 Result ID、HTML report、<code>evidenceRefId</code>、claim ref、相关 SQL、Skill 表格和 <code>/health</code> 的 runtime 信息。</p><h2 id="可用性修复"><a href="#可用性修复" class="headerlink" title="可用性修复"></a>可用性修复</h2><p>新增功能之外，最近的修复主要集中在“能不能稳定跑完第一条真实 trace”和“出了问题能不能定位”。</p><table><thead><tr><th>修复方向</th><th>用户感知</th></tr></thead><tbody><tr><td>trace processor 预编译产物</td><td>源码和 npm CLI 更容易拿到固定版本的 <code>trace_processor_shell</code>，启动失败会有更明确的错误</td></tr><tr><td>Provider debug status</td><td><code>/health</code> 里能看到实际 runtime、credential source、provider mode 和 diagnostics</td></tr><tr><td>Node 24 hardening</td><td>源码和 CLI 要求 Node.js <code>&gt;=24 &lt;25</code>，减少 Node 版本漂移带来的构建和 runtime 问题</td></tr><tr><td>npm CLI bin</td><td><code>smp</code> &#x2F; <code>smartperfetto</code> 作为有效 bin 发布，fresh install 后可以直接跑版本和 doctor smoke</td></tr><tr><td>service port 配置</td><td>支持可配置 SmartPerfetto service ports，不再把端口清理做成粗暴杀进程</td></tr><tr><td>Docker healthcheck</td><td>Docker healthcheck 语法修正，发布流程能覆盖 runtime image smoke</td></tr><tr><td>frontend evidence table</td><td>AI Assistant 里的证据表可读性提升，报告和聊天里的表格更容易检查</td></tr><tr><td>final SSE conclusion</td><td>SSE 结论、analysis_completed、HTML report 的终态关系更稳定</td></tr><tr><td>raw SQL artifact</td><td>原始 SQL、最终可执行 SQL、失败诊断和用户可见证据分开处理</td></tr><tr><td>release verification</td><td>npm、portable、GitHub assets、Docker latest &#x2F; version tag 都有发布后验证</td></tr></tbody></table><p>这类修复不一定适合放在功能宣传里，但它们决定了工具能不能被真实 Android 性能团队使用。SmartPerfetto 的状态同时跨 Perfetto UI、Express 后端、SSE、trace processor、Provider 协议、模型 SDK、CLI、Docker 和 portable 包。任何一层状态漂移，都会被用户看成“AI 分析不可靠”。</p><h2 id="现在怎么选运行方式"><a href="#现在怎么选运行方式" class="headerlink" title="现在怎么选运行方式"></a>现在怎么选运行方式</h2><p>普通用户仍然优先选 Docker 或免安装包；开发者和脚本用户再考虑源码和 CLI。</p><table><thead><tr><th>运行方式</th><th>适合谁</th><th>说明</th></tr></thead><tbody><tr><td>Docker Hub</td><td>想快速试用或部署的人</td><td>不依赖宿主机 Claude Code 登录态；需要用 Provider Manager 或 <code>.env</code> 配 provider</td></tr><tr><td>免安装包</td><td>不想装 Node.js &#x2F; Docker 的用户</td><td>Windows、macOS、Linux portable 包自带 Node.js 24、后端、预构建 frontend 和固定 trace processor</td></tr><tr><td>本地源码 <code>./start.sh</code></td><td>想跟主干或改后端 &#x2F; Skill &#x2F; 策略的人</td><td>使用仓库提交的预构建 frontend，常规后端和 Skill 改动不需要构建 Perfetto UI</td></tr><tr><td>Dev 模式 <code>./scripts/start-dev.sh</code></td><td>修改 AI Assistant 插件 UI 的人</td><td>需要初始化 <code>perfetto/</code> submodule，并用 watch 构建插件</td></tr><tr><td>npm CLI <code>smp</code></td><td>需要终端采集、分析、CI 接入的人</td><td>不启动 Web UI，复用同一组 runtime、MCP 工具、Skill、report 和 session snapshot</td></tr></tbody></table><p>Runtime 配置上，第一次只选一种方式：</p><table><thead><tr><th>你现在有什么</th><th>推荐选择</th></tr></thead><tbody><tr><td>本地源码运行，终端里的 <code>claude</code> 已经能用</td><td>默认 <code>claude-agent-sdk</code>，不需要额外配置 OpenAI key</td></tr><tr><td>OpenAI、Ollama 或 OpenAI-compatible gateway</td><td><code>openai-agents-sdk</code></td></tr><tr><td>Pi Agent Core model 配置</td><td>custom provider + <code>pi-agent-core</code></td></tr><tr><td>OpenCode model 配置</td><td>custom provider + <code>opencode</code></td></tr><tr><td>Docker &#x2F; portable，不想碰 env</td><td>UI Provider Manager 里创建并激活 provider profile</td></tr></tbody></table><p>不要把 provider 名称写进 <code>SMARTPERFETTO_AGENT_RUNTIME</code>。这个变量只接受 <code>claude-agent-sdk</code>、<code>openai-agents-sdk</code>、<code>pi-agent-core</code>、<code>opencode</code>。DeepSeek、Qwen、Kimi、MiMo、TokenHub 这类 provider 应该通过 Provider Manager 或对应协议的 env block 配置。</p><h2 id="Bug-反馈该怎么写"><a href="#Bug-反馈该怎么写" class="headerlink" title="Bug 反馈该怎么写"></a>Bug 反馈该怎么写</h2><p><img src="/images/SmartPerfetto-Three-Week-Update/bug-feedback.png" alt="SmartPerfetto Bug 反馈清单"></p><p>SmartPerfetto 的 bug 反馈入口仍然是 GitHub Issues。安全问题不要发公开 issue，走 GitHub private advisory 或安全邮箱。</p><p><code>v1.0.28</code> 之后，一份可定位的反馈建议包含这些字段：</p><table><thead><tr><th>类别</th><th>要写什么</th></tr></thead><tbody><tr><td>SmartPerfetto 版本</td><td>版本号、commit、Docker image tag、portable 文件名、npm CLI 版本，至少给出一种</td></tr><tr><td>运行方式</td><td>Docker、portable、源码 <code>./start.sh</code>、dev 模式、npm CLI、API</td></tr><tr><td>Runtime &#x2F; Provider</td><td><code>claude-agent-sdk</code>、<code>openai-agents-sdk</code>、<code>pi-agent-core</code>、<code>opencode</code>；provider 名称、模型 ID、Base URL、协议类型</td></tr><tr><td>Trace 信息</td><td>设备、Android 版本、业务场景、trace category、是否包含 FrameTimeline、trace 大小</td></tr><tr><td>分析范围</td><td>全 trace、selected range、Smart scene、CLI capture，是否多轮追问或中途切换模式</td></tr><tr><td>证据定位</td><td>Result ID、HTML report、<code>evidenceRefId</code>、claim ref、<code>Q/C</code> 行、相关 SQL 或 Skill 表格</td></tr><tr><td>问题表面</td><td>chat 文本、SQL、Skill 表、报告、provider 连接、runtime 选择、session resume、CLI 输出</td></tr><tr><td>证据材料</td><td>后端日志、CLI turn files、<code>/health</code> 的 <code>aiEngine</code> 片段、截图、HTML report</td></tr><tr><td>预期与实际</td><td>最小复现步骤，实际输出，预期输出，以及人工判断依据</td></tr></tbody></table><p>Provider 相关问题要把“模型能聊天”和“模型能稳定 tool &#x2F; function calling”分开。SmartPerfetto 依赖流式输出、结构化工具参数、上下文恢复和长程报告生成。普通聊天正常，不代表能跑完整 trace 分析。</p><p>Trace 相关问题也要写采集条件。Android 12+ 且包含 FrameTimeline 的 trace 更适合启动、滑动和渲染分析；Power、ANR、网络、IO 各自需要不同 category。缺少数据源时，正确行为是报告缺失信号，不是补一个确定结论。</p><h2 id="当前更需要的反馈"><a href="#当前更需要的反馈" class="headerlink" title="当前更需要的反馈"></a>当前更需要的反馈</h2><p>SmartPerfetto 现在更需要能变成代码修复、Skill 分支或回归测试的反馈。</p><p>更有价值的样本通常长这样：</p><ul><li>某条 power trace 里，报告把耗电归到 CPU，但人工看是 wakelock 或 modem 活跃。请附 power rails、wakelock、CPU freq &#x2F; idle 相关证据位置。</li><li>某条 ANR trace 里，报告说主线程被 futex 阻塞，但 logcat 或 thread state 不支持。请附 ANR 时间段、main thread state 表、futex wait 表和 logcat 片段。</li><li>某个 OpenAI-compatible provider 连接测试通过，但 full analysis 的 tool 参数变形。请附 runtime、provider、模型 ID、协议类型、session log 和 <code>/health</code> 片段。</li><li>某个 OpenCode 或 Pi Agent Core 配置能 smoke，但 startup &#x2F; scrolling E2E 质量不稳定。请附模型配置、运行命令、Result ID 和 HTML report。</li><li>某个 Smart scene 识别错了范围。请附 trace 时间段、scene inventory 输出、期望 scene 类型和人工判断依据。</li><li>CLI capture 或 analyze 在远程机器失败。请附 Node 版本、平台、<code>smp doctor --format json</code>、CLI turn files 和 trace processor 错误。</li></ul><p>只有截图和一句“结果不对”，维护者很难判断问题在 trace 采集、SQL、Skill、场景策略、Provider 协议、runtime session、前端展示还是报告规则。</p><h2 id="结尾"><a href="#结尾" class="headerlink" title="结尾"></a>结尾</h2><p>SmartPerfetto 在 2026 年 5 月 17 日到 6 月 4 日之间的主线很清楚：Perfetto UI 仍然是入口之一，CLI 和 API 也在复用同一套分析流程；runtime 可以不同，证据和报告规则要一致。</p><p>它仍处在快速开发阶段。Provider preset、runtime 配置、public API、报告规则和 Skill 体系都会继续调整。对普通用户来说，最稳的方式是用 Docker 或 portable 跑一条自己的 trace；对贡献者来说，最有用的输入是可复现 trace、带证据位置的错误归因、能补进 Skill &#x2F; strategy 的 SQL 和回归样本。</p><p>5 月 17 日那篇文章已经不足以代表当前仓库状态。现在再试 SmartPerfetto，优先看 Smart 模式、选区快问、CLI 和四 runtime 配置。</p>]]></content>
+      
+      
+      <categories>
+          
+          <category> Android </category>
+          
+      </categories>
+      
+      
+        <tags>
+            
+            <tag> Android </tag>
+            
+            <tag> Perfetto </tag>
+            
+            <tag> Performance </tag>
+            
+            <tag> AI Agent </tag>
+            
+            <tag> SmartPerfetto </tag>
+            
+            <tag> MCP </tag>
+            
+            <tag> Open Source </tag>
+            
+        </tags>
+      
+    </entry>
+    
+    
+    
+    <entry>
       <title>SmartPerfetto 两周更新：从 Perfetto AI Assistant 到可复用的 Trace 分析平台</title>
       <link href="/2026/05/17/SmartPerfetto-Two-Week-Update/"/>
       <url>/2026/05/17/SmartPerfetto-Two-Week-Update/</url>
@@ -331,9 +368,9 @@
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
-            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> 性能优化 </tag>
             
@@ -372,13 +409,13 @@
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
-            
             <tag> Perfetto </tag>
             
-            <tag> Performance </tag>
+            <tag> Systrace </tag>
             
             <tag> RenderThread </tag>
+            
+            <tag> Performance </tag>
             
         </tags>
       
@@ -403,13 +440,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -438,13 +475,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -473,13 +510,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> RenderThread </tag>
             
@@ -506,13 +543,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
-            
             <tag> Memory </tag>
             
+            <tag> Android </tag>
+            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -539,11 +576,11 @@
       
         <tags>
             
-            <tag> Android </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
             
             <tag> ANR </tag>
             
@@ -572,13 +609,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> ANR </tag>
             
@@ -605,11 +642,11 @@
       
         <tags>
             
-            <tag> Android </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -638,13 +675,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
-            
             <tag> Memory </tag>
             
+            <tag> Android </tag>
+            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -671,13 +708,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
-            
             <tag> Memory </tag>
             
+            <tag> Android </tag>
+            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -704,13 +741,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
-            
             <tag> Memory </tag>
             
+            <tag> Android </tag>
+            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -739,13 +776,13 @@
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
-            
             <tag> Perfetto </tag>
             
-            <tag> Performance </tag>
+            <tag> Systrace </tag>
             
             <tag> RenderThread </tag>
+            
+            <tag> Performance </tag>
             
         </tags>
       
@@ -799,9 +836,9 @@
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
-            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> ANR </tag>
             
@@ -863,13 +900,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
             
-            <tag> Performance </tag>
+            <tag> Android </tag>
             
             <tag> RenderThread </tag>
+            
+            <tag> Performance </tag>
             
             <tag> Java </tag>
             
@@ -896,11 +933,11 @@
       
         <tags>
             
+            <tag> Startup </tag>
+            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
-            
-            <tag> Startup </tag>
             
             <tag> Performance </tag>
             
@@ -948,7 +985,7 @@
       <link href="/2022/03/13/android-systrace-cpu-state-sleep/"/>
       <url>/2022/03/13/android-systrace-cpu-state-sleep/</url>
       
-        <content type="html"><![CDATA[<p>本文是 Systrace 线程 CPU 运行状态分析技巧系列的第三篇，本文主要讲了使用 Systrace 分析 CPU 状态时遇到的 <strong>Sleep</strong> 与 <strong>Uninterruptible Sleep</strong> 状态的原因排查方法与优化方法，这两个状态导致性能变差概率非常高，而且排查起来也比较费劲，网上也没有系统化的文档。</p><p>本系列的目的是通过 Systrace 这个工具，从另外一个角度来看待 Android 系统整体的运行，同时也从另外一个角度来对 Framework 进行学习。也许你看了很多讲 Framework 的文章，但是总是记不住代码，或者不清楚其运行的流程，也许从 Systrace 这个图形化的角度，你可以理解的更深入一些。Systrace 基础和实战系列大家可以在 <a href="https://www.androidperformance.com/2019/07/23/Android-Systrace-Pre/">Systrace 基础知识 - Systrace 预备知识</a> 或者 <a href="https://www.androidperformance.com/2019/12/01/BlogMap/">博客文章目录</a> 这里看到完整的目录</p><span id="more"></span><h2 id="本文目录"><a href="#本文目录" class="headerlink" title="本文目录"></a>本文目录</h2><ul><li><a href="#sleep-overview">Linux 中的 Sleep 状态是什么</a></li><li><a href="#sleep-analysis">Sleep 状态分析</a></li><li><a href="#usleep-analysis">UninterruptibleSleep 状态分析</a></li><li><a href="#appendix">附录</a></li><li><a href="#about">关于我 &amp;&amp; 博客</a></li></ul><ol><li><a href="https://www.androidperformance.com/2022/01/21/android-systrace-cpu-state-runnable/">Systrace 线程 CPU 运行状态分析技巧 - Runnable 篇</a></li><li><a href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-running/">Systrace 线程 CPU 运行状态分析技巧 - Running 篇</a></li><li><a href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a></li></ol><p><a id="sleep-overview"></a></p><h1 id="Linux-中的-Sleep-状态是什么"><a href="#Linux-中的-Sleep-状态是什么" class="headerlink" title="Linux 中的 Sleep 状态是什么"></a>Linux 中的 Sleep 状态是什么</h1><h2 id="TASK-INTERUPTIBLE-vs-TASK-UNINTERRUPTIBLE"><a href="#TASK-INTERUPTIBLE-vs-TASK-UNINTERRUPTIBLE" class="headerlink" title="TASK_INTERUPTIBLE vs TASK_UNINTERRUPTIBLE"></a>TASK_INTERUPTIBLE vs TASK_UNINTERRUPTIBLE</h2><p>一个线程的状态不属于 Running 或者 Runnable 的时候，那就是 Sleep 状态了（严谨来说，还有其他状态，不过对性能分析来说不常见，比如 STOP、Trace 等）。</p><p>在 Linux 中的Sleep 状态可以细分为 3 个状态：</p><ul><li><strong>TASK_INTERUPTIBLE</strong> → 可中断</li><li><strong>TASK_UNINTERRUPTIBLE</strong> → 不可中断</li><li><strong>TASK_KILLABLE</strong> → 等同于 TASK_WAKEKILL | TASK_UNINTERRUPTIBLE</li></ul><p><img src="/images/android-systrace-cpu-state-sleep/image.webp" alt=" &quot;图 1: 性能之巅 2 CPU 优化&quot;"></p><p>在 Systrace&#x2F;Perfetto 中，Sleep 状态指的是 Linux 中的TASK_INTERUPTIBLE，trace 中的颜色为白色。Uninterruptible Sleep 指的是 Linux 中的 TASK_UNINTERRUPTIBLE，trace 中的颜色为橙色。</p><p>这两类状态都处于睡眠状态，拿不到 CPU 的时间片；只有满足某些条件时才会变为 Runnable，随后进入 Running。</p><p>TASK_INTERRUPTIBLE 与 TASK_UNINTERRUPTIBLE 都属于 Sleep，<strong>区别在于前者可以处理 Signal，后者不能，即使是 Kill 类型的 Signal</strong>。因此，除非拿到自己等待的资源，否则没有其他方法可以唤醒它们。 TASK_WAKEKILL 是指可以接受 Kill 类型 Signal 的 TASK_UNINTERRUPTIBLE。</p><p>Android 中的 Looper、Java&#x2F;Native 锁等待都属于 TAKS_INTERRUPTIBLE，因为他们可以被其他进程唤醒，应该说绝大部分的程序都处于 TAKS_INTERRUPTIBLE 状态，即 Sleep 状态。 看看 Systrace 中的一大片进程的白色状态就知道了（trace 中表现为白色块），它们绝大部分时间都是在 Runnning 跟 Sleep 状态之间转换，零星会看到几个 Runnable 或者 UninterruptibleSleep，即蓝色跟橙色。</p><h2 id="TASK-UNINTERRUPTIBLE-作用"><a href="#TASK-UNINTERRUPTIBLE-作用" class="headerlink" title="TASK_UNINTERRUPTIBLE 作用"></a>TASK_UNINTERRUPTIBLE 作用</h2><p>似乎看来 TASK_INTERUPTIBLE 就可以了，那为什么还要有 TASK_UNINTERRUPTIBLE 状态呢？</p><p>中断来源有两个，一个是硬件，另一个就是软件。硬件中断是外围控制芯片直接向 CPU 发送了中断信号，被 CPU 捕获并调用了对应的硬件处理函数。软件中断，前面说的 Signal、驱动程序里的 softirq 机制，主要用来在软件层面触发执行中断处理程序，也可以用作进程间通讯机制。</p><p>一个进程可以随时处理软中断或者硬件中断，他们的执行是在当前进程的上下文上，意味着共享进程的堆栈。但是在某种情况下，程序不希望有任何打扰，它就想等待自己所等待的事情执行完成。比如与硬件驱动打交道的流程，如 IO 等待、网络操作。 这是为了保护这段逻辑不会被其他事情所干扰，<code>避免它进入不可控的状态</code>。</p><p>Linux 处理硬件调度的时候也会临时关闭中断控制器，调度的时候会临时关闭抢占功能，目的都是 <code>防止程序流程进入不可控的状态</code>。这类状态本身执行时间非常短，但系统出异常、运行压力较大的时候可能会影响到性能。</p><p><a href="https://elixir.bootlin.com/linux/latest/ident/TASK_UNINTERRUPTIBLE">https://elixir.bootlin.com/linux/latest/ident/TASK_UNINTERRUPTIBLE</a></p><p>可以看到内核中使用此状态的情况，典型的有 Swap 读数据、信号量机制、mutex 锁、内存慢路径回收等场景。</p><h2 id="分析时候的注意点"><a href="#分析时候的注意点" class="headerlink" title="分析时候的注意点"></a>分析时候的注意点</h2><p>首先要认识到 TASK_INTERUPTIBLE、TASK_UNINTERRUPTIBLE 状态的出现是正常的，但是如果这些这些状态的累计占比达到了一定程度，就要引起注意了。特别是在关键操作路径上这类状态的占比较多的时候，需要排查原因之后做相应的优化。 分析问题以及做优化的时候需要牢牢把握两个关键点，它类似于内功心法一样:</p><ol><li><strong>原因的排查方法</strong></li><li><strong>优化方法论</strong></li></ol><p>你需要知道是什么原因导致了这次睡眠，是主动的还是被动的？如果是主动的，通过走读代码调查是否是正常的逻辑。如果是被动的，故事的源头是什么？ 这需要你对系统有足够多的认识，以及分析问题的经验，你需要经常看案例以增强自己的知识。</p><p>以下把 TASK_INTERUPTIBLE 称之为 Sleep，TASK_UNINTERRUPTIBLE称之为 UninterruptibleSleep，目的是与 Systrac 中的用词保持一致。</p><p>初期分析 Sleep 与 UninterruptibleSleep 状态的经验不足时你会感到困惑，这种困惑主要是来自于对系统的不了解。你需要读大量的框架层、内核层的代码才能从 Trace 中找出蛛丝马迹。目前并没有一种 Trace 工具能把整个逻辑链路描述的很清楚，而且他们有时候还有不准的时候，比如 Systrace 中的 wakeup_from 信息。只有广泛的系统运行原理做为支持储备，再结合 Trace 工具分析问题，才能做到准确定位问题根因。否则就是我经常说的「性能优化流氓」，你说什么是什么，别人也没法证伪。反复折磨测试同学复测，没测出来之后，这个问题也就不了了之了。</p><p>本文没办法列举完所有状态的原因，因此只能列举最为常见的类型，以及典型的实际案例。更重要的是，你需要掌握诊断方法，并结合源代码来定位问题。</p><h2 id="Trace-中的可视化效果"><a href="#Trace-中的可视化效果" class="headerlink" title="Trace 中的可视化效果"></a>Trace 中的可视化效果</h2><p><img src="/images/android-systrace-cpu-state-sleep/image_1.webp" alt="Pefetto 中支持显示的状态"></p><p><img src="/images/android-systrace-cpu-state-sleep/image_2.webp" alt="Systrace 支持显示的状态"></p><p><a id="sleep-analysis"></a></p><h1 id="Sleep-状态分析"><a href="#Sleep-状态分析" class="headerlink" title="Sleep 状态分析"></a>Sleep 状态分析</h1><p><img src="/images/android-systrace-cpu-state-sleep/image_3.webp" alt="图 1: UIThread 等待 RenderThread"></p><p><img src="/images/android-systrace-cpu-state-sleep/image_4.webp" alt="图 2: Binder 调用等待"></p><h2 id="诊断方法"><a href="#诊断方法" class="headerlink" title="诊断方法"></a>诊断方法</h2><h3 id="通过-wakeup-from-tid-查看唤醒线程"><a href="#通过-wakeup-from-tid-查看唤醒线程" class="headerlink" title="通过 wakeup from tid: ***查看唤醒线程"></a>通过 <code>wakeup from tid: ***</code>查看唤醒线程</h3><p>Sleep 最常见的有图 1（UIThread 与 RenderThread 同步）的情况与图 2（Binder 调用）的情况。 Sleep 状态一般是由程序主动等待某个事件的发生而造成的，比如锁等待，因此它有个比较明确的唤醒源。比如图 1，UIThread 等待的是 RenderThread，你可以通过阅读代码来了解这种多线程之间的交互关系。虽然最直接，但是对开发者的要求非常高，因为这需要你熟读图形栈的代码。这可不是一般的难度，是追求的目标，但不具备普适性。</p><p>更简单的方法是通过所谓的 <code>wakeup from tid: ***</code> 来调查线程之间的交互关系。从前面的 <a href="https://articles.zsxq.com/id_wzkkiwop5pgm.html">Runnable 文章</a> 中讲过，任何线程进入 Running 之前会先进入到 Runnable 状态，由此再转换成 Running。从 Sleep 状态切换到 Running，必然也要经过 Runnable。</p><p>进入到 Runnable 有两种方式，一种是 Running 中的程序被抢占了，暂时进入到 Runnable。还有一种是由另外一个线程将此线程（处于 Sleep 的线程）变成了 Runnable。</p><p>我们在调查Sleep 唤醒线程关系的时候，应用到的原理是第二种情况。在 Systrace 中这种是被 <code>wakeup from tid: ***</code> 信息所呈现。线程被抢占之后变成 Runnable，在 Systrace 中是被 <code>Running Instead</code> 呈现。</p><p><img src="/images/android-systrace-cpu-state-sleep/image_5.webp"></p><p>需要特别注意的是 <code>wakeupfrom</code> 这个有时候不准，原因是跟具体的 tracepoint 类型有关。分析的时候要注意甄别，不要一味地相信这个数据是对的。</p><h3 id="其他方法"><a href="#其他方法" class="headerlink" title="其他方法"></a>其他方法</h3><ol><li>Simpleperf 还原代码执行流</li><li>在 Systrace 寻找时间点对齐的事件</li></ol><p>方法 1 适合用来看程序到底在执行什么操作进入到这种状态，是 IO 还是锁等待？球里连载 Simpleperf 工具的使用方法，其中「<a href="https://articles.zsxq.com/id_xc0a7uwmsf3z.html">Simpleperf 分析篇 (1): 使用 Firefox Profiler 可视分析 Simpleperf 数据</a>」介绍了可以按时间顺序看函数调用的可视化方法。其他使用也会陆续更新，直接搜关键字即可。</p><p>方法 2 是个比较笨的方法，但有时候也可以通过它找到蛛丝马迹，不过缺点是错误率比较高。</p><h2 id="耗时过长的常见原因"><a href="#耗时过长的常见原因" class="headerlink" title="耗时过长的常见原因"></a>耗时过长的常见原因</h2><ul><li><strong>Binder 操作</strong> → 通过打开 Binder 对应的 trace，可方便地观察到调用到远端的 Binder 执行线程。如果 Binder 耗时长，要分析远端的 Binder 执行情况，是否是锁竞争？得不到CPU 时间片？要具体问题具体分析</li><li><strong>Java\futex锁竞争等待</strong> → 最常见也是最容易引起性能问题，当负载较高时候特别容易出现，特别是在 SystemServer 进程中。这是 Binder 多线程并行化或抢占公共资源导致的弊端。</li><li><strong>主动等待</strong> → 线程主动进入 Sleep 状态，等待其它线程的唤醒，比如等待信号量的释放。优化建议：需要看代码逻辑分析等待是否合理，不合理就要优化掉。</li><li><strong>等待 GPU 执行完毕</strong> → 等 GPU 任务执行完毕，Trace 中可以看到等 GPU fence 时间。常见的原因有渲染任务过重、 GPU 能力弱、GPU 频率低等。优化建议：提升 GPU 频率、降低渲染任务复杂度，比如精简 Shader、降低渲染分辨率、降低Texture 画质等。</li></ul><p><a id="usleep-analysis"></a></p><h1 id="UninterruptibleSleep-状态分析"><a href="#UninterruptibleSleep-状态分析" class="headerlink" title="UninterruptibleSleep 状态分析"></a>UninterruptibleSleep 状态分析</h1><h2 id="诊断方法-1"><a href="#诊断方法-1" class="headerlink" title="诊断方法"></a>诊断方法</h2><p>UninterruptibleSleep 也是一种 Sleep，因此分析 Sleep 状态时用到的方法也是通用的。不过此状态有两个特殊点与普通 Sleep 不同，因此在此特别说明。</p><ol><li><strong>UninterruptibleSleep 分为 IOWait 与 Non-IOWait</strong></li><li><strong>UninterruptibleSleep 有 Block reason</strong></li></ol><h3 id="UninterruptibleSleep-分为-IOWait-与-Non-IOWait"><a href="#UninterruptibleSleep-分为-IOWait-与-Non-IOWait" class="headerlink" title="UninterruptibleSleep 分为 IOWait 与 Non-IOWait"></a>UninterruptibleSleep 分为 IOWait 与 Non-IOWait</h3><p>IO 等待好理解，就是程序执行了 IO 操作。最简单的，程序如果没法从 PageCache 缓存里快速拿到数据，那就要与设备进行 IO 操作。CPU 内部缓存的访问速度是最快的，其次是内存，最后是磁盘。它们之间的延迟差异是数量级差异，因此系统越是从磁盘中读取数据，对整体性能的影响就越大。</p><p>非 IO 等待主要是指内核级别的锁等待，或者驱动程序中人为设置的等待。Linux 内核中某些路径是热点区域，因此不得不拿锁来进行保护。比如Binder 驱动，当负载大到一定程度，Binder 的内部的锁竞争导致的性能瓶颈就会呈现出来。</p><h3 id="Block-Reason"><a href="#Block-Reason" class="headerlink" title="Block Reason"></a>Block Reason</h3><p>谷歌的 Riley Andrews(<a href="mailto:&#114;&#105;&#97;&#x6e;&#x64;&#114;&#101;&#x77;&#115;&#x40;&#103;&#x6f;&#x6f;&#103;&#108;&#101;&#46;&#99;&#x6f;&#109;">&#114;&#105;&#97;&#x6e;&#x64;&#114;&#101;&#x77;&#115;&#x40;&#103;&#x6f;&#x6f;&#103;&#108;&#101;&#46;&#99;&#x6f;&#109;</a>) 15年左右往内核里提交了一个 tracepoint 补丁，用于记录当发生 UninterruptibleSleep 的时候是否是 IO 等待、调用函数等信息。Systrace 中的展示的 IOWait 与 BlockReason，就是通过解析这条 tracepoint 而来的。这条代码提交的介绍如下（由于这笔提交未合入到 Linux 上游主线，因此要注意你用的内核是否单独带了此补丁）:</p><figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">sched: add sched blocked tracepoint which dumps out context of sleep.</span><br><span class="line">Decare war on uninterruptible sleep. Add a tracepoint which</span><br><span class="line">walks the kernel stack and dumps the first non-scheduler function</span><br><span class="line">called before the scheduler is invoked.</span><br><span class="line"></span><br><span class="line">Change-Id: [I19e965d5206329360a92cbfe2afcc8c30f65c229](https://android-review.googlesource.com/#/q/I19e965d5206329360a92cbfe2afcc8c30f65c229)</span><br><span class="line">Signed-off-by: Riley Andrews [riandrews@google.com](mailto:riandrews@google.com)</span><br></pre></td></tr></table></figure><p>在 ftrace（Systrace 使用的数据抓取机制） 中的被记录为</p><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">sched_blocked_reason: pid=<span class="number">30235</span> iowait=<span class="number">0</span> caller=get_user_pages_fast+<span class="number">0x34</span>/<span class="number">0x70</span></span><br></pre></td></tr></table></figure><p>这句话被 Systrace 可视化的效果为:</p><p><img src="/images/android-systrace-cpu-state-sleep/image_6.webp"></p><p>主线程中有一段 Uninterruptible Sleep 状态，它的 BlockReason 是 <code>get_user_pages_fast</code>。它是一个 Linux 内核中函数的名字，代表着是线程是被它切换到了 UninterruptibleSleep 状态。为了查看具体的原因，需要查看这个函数的具体实现。</p><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> * get_user_pages_fast() - pin user pages in memory</span></span><br><span class="line"><span class="comment"> * @start:      starting user address</span></span><br><span class="line"><span class="comment"> * @nr_pages:   number of pages from start to pin</span></span><br><span class="line"><span class="comment"> * @gup_flags:  flags modifying pin behaviour</span></span><br><span class="line"><span class="comment"> * @pages:      array that receives pointers to the pages pinned.</span></span><br><span class="line"><span class="comment"> *              Should be at least nr_pages long.</span></span><br><span class="line"><span class="comment"> *</span></span><br><span class="line"><span class="comment"> * Attempt to pin user pages in memory without taking mm-&gt;mmap_lock.</span></span><br><span class="line"><span class="comment"> * If not successful, it will fall back to taking the lock and</span></span><br><span class="line"><span class="comment"> * calling get_user_pages().</span></span><br><span class="line"><span class="comment"> *</span></span><br><span class="line"><span class="comment"> * Returns number of pages pinned. This may be fewer than the number requested.</span></span><br><span class="line"><span class="comment"> * If nr_pages is 0 or negative, returns 0. If no pages were pinned, returns</span></span><br><span class="line"><span class="comment"> * -errno.</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line"><span class="type">int</span> <span class="title function_">get_user_pages_fast</span><span class="params">(<span class="type">unsigned</span> <span class="type">long</span> start, <span class="type">int</span> nr_pages,</span></span><br><span class="line"><span class="params">      <span class="type">unsigned</span> <span class="type">int</span> gup_flags, <span class="keyword">struct</span> page **pages)</span></span><br><span class="line">&#123;</span><br><span class="line">  <span class="keyword">if</span> (!is_valid_gup_flags(gup_flags))</span><br><span class="line">    <span class="keyword">return</span> -EINVAL;</span><br><span class="line"></span><br><span class="line">  <span class="comment">/*</span></span><br><span class="line"><span class="comment">   * The caller may or may not have explicitly set FOLL_GET; either way is</span></span><br><span class="line"><span class="comment">   * OK. However, internally (within mm/gup.c), gup fast variants must set</span></span><br><span class="line"><span class="comment">   * FOLL_GET, because gup fast is always a &quot;pin with a +1 page refcount&quot;</span></span><br><span class="line"><span class="comment">   * request.</span></span><br><span class="line"><span class="comment">   */</span></span><br><span class="line">  gup_flags |= FOLL_GET;</span><br><span class="line">  <span class="keyword">return</span> internal_get_user_pages_fast(start, nr_pages, gup_flags, pages);</span><br><span class="line">&#125;</span><br><span class="line">EXPORT_SYMBOL_GPL(get_user_pages_fast);</span><br></pre></td></tr></table></figure><p>从函数解释上可以看到，函数首先是通过无锁的方式pin 应用侧的 pages，如果失败的时候不得不尝试持锁后走慢速执行路径。此时，无法持锁的时候那就要等待了，直到先前持锁的人释放锁。那之前被谁持有了呢？这时候可以利用之前介绍的Sleep 诊断方法，如下图。</p><p><img src="/images/android-systrace-cpu-state-sleep/image_7.webp"></p><p>UninterruptibleSleep 状态相比 Sleep 有点复杂，因为它涉及到 Linux 内部的实现。可能是内核本身的机制有问题，也有可能是应用层使用不对，因此要联合上层的行为综合诊断才行。毕竟内核也不是万能的，它也有自己的能力边界，当应用层的使用超过其边界的时候，就会出现影响性能的现象。</p><h2 id="IOWait-常见原因与优化方法"><a href="#IOWait-常见原因与优化方法" class="headerlink" title="IOWait 常见原因与优化方法"></a>IOWait 常见原因与优化方法</h2><h3 id="1-主动IO-操作"><a href="#1-主动IO-操作" class="headerlink" title="1. 主动IO 操作"></a>1. <strong>主动IO 操作</strong></h3><ul><li>程序进行频繁、大量的读或者写 IO 操作，这是最常见的情况。</li><li>多个应用同时下发 IO 操作，导致器件的压力较大。同时执行的程序多的时候 IO 负载高的可能性也大。</li><li>器件本身的 IO 性能较差，可通过 IO Benchmark 来进行排查。 常见的原因有磁盘碎片化、器件老化、剩余空间较少（越是低端机越明显）、读放大、写放大等等。</li><li>文件系统特性，比如有些文件系统的内部操作会表现为 IO 等待。</li><li>开启 Swap 机制的内核下，数据从 Swap 中读取。</li></ul><p><strong>优化方法</strong></p><ul><li>调优 Readahead 机制</li><li>指定文件到 PageCache，即 PinFile 机制</li><li>调整 PageCache 回收策略</li><li>调优清理垃圾文件策略</li></ul><h3 id="2-低内存导致的-IO-变多"><a href="#2-低内存导致的-IO-变多" class="headerlink" title="2. 低内存导致的 IO 变多"></a>2. 低内存导致的 IO 变多</h3><p>内存是个非常有意思的东西，由于它的速度比磁盘快，因此 OS 设计者们把内存当做磁盘的缓存，通过它来避免了部分IO操作的请求，非常有效的提升了整体 IO 性能。有两个极端情况，当系统内存特别大的时候，绝大部分操作都可以在内存中执行，此时整体 IO 性能会非常好。当系统内存特别低，以至于没办法缓存 IO 数据的时候，几乎所有的 IO 操作都直接与器件打交道，这时候整体性能相比内存多的时候而言是非常差的。</p><p>所以系统中的内存较少的时候 IO 等待的概率也会变高。所以，这个问题就变成了如何让系统中有足够多的内存？如何调节磁盘缓存的淘汰算法？</p><p><strong>优化方法</strong></p><ul><li>关键路径上减少 IO 操作</li><li>通过Readahead 机制读数据</li><li>将热点数据尽量聚集在一起，使被 Readahead 机制命中的概率高</li><li>最后一个老生常谈的，减少大量的内存分配、内存浪费等操作</li></ul><p>系统中的内存是被各个进程所共用。当app 只考虑自己，肆无忌惮的使用计算资源，必然会影响到其他程序。这时候系统还是会回来压制你，到头来亏损的还是自己。 不过能想到这一步的开发者比较少，也不现实。明文化的执行系统约定，可能是个终极解决方案。</p><h2 id="Non-IOWait-常见原因"><a href="#Non-IOWait-常见原因" class="headerlink" title="Non-IOWait 常见原因"></a>Non-IOWait 常见原因</h2><ul><li><strong>低内存导致等待</strong> → 低内存的时候要回收其他程序或者缓存上的内存。</li><li><strong>Binder 等待</strong> → 有大量 Binder 操作的时候出现概率较高。</li><li><strong>各种各样的内核锁，不胜枚举</strong>。结合「诊断方法」来分析。</li></ul><h2 id="系统调度与-UninterruptibleSleep-耦合的问题"><a href="#系统调度与-UninterruptibleSleep-耦合的问题" class="headerlink" title="系统调度与 UninterruptibleSleep  耦合的问题"></a>系统调度与 UninterruptibleSleep  耦合的问题</h2><p>当线程处于 UninterruptibleSleep 非 IO等待状态（即内核锁），而持有该锁的其他线程因 CPU 调度原因，较长时间处于 Runnable 状态。这时候就出现了有意思的现象，即使被等待的线程处于高优先级，它的依赖方没有被调度器及时的识别到，即使是非常短的锁持有，也会出现较长时间的等待。</p><p>规避或者彻底解决这类问题都是件比较难的事情，不同厂家实现了不同的解决方案，也是比较考虑厂家技术能力的一个问题。</p><p><a id="appendix"></a></p><h1 id="附录"><a href="#附录" class="headerlink" title="附录"></a>附录</h1><h2 id="Linux-线程状态释义"><a href="#Linux-线程状态释义" class="headerlink" title="Linux 线程状态释义"></a>Linux 线程状态释义</h2><table><thead><tr><th>线程状态</th><th>描述</th></tr></thead><tbody><tr><td>S</td><td>SLEEPING</td></tr><tr><td>R、R+</td><td>RUNNABLE</td></tr><tr><td>D</td><td>UNINTR_SLEEP</td></tr><tr><td>T</td><td>STOPPED</td></tr><tr><td>t</td><td>DEBUG</td></tr><tr><td>Z</td><td>ZOMBIE</td></tr><tr><td>X</td><td>EXIT_DEAD</td></tr><tr><td>x</td><td>TASK_DEAD</td></tr><tr><td>K</td><td>WAKE_KILL</td></tr><tr><td>W</td><td>WAKING</td></tr><tr><td>D</td><td>K</td></tr><tr><td>D</td><td>W</td></tr></tbody></table><h2 id="案例-从-Swap-读取数据时的等待"><a href="#案例-从-Swap-读取数据时的等待" class="headerlink" title="案例: 从 Swap 读取数据时的等待"></a>案例: 从 Swap 读取数据时的等待</h2><p><img src="/images/android-systrace-cpu-state-sleep/image_8.webp"></p><h2 id="案例-同进程的多个线程进行-mmap"><a href="#案例-同进程的多个线程进行-mmap" class="headerlink" title="案例: 同进程的多个线程进行 mmap"></a>案例: 同进程的多个线程进行 mmap</h2><p><img src="/images/android-systrace-cpu-state-sleep/image_9.webp"></p><p>共享同一个 mm_struct 的线程同时执行 mmap() 系统调用进行 vma 分配时发生锁竞争。</p><p>mmap_write_lock_killable() 与 mmap_write_unlock() 包起来的区域就是由锁受保护的区域。</p><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">unsigned</span> <span class="type">long</span> <span class="title function_">vm_mmap_pgoff</span><span class="params">(<span class="keyword">struct</span> file *file, <span class="type">unsigned</span> <span class="type">long</span> addr,</span></span><br><span class="line"><span class="params">  <span class="type">unsigned</span> <span class="type">long</span> len, <span class="type">unsigned</span> <span class="type">long</span> prot,</span></span><br><span class="line"><span class="params">  <span class="type">unsigned</span> <span class="type">long</span> flag, <span class="type">unsigned</span> <span class="type">long</span> pgoff)</span></span><br><span class="line">&#123;</span><br><span class="line">  <span class="type">unsigned</span> <span class="type">long</span> ret;</span><br><span class="line">  <span class="class"><span class="keyword">struct</span> <span class="title">mm_struct</span> *<span class="title">mm</span> =</span> current-&gt;mm;</span><br><span class="line">  <span class="type">unsigned</span> <span class="type">long</span> populate;</span><br><span class="line">  LIST_HEAD(uf);</span><br><span class="line"></span><br><span class="line">  ret = security_mmap_file(file, prot, flag);</span><br><span class="line">  <span class="keyword">if</span> (!ret) &#123;</span><br><span class="line">    <span class="keyword">if</span> (mmap_write_lock_killable(mm))</span><br><span class="line">      <span class="keyword">return</span> -EINTR;</span><br><span class="line">    ret = do_mmap(file, addr, len, prot, flag, pgoff, &amp;populate,</span><br><span class="line">            &amp;uf);</span><br><span class="line">    mmap_write_unlock(mm);</span><br><span class="line">    userfaultfd_unmap_complete(mm, &amp;uf);</span><br><span class="line">    <span class="keyword">if</span> (populate)</span><br><span class="line">      mm_populate(ret, populate);</span><br><span class="line">  &#125;</span><br><span class="line">  <span class="keyword">return</span> ret;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure><p><a id="about"></a></p><h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p><ol><li><a href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li><li><a href="https://androidperformance.com/2019/12/01/BlogMap/">本博客内容导航</a> ：个人博客内容的一个导航。</li><li><a href="https://androidperformance.com/2018/05/07/Android-performance-optimization-skills-and-tools/">个人整理和搜集的优秀博客文章 - Android 性能优化必知必会</a> ：欢迎大家自荐和推荐 （微信私聊即可）</li><li><a href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a> ： 欢迎加入，多谢支持～</li></ol><blockquote><p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p></blockquote><p><img src="/images/WechatIMG581.webp" alt="微信扫一扫"></p>]]></content>
+        <content type="html"><![CDATA[<p>本文是 Systrace 线程 CPU 运行状态分析技巧系列的第三篇，本文主要讲了使用 Systrace 分析 CPU 状态时遇到的 <strong>Sleep</strong> 与 <strong>Uninterruptible Sleep</strong> 状态的原因排查方法与优化方法，这两个状态导致性能变差概率非常高，而且排查起来也比较费劲，网上也没有系统化的文档。</p><p>本系列的目的是通过 Systrace 这个工具，从另外一个角度来看待 Android 系统整体的运行，同时也从另外一个角度来对 Framework 进行学习。也许你看了很多讲 Framework 的文章，但是总是记不住代码，或者不清楚其运行的流程，也许从 Systrace 这个图形化的角度，你可以理解的更深入一些。Systrace 基础和实战系列大家可以在 <a href="https://www.androidperformance.com/2019/07/23/Android-Systrace-Pre/">Systrace 基础知识 - Systrace 预备知识</a> 或者 <a href="https://www.androidperformance.com/2019/12/01/BlogMap/">博客文章目录</a> 这里看到完整的目录</p><span id="more"></span><h2 id="本文目录"><a href="#本文目录" class="headerlink" title="本文目录"></a>本文目录</h2><ul><li><a href="#sleep-overview">Linux 中的 Sleep 状态是什么</a></li><li><a href="#sleep-analysis">Sleep 状态分析</a></li><li><a href="#usleep-analysis">UninterruptibleSleep 状态分析</a></li><li><a href="#appendix">附录</a></li><li><a href="#about">关于我 &amp;&amp; 博客</a></li></ul><ol><li><a href="https://www.androidperformance.com/2022/01/21/android-systrace-cpu-state-runnable/">Systrace 线程 CPU 运行状态分析技巧 - Runnable 篇</a></li><li><a href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-running/">Systrace 线程 CPU 运行状态分析技巧 - Running 篇</a></li><li><a href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a></li></ol><p><a id="sleep-overview"></a></p><h1 id="Linux-中的-Sleep-状态是什么"><a href="#Linux-中的-Sleep-状态是什么" class="headerlink" title="Linux 中的 Sleep 状态是什么"></a>Linux 中的 Sleep 状态是什么</h1><h2 id="TASK-INTERUPTIBLE-vs-TASK-UNINTERRUPTIBLE"><a href="#TASK-INTERUPTIBLE-vs-TASK-UNINTERRUPTIBLE" class="headerlink" title="TASK_INTERUPTIBLE vs TASK_UNINTERRUPTIBLE"></a>TASK_INTERUPTIBLE vs TASK_UNINTERRUPTIBLE</h2><p>一个线程的状态不属于 Running 或者 Runnable 的时候，那就是 Sleep 状态了（严谨来说，还有其他状态，不过对性能分析来说不常见，比如 STOP、Trace 等）。</p><p>在 Linux 中的Sleep 状态可以细分为 3 个状态：</p><ul><li><strong>TASK_INTERUPTIBLE</strong> → 可中断</li><li><strong>TASK_UNINTERRUPTIBLE</strong> → 不可中断</li><li><strong>TASK_KILLABLE</strong> → 等同于 TASK_WAKEKILL | TASK_UNINTERRUPTIBLE</li></ul><p><img src="/images/android-systrace-cpu-state-sleep/image.webp" alt=" &quot;图 1: 性能之巅 2 CPU 优化&quot;"></p><p>在 Systrace&#x2F;Perfetto 中，Sleep 状态指的是 Linux 中的TASK_INTERUPTIBLE，trace 中的颜色为白色。Uninterruptible Sleep 指的是 Linux 中的 TASK_UNINTERRUPTIBLE，trace 中的颜色为橙色。</p><p>这两类状态都处于睡眠状态，拿不到 CPU 的时间片；只有满足某些条件时才会变为 Runnable，随后进入 Running。</p><p>TASK_INTERRUPTIBLE 与 TASK_UNINTERRUPTIBLE 都属于 Sleep，<strong>区别在于前者可以处理 Signal，后者不能，即使是 Kill 类型的 Signal</strong>。因此，除非拿到自己等待的资源，否则没有其他方法可以唤醒它们。 TASK_WAKEKILL 是指可以接受 Kill 类型 Signal 的 TASK_UNINTERRUPTIBLE。</p><p>Android 中的 Looper、Java&#x2F;Native 锁等待都属于 TAKS_INTERRUPTIBLE，因为他们可以被其他进程唤醒，应该说绝大部分的程序都处于 TAKS_INTERRUPTIBLE 状态，即 Sleep 状态。 看看 Systrace 中的一大片进程的白色状态就知道了（trace 中表现为白色块），它们绝大部分时间都是在 Runnning 跟 Sleep 状态之间转换，零星会看到几个 Runnable 或者 UninterruptibleSleep，即蓝色跟橙色。</p><h2 id="TASK-UNINTERRUPTIBLE-作用"><a href="#TASK-UNINTERRUPTIBLE-作用" class="headerlink" title="TASK_UNINTERRUPTIBLE 作用"></a>TASK_UNINTERRUPTIBLE 作用</h2><p>似乎看来 TASK_INTERUPTIBLE 就可以了，那为什么还要有 TASK_UNINTERRUPTIBLE 状态呢？</p><p>中断来源有两个，一个是硬件，另一个就是软件。硬件中断是外围控制芯片直接向 CPU 发送了中断信号，被 CPU 捕获并调用了对应的硬件处理函数。软件中断，前面说的 Signal、驱动程序里的 softirq 机制，主要用来在软件层面触发执行中断处理程序，也可以用作进程间通讯机制。</p><p>一个进程可以随时处理软中断或者硬件中断，他们的执行是在当前进程的上下文上，意味着共享进程的堆栈。但是在某种情况下，程序不希望有任何打扰，它就想等待自己所等待的事情执行完成。比如与硬件驱动打交道的流程，如 IO 等待、网络操作。 这是为了保护这段逻辑不会被其他事情所干扰，<code>避免它进入不可控的状态</code>。</p><p>Linux 处理硬件调度的时候也会临时关闭中断控制器，调度的时候会临时关闭抢占功能，目的都是 <code>防止程序流程进入不可控的状态</code>。这类状态本身执行时间非常短，但系统出异常、运行压力较大的时候可能会影响到性能。</p><p><a href="https://elixir.bootlin.com/linux/latest/ident/TASK_UNINTERRUPTIBLE">https://elixir.bootlin.com/linux/latest/ident/TASK_UNINTERRUPTIBLE</a></p><p>可以看到内核中使用此状态的情况，典型的有 Swap 读数据、信号量机制、mutex 锁、内存慢路径回收等场景。</p><h2 id="分析时候的注意点"><a href="#分析时候的注意点" class="headerlink" title="分析时候的注意点"></a>分析时候的注意点</h2><p>首先要认识到 TASK_INTERUPTIBLE、TASK_UNINTERRUPTIBLE 状态的出现是正常的，但是如果这些这些状态的累计占比达到了一定程度，就要引起注意了。特别是在关键操作路径上这类状态的占比较多的时候，需要排查原因之后做相应的优化。 分析问题以及做优化的时候需要牢牢把握两个关键点，它类似于内功心法一样:</p><ol><li><strong>原因的排查方法</strong></li><li><strong>优化方法论</strong></li></ol><p>你需要知道是什么原因导致了这次睡眠，是主动的还是被动的？如果是主动的，通过走读代码调查是否是正常的逻辑。如果是被动的，故事的源头是什么？ 这需要你对系统有足够多的认识，以及分析问题的经验，你需要经常看案例以增强自己的知识。</p><p>以下把 TASK_INTERUPTIBLE 称之为 Sleep，TASK_UNINTERRUPTIBLE称之为 UninterruptibleSleep，目的是与 Systrac 中的用词保持一致。</p><p>初期分析 Sleep 与 UninterruptibleSleep 状态的经验不足时你会感到困惑，这种困惑主要是来自于对系统的不了解。你需要读大量的框架层、内核层的代码才能从 Trace 中找出蛛丝马迹。目前并没有一种 Trace 工具能把整个逻辑链路描述的很清楚，而且他们有时候还有不准的时候，比如 Systrace 中的 wakeup_from 信息。只有广泛的系统运行原理做为支持储备，再结合 Trace 工具分析问题，才能做到准确定位问题根因。否则就是我经常说的「性能优化流氓」，你说什么是什么，别人也没法证伪。反复折磨测试同学复测，没测出来之后，这个问题也就不了了之了。</p><p>本文没办法列举完所有状态的原因，因此只能列举最为常见的类型，以及典型的实际案例。更重要的是，你需要掌握诊断方法，并结合源代码来定位问题。</p><h2 id="Trace-中的可视化效果"><a href="#Trace-中的可视化效果" class="headerlink" title="Trace 中的可视化效果"></a>Trace 中的可视化效果</h2><p><img src="/images/android-systrace-cpu-state-sleep/image_1.webp" alt="Pefetto 中支持显示的状态"></p><p><img src="/images/android-systrace-cpu-state-sleep/image_2.webp" alt="Systrace 支持显示的状态"></p><p><a id="sleep-analysis"></a></p><h1 id="Sleep-状态分析"><a href="#Sleep-状态分析" class="headerlink" title="Sleep 状态分析"></a>Sleep 状态分析</h1><p><img src="/images/android-systrace-cpu-state-sleep/image_3.webp" alt="图 1: UIThread 等待 RenderThread"></p><p><img src="/images/android-systrace-cpu-state-sleep/image_4.webp" alt="图 2: Binder 调用等待"></p><h2 id="诊断方法"><a href="#诊断方法" class="headerlink" title="诊断方法"></a>诊断方法</h2><h3 id="通过-wakeup-from-tid-查看唤醒线程"><a href="#通过-wakeup-from-tid-查看唤醒线程" class="headerlink" title="通过 wakeup from tid: ***查看唤醒线程"></a>通过 <code>wakeup from tid: ***</code>查看唤醒线程</h3><p>Sleep 最常见的有图 1（UIThread 与 RenderThread 同步）的情况与图 2（Binder 调用）的情况。 Sleep 状态一般是由程序主动等待某个事件的发生而造成的，比如锁等待，因此它有个比较明确的唤醒源。比如图 1，UIThread 等待的是 RenderThread，你可以通过阅读代码来了解这种多线程之间的交互关系。虽然最直接，但是对开发者的要求非常高，因为这需要你熟读图形栈的代码。这可不是一般的难度，是追求的目标，但不具备普适性。</p><p>更简单的方法是通过所谓的 <code>wakeup from tid: ***</code> 来调查线程之间的交互关系。从前面的 <a href="https://articles.zsxq.com/id_wzkkiwop5pgm.html">Runnable 文章</a> 中讲过，任何线程进入 Running 之前会先进入到 Runnable 状态，由此再转换成 Running。从 Sleep 状态切换到 Running，必然也要经过 Runnable。</p><p>进入到 Runnable 有两种方式，一种是 Running 中的程序被抢占了，暂时进入到 Runnable。还有一种是由另外一个线程将此线程（处于 Sleep 的线程）变成了 Runnable。</p><p>我们在调查Sleep 唤醒线程关系的时候，应用到的原理是第二种情况。在 Systrace 中这种是被 <code>wakeup from tid: ***</code> 信息所呈现。线程被抢占之后变成 Runnable，在 Systrace 中是被 <code>Running Instead</code> 呈现。</p><p><img src="/images/android-systrace-cpu-state-sleep/image_5.webp"></p><p>需要特别注意的是 <code>wakeupfrom</code> 这个有时候不准，原因是跟具体的 tracepoint 类型有关。分析的时候要注意甄别，不要一味地相信这个数据是对的。</p><h3 id="其他方法"><a href="#其他方法" class="headerlink" title="其他方法"></a>其他方法</h3><ol><li>Simpleperf 还原代码执行流</li><li>在 Systrace 寻找时间点对齐的事件</li></ol><p>方法 1 适合用来看程序到底在执行什么操作进入到这种状态，是 IO 还是锁等待？球里连载 Simpleperf 工具的使用方法，其中「<a href="https://articles.zsxq.com/id_xc0a7uwmsf3z.html">Simpleperf 分析篇 (1): 使用 Firefox Profiler 可视分析 Simpleperf 数据</a>」介绍了可以按时间顺序看函数调用的可视化方法。其他使用也会陆续更新，直接搜关键字即可。</p><p>方法 2 是个比较笨的方法，但有时候也可以通过它找到蛛丝马迹，不过缺点是错误率比较高。</p><h2 id="耗时过长的常见原因"><a href="#耗时过长的常见原因" class="headerlink" title="耗时过长的常见原因"></a>耗时过长的常见原因</h2><ul><li><strong>Binder 操作</strong> → 通过打开 Binder 对应的 trace，可方便地观察到调用到远端的 Binder 执行线程。如果 Binder 耗时长，要分析远端的 Binder 执行情况，是否是锁竞争？得不到CPU 时间片？要具体问题具体分析</li><li><strong>Java\futex锁竞争等待</strong> → 最常见也是最容易引起性能问题，当负载较高时候特别容易出现，特别是在 SystemServer 进程中。这是 Binder 多线程并行化或抢占公共资源导致的弊端。</li><li><strong>主动等待</strong> → 线程主动进入 Sleep 状态，等待其它线程的唤醒，比如等待信号量的释放。优化建议：需要看代码逻辑分析等待是否合理，不合理就要优化掉。</li><li><strong>等待 GPU 执行完毕</strong> → 等 GPU 任务执行完毕，Trace 中可以看到等 GPU fence 时间。常见的原因有渲染任务过重、 GPU 能力弱、GPU 频率低等。优化建议：提升 GPU 频率、降低渲染任务复杂度，比如精简 Shader、降低渲染分辨率、降低Texture 画质等。</li></ul><p><a id="usleep-analysis"></a></p><h1 id="UninterruptibleSleep-状态分析"><a href="#UninterruptibleSleep-状态分析" class="headerlink" title="UninterruptibleSleep 状态分析"></a>UninterruptibleSleep 状态分析</h1><h2 id="诊断方法-1"><a href="#诊断方法-1" class="headerlink" title="诊断方法"></a>诊断方法</h2><p>UninterruptibleSleep 也是一种 Sleep，因此分析 Sleep 状态时用到的方法也是通用的。不过此状态有两个特殊点与普通 Sleep 不同，因此在此特别说明。</p><ol><li><strong>UninterruptibleSleep 分为 IOWait 与 Non-IOWait</strong></li><li><strong>UninterruptibleSleep 有 Block reason</strong></li></ol><h3 id="UninterruptibleSleep-分为-IOWait-与-Non-IOWait"><a href="#UninterruptibleSleep-分为-IOWait-与-Non-IOWait" class="headerlink" title="UninterruptibleSleep 分为 IOWait 与 Non-IOWait"></a>UninterruptibleSleep 分为 IOWait 与 Non-IOWait</h3><p>IO 等待好理解，就是程序执行了 IO 操作。最简单的，程序如果没法从 PageCache 缓存里快速拿到数据，那就要与设备进行 IO 操作。CPU 内部缓存的访问速度是最快的，其次是内存，最后是磁盘。它们之间的延迟差异是数量级差异，因此系统越是从磁盘中读取数据，对整体性能的影响就越大。</p><p>非 IO 等待主要是指内核级别的锁等待，或者驱动程序中人为设置的等待。Linux 内核中某些路径是热点区域，因此不得不拿锁来进行保护。比如Binder 驱动，当负载大到一定程度，Binder 的内部的锁竞争导致的性能瓶颈就会呈现出来。</p><h3 id="Block-Reason"><a href="#Block-Reason" class="headerlink" title="Block Reason"></a>Block Reason</h3><p>谷歌的 Riley Andrews(<a href="mailto:&#114;&#105;&#x61;&#110;&#100;&#x72;&#x65;&#119;&#115;&#64;&#103;&#111;&#x6f;&#103;&#108;&#101;&#46;&#x63;&#111;&#x6d;">&#114;&#105;&#x61;&#110;&#100;&#x72;&#x65;&#119;&#115;&#64;&#103;&#111;&#x6f;&#103;&#108;&#101;&#46;&#x63;&#111;&#x6d;</a>) 15年左右往内核里提交了一个 tracepoint 补丁，用于记录当发生 UninterruptibleSleep 的时候是否是 IO 等待、调用函数等信息。Systrace 中的展示的 IOWait 与 BlockReason，就是通过解析这条 tracepoint 而来的。这条代码提交的介绍如下（由于这笔提交未合入到 Linux 上游主线，因此要注意你用的内核是否单独带了此补丁）:</p><figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">sched: add sched blocked tracepoint which dumps out context of sleep.</span><br><span class="line">Decare war on uninterruptible sleep. Add a tracepoint which</span><br><span class="line">walks the kernel stack and dumps the first non-scheduler function</span><br><span class="line">called before the scheduler is invoked.</span><br><span class="line"></span><br><span class="line">Change-Id: [I19e965d5206329360a92cbfe2afcc8c30f65c229](https://android-review.googlesource.com/#/q/I19e965d5206329360a92cbfe2afcc8c30f65c229)</span><br><span class="line">Signed-off-by: Riley Andrews [riandrews@google.com](mailto:riandrews@google.com)</span><br></pre></td></tr></table></figure><p>在 ftrace（Systrace 使用的数据抓取机制） 中的被记录为</p><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">sched_blocked_reason: pid=<span class="number">30235</span> iowait=<span class="number">0</span> caller=get_user_pages_fast+<span class="number">0x34</span>/<span class="number">0x70</span></span><br></pre></td></tr></table></figure><p>这句话被 Systrace 可视化的效果为:</p><p><img src="/images/android-systrace-cpu-state-sleep/image_6.webp"></p><p>主线程中有一段 Uninterruptible Sleep 状态，它的 BlockReason 是 <code>get_user_pages_fast</code>。它是一个 Linux 内核中函数的名字，代表着是线程是被它切换到了 UninterruptibleSleep 状态。为了查看具体的原因，需要查看这个函数的具体实现。</p><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> * get_user_pages_fast() - pin user pages in memory</span></span><br><span class="line"><span class="comment"> * @start:      starting user address</span></span><br><span class="line"><span class="comment"> * @nr_pages:   number of pages from start to pin</span></span><br><span class="line"><span class="comment"> * @gup_flags:  flags modifying pin behaviour</span></span><br><span class="line"><span class="comment"> * @pages:      array that receives pointers to the pages pinned.</span></span><br><span class="line"><span class="comment"> *              Should be at least nr_pages long.</span></span><br><span class="line"><span class="comment"> *</span></span><br><span class="line"><span class="comment"> * Attempt to pin user pages in memory without taking mm-&gt;mmap_lock.</span></span><br><span class="line"><span class="comment"> * If not successful, it will fall back to taking the lock and</span></span><br><span class="line"><span class="comment"> * calling get_user_pages().</span></span><br><span class="line"><span class="comment"> *</span></span><br><span class="line"><span class="comment"> * Returns number of pages pinned. This may be fewer than the number requested.</span></span><br><span class="line"><span class="comment"> * If nr_pages is 0 or negative, returns 0. If no pages were pinned, returns</span></span><br><span class="line"><span class="comment"> * -errno.</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line"><span class="type">int</span> <span class="title function_">get_user_pages_fast</span><span class="params">(<span class="type">unsigned</span> <span class="type">long</span> start, <span class="type">int</span> nr_pages,</span></span><br><span class="line"><span class="params">      <span class="type">unsigned</span> <span class="type">int</span> gup_flags, <span class="keyword">struct</span> page **pages)</span></span><br><span class="line">&#123;</span><br><span class="line">  <span class="keyword">if</span> (!is_valid_gup_flags(gup_flags))</span><br><span class="line">    <span class="keyword">return</span> -EINVAL;</span><br><span class="line"></span><br><span class="line">  <span class="comment">/*</span></span><br><span class="line"><span class="comment">   * The caller may or may not have explicitly set FOLL_GET; either way is</span></span><br><span class="line"><span class="comment">   * OK. However, internally (within mm/gup.c), gup fast variants must set</span></span><br><span class="line"><span class="comment">   * FOLL_GET, because gup fast is always a &quot;pin with a +1 page refcount&quot;</span></span><br><span class="line"><span class="comment">   * request.</span></span><br><span class="line"><span class="comment">   */</span></span><br><span class="line">  gup_flags |= FOLL_GET;</span><br><span class="line">  <span class="keyword">return</span> internal_get_user_pages_fast(start, nr_pages, gup_flags, pages);</span><br><span class="line">&#125;</span><br><span class="line">EXPORT_SYMBOL_GPL(get_user_pages_fast);</span><br></pre></td></tr></table></figure><p>从函数解释上可以看到，函数首先是通过无锁的方式pin 应用侧的 pages，如果失败的时候不得不尝试持锁后走慢速执行路径。此时，无法持锁的时候那就要等待了，直到先前持锁的人释放锁。那之前被谁持有了呢？这时候可以利用之前介绍的Sleep 诊断方法，如下图。</p><p><img src="/images/android-systrace-cpu-state-sleep/image_7.webp"></p><p>UninterruptibleSleep 状态相比 Sleep 有点复杂，因为它涉及到 Linux 内部的实现。可能是内核本身的机制有问题，也有可能是应用层使用不对，因此要联合上层的行为综合诊断才行。毕竟内核也不是万能的，它也有自己的能力边界，当应用层的使用超过其边界的时候，就会出现影响性能的现象。</p><h2 id="IOWait-常见原因与优化方法"><a href="#IOWait-常见原因与优化方法" class="headerlink" title="IOWait 常见原因与优化方法"></a>IOWait 常见原因与优化方法</h2><h3 id="1-主动IO-操作"><a href="#1-主动IO-操作" class="headerlink" title="1. 主动IO 操作"></a>1. <strong>主动IO 操作</strong></h3><ul><li>程序进行频繁、大量的读或者写 IO 操作，这是最常见的情况。</li><li>多个应用同时下发 IO 操作，导致器件的压力较大。同时执行的程序多的时候 IO 负载高的可能性也大。</li><li>器件本身的 IO 性能较差，可通过 IO Benchmark 来进行排查。 常见的原因有磁盘碎片化、器件老化、剩余空间较少（越是低端机越明显）、读放大、写放大等等。</li><li>文件系统特性，比如有些文件系统的内部操作会表现为 IO 等待。</li><li>开启 Swap 机制的内核下，数据从 Swap 中读取。</li></ul><p><strong>优化方法</strong></p><ul><li>调优 Readahead 机制</li><li>指定文件到 PageCache，即 PinFile 机制</li><li>调整 PageCache 回收策略</li><li>调优清理垃圾文件策略</li></ul><h3 id="2-低内存导致的-IO-变多"><a href="#2-低内存导致的-IO-变多" class="headerlink" title="2. 低内存导致的 IO 变多"></a>2. 低内存导致的 IO 变多</h3><p>内存是个非常有意思的东西，由于它的速度比磁盘快，因此 OS 设计者们把内存当做磁盘的缓存，通过它来避免了部分IO操作的请求，非常有效的提升了整体 IO 性能。有两个极端情况，当系统内存特别大的时候，绝大部分操作都可以在内存中执行，此时整体 IO 性能会非常好。当系统内存特别低，以至于没办法缓存 IO 数据的时候，几乎所有的 IO 操作都直接与器件打交道，这时候整体性能相比内存多的时候而言是非常差的。</p><p>所以系统中的内存较少的时候 IO 等待的概率也会变高。所以，这个问题就变成了如何让系统中有足够多的内存？如何调节磁盘缓存的淘汰算法？</p><p><strong>优化方法</strong></p><ul><li>关键路径上减少 IO 操作</li><li>通过Readahead 机制读数据</li><li>将热点数据尽量聚集在一起，使被 Readahead 机制命中的概率高</li><li>最后一个老生常谈的，减少大量的内存分配、内存浪费等操作</li></ul><p>系统中的内存是被各个进程所共用。当app 只考虑自己，肆无忌惮的使用计算资源，必然会影响到其他程序。这时候系统还是会回来压制你，到头来亏损的还是自己。 不过能想到这一步的开发者比较少，也不现实。明文化的执行系统约定，可能是个终极解决方案。</p><h2 id="Non-IOWait-常见原因"><a href="#Non-IOWait-常见原因" class="headerlink" title="Non-IOWait 常见原因"></a>Non-IOWait 常见原因</h2><ul><li><strong>低内存导致等待</strong> → 低内存的时候要回收其他程序或者缓存上的内存。</li><li><strong>Binder 等待</strong> → 有大量 Binder 操作的时候出现概率较高。</li><li><strong>各种各样的内核锁，不胜枚举</strong>。结合「诊断方法」来分析。</li></ul><h2 id="系统调度与-UninterruptibleSleep-耦合的问题"><a href="#系统调度与-UninterruptibleSleep-耦合的问题" class="headerlink" title="系统调度与 UninterruptibleSleep  耦合的问题"></a>系统调度与 UninterruptibleSleep  耦合的问题</h2><p>当线程处于 UninterruptibleSleep 非 IO等待状态（即内核锁），而持有该锁的其他线程因 CPU 调度原因，较长时间处于 Runnable 状态。这时候就出现了有意思的现象，即使被等待的线程处于高优先级，它的依赖方没有被调度器及时的识别到，即使是非常短的锁持有，也会出现较长时间的等待。</p><p>规避或者彻底解决这类问题都是件比较难的事情，不同厂家实现了不同的解决方案，也是比较考虑厂家技术能力的一个问题。</p><p><a id="appendix"></a></p><h1 id="附录"><a href="#附录" class="headerlink" title="附录"></a>附录</h1><h2 id="Linux-线程状态释义"><a href="#Linux-线程状态释义" class="headerlink" title="Linux 线程状态释义"></a>Linux 线程状态释义</h2><table><thead><tr><th>线程状态</th><th>描述</th></tr></thead><tbody><tr><td>S</td><td>SLEEPING</td></tr><tr><td>R、R+</td><td>RUNNABLE</td></tr><tr><td>D</td><td>UNINTR_SLEEP</td></tr><tr><td>T</td><td>STOPPED</td></tr><tr><td>t</td><td>DEBUG</td></tr><tr><td>Z</td><td>ZOMBIE</td></tr><tr><td>X</td><td>EXIT_DEAD</td></tr><tr><td>x</td><td>TASK_DEAD</td></tr><tr><td>K</td><td>WAKE_KILL</td></tr><tr><td>W</td><td>WAKING</td></tr><tr><td>D</td><td>K</td></tr><tr><td>D</td><td>W</td></tr></tbody></table><h2 id="案例-从-Swap-读取数据时的等待"><a href="#案例-从-Swap-读取数据时的等待" class="headerlink" title="案例: 从 Swap 读取数据时的等待"></a>案例: 从 Swap 读取数据时的等待</h2><p><img src="/images/android-systrace-cpu-state-sleep/image_8.webp"></p><h2 id="案例-同进程的多个线程进行-mmap"><a href="#案例-同进程的多个线程进行-mmap" class="headerlink" title="案例: 同进程的多个线程进行 mmap"></a>案例: 同进程的多个线程进行 mmap</h2><p><img src="/images/android-systrace-cpu-state-sleep/image_9.webp"></p><p>共享同一个 mm_struct 的线程同时执行 mmap() 系统调用进行 vma 分配时发生锁竞争。</p><p>mmap_write_lock_killable() 与 mmap_write_unlock() 包起来的区域就是由锁受保护的区域。</p><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">unsigned</span> <span class="type">long</span> <span class="title function_">vm_mmap_pgoff</span><span class="params">(<span class="keyword">struct</span> file *file, <span class="type">unsigned</span> <span class="type">long</span> addr,</span></span><br><span class="line"><span class="params">  <span class="type">unsigned</span> <span class="type">long</span> len, <span class="type">unsigned</span> <span class="type">long</span> prot,</span></span><br><span class="line"><span class="params">  <span class="type">unsigned</span> <span class="type">long</span> flag, <span class="type">unsigned</span> <span class="type">long</span> pgoff)</span></span><br><span class="line">&#123;</span><br><span class="line">  <span class="type">unsigned</span> <span class="type">long</span> ret;</span><br><span class="line">  <span class="class"><span class="keyword">struct</span> <span class="title">mm_struct</span> *<span class="title">mm</span> =</span> current-&gt;mm;</span><br><span class="line">  <span class="type">unsigned</span> <span class="type">long</span> populate;</span><br><span class="line">  LIST_HEAD(uf);</span><br><span class="line"></span><br><span class="line">  ret = security_mmap_file(file, prot, flag);</span><br><span class="line">  <span class="keyword">if</span> (!ret) &#123;</span><br><span class="line">    <span class="keyword">if</span> (mmap_write_lock_killable(mm))</span><br><span class="line">      <span class="keyword">return</span> -EINTR;</span><br><span class="line">    ret = do_mmap(file, addr, len, prot, flag, pgoff, &amp;populate,</span><br><span class="line">            &amp;uf);</span><br><span class="line">    mmap_write_unlock(mm);</span><br><span class="line">    userfaultfd_unmap_complete(mm, &amp;uf);</span><br><span class="line">    <span class="keyword">if</span> (populate)</span><br><span class="line">      mm_populate(ret, populate);</span><br><span class="line">  &#125;</span><br><span class="line">  <span class="keyword">return</span> ret;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure><p><a id="about"></a></p><h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p><ol><li><a href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li><li><a href="https://androidperformance.com/2019/12/01/BlogMap/">本博客内容导航</a> ：个人博客内容的一个导航。</li><li><a href="https://androidperformance.com/2018/05/07/Android-performance-optimization-skills-and-tools/">个人整理和搜集的优秀博客文章 - Android 性能优化必知必会</a> ：欢迎大家自荐和推荐 （微信私聊即可）</li><li><a href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a> ： 欢迎加入，多谢支持～</li></ol><blockquote><p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p></blockquote><p><img src="/images/WechatIMG581.webp" alt="微信扫一扫"></p>]]></content>
       
       
       <categories>
@@ -960,13 +997,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
-            
             <tag> Memory </tag>
             
+            <tag> Android </tag>
+            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -993,13 +1030,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Memory </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
-            <tag> Memory </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1026,13 +1063,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1086,9 +1123,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Framework </tag>
             
@@ -1115,15 +1152,15 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
-            
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
         </tags>
       
@@ -1148,13 +1185,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
-            
             <tag> Memory </tag>
             
+            <tag> Android </tag>
+            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> ANR </tag>
             
@@ -1181,9 +1218,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Linux </tag>
             
@@ -1210,13 +1247,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
-            
             <tag> Startup </tag>
             
+            <tag> Android </tag>
+            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> ANR </tag>
             
@@ -1243,13 +1280,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
-            
             <tag> Startup </tag>
             
+            <tag> Android </tag>
+            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> ANR </tag>
             
@@ -1276,13 +1313,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
-            
             <tag> Startup </tag>
             
+            <tag> Android </tag>
+            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> ANR </tag>
             
@@ -1309,13 +1346,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
-            
             <tag> Startup </tag>
             
+            <tag> Android </tag>
+            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> ANR </tag>
             
@@ -1342,13 +1379,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
-            
             <tag> Startup </tag>
             
+            <tag> Android </tag>
+            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> ANR </tag>
             
@@ -1375,13 +1412,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
-            
             <tag> Startup </tag>
             
+            <tag> Android </tag>
+            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> ANR </tag>
             
@@ -1408,9 +1445,9 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Java </tag>
             
@@ -1468,11 +1505,11 @@
       
         <tags>
             
-            <tag> Android </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
             
         </tags>
       
@@ -1497,13 +1534,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
-            <tag> Startup </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1530,9 +1567,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -1561,9 +1598,9 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
         </tags>
       
@@ -1588,13 +1625,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
-            <tag> Startup </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1621,13 +1658,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
-            <tag> Startup </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1654,13 +1691,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
-            <tag> Startup </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1689,9 +1726,9 @@
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
-            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> RenderThread </tag>
             
@@ -1718,13 +1755,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
-            <tag> Startup </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1751,11 +1788,11 @@
       
         <tags>
             
-            <tag> Android </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -1784,13 +1821,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
-            <tag> Startup </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1817,13 +1854,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
-            <tag> Startup </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -1850,11 +1887,11 @@
       
         <tags>
             
+            <tag> Startup </tag>
+            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
-            
-            <tag> Startup </tag>
             
             <tag> Framework </tag>
             
@@ -1883,13 +1920,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
-            <tag> Startup </tag>
+            <tag> Systrace </tag>
             
             <tag> RenderThread </tag>
             
@@ -1916,13 +1953,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
-            <tag> Android </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Linux </tag>
             
@@ -1949,15 +1986,15 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
+            
+            <tag> Jank </tag>
+            
+            <tag> Systrace </tag>
             
         </tags>
       
@@ -1982,13 +2019,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Memory </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
-            <tag> Memory </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -2015,13 +2052,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -2048,13 +2085,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Memory </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
-            <tag> Memory </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -2081,11 +2118,11 @@
       
         <tags>
             
+            <tag> Startup </tag>
+            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
-            
-            <tag> Startup </tag>
             
             <tag> Performance </tag>
             
@@ -2118,11 +2155,11 @@
             
             <tag> Systrace </tag>
             
+            <tag> RenderThread </tag>
+            
             <tag> Performance </tag>
             
             <tag> Tools </tag>
-            
-            <tag> RenderThread </tag>
             
         </tags>
       
@@ -2147,13 +2184,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -2180,13 +2217,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
-            <tag> Startup </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -2213,13 +2250,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
-            
             <tag> Memory </tag>
             
+            <tag> Android </tag>
+            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -2246,13 +2283,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Systrace </tag>
+            <tag> Jank </tag>
             
-            <tag> Startup </tag>
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -2279,13 +2316,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
-            
             <tag> Startup </tag>
             
+            <tag> Android </tag>
+            
             <tag> Perfetto </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> Performance </tag>
             
@@ -2312,15 +2349,15 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
+            
+            <tag> Jank </tag>
+            
+            <tag> Systrace </tag>
             
         </tags>
       
@@ -2370,9 +2407,9 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -2403,11 +2440,11 @@
       
         <tags>
             
-            <tag> Android </tag>
+            <tag> 年度推荐 </tag>
             
             <tag> Memory </tag>
             
-            <tag> 年度推荐 </tag>
+            <tag> Android </tag>
             
             <tag> Linux </tag>
             
@@ -2434,11 +2471,11 @@
       
         <tags>
             
-            <tag> Android </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
             
             <tag> Framework </tag>
             
@@ -2654,9 +2691,9 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> 读书笔记 </tag>
             
@@ -2712,13 +2749,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
-            <tag> Android </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Process </tag>
             
@@ -2745,13 +2782,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
-            <tag> Android </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> RenderThread </tag>
             
@@ -2778,11 +2815,11 @@
       
         <tags>
             
+            <tag> Startup </tag>
+            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
-            
-            <tag> Startup </tag>
             
             <tag> RenderThread </tag>
             
@@ -2811,13 +2848,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
-            <tag> Android </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -2844,13 +2881,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
-            <tag> Memory </tag>
+            <tag> 年度推荐 </tag>
             
             <tag> Startup </tag>
             
-            <tag> 年度推荐 </tag>
+            <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
         </tags>
       
@@ -2954,11 +2991,11 @@
       
         <tags>
             
-            <tag> Android </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -2985,9 +3022,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -3016,9 +3053,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> RenderThread </tag>
             
@@ -3049,11 +3086,11 @@
       
         <tags>
             
+            <tag> Startup </tag>
+            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
-            
-            <tag> Startup </tag>
             
             <tag> RenderThread </tag>
             
@@ -3111,11 +3148,11 @@
       
         <tags>
             
-            <tag> Android </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3144,13 +3181,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
-            <tag> Android </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -3177,11 +3214,11 @@
       
         <tags>
             
-            <tag> Android </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3210,9 +3247,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3243,9 +3280,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -3303,15 +3340,15 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Memory </tag>
             
             <tag> Android </tag>
             
-            <tag> Memory </tag>
-            
-            <tag> Performance </tag>
+            <tag> Jank </tag>
             
             <tag> RenderThread </tag>
+            
+            <tag> Performance </tag>
             
         </tags>
       
@@ -3336,15 +3373,15 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Memory </tag>
             
             <tag> Android </tag>
             
-            <tag> Memory </tag>
-            
-            <tag> Performance </tag>
+            <tag> Jank </tag>
             
             <tag> RenderThread </tag>
+            
+            <tag> Performance </tag>
             
         </tags>
       
@@ -3369,13 +3406,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
             
-            <tag> Performance </tag>
+            <tag> Android </tag>
             
             <tag> RenderThread </tag>
+            
+            <tag> Performance </tag>
             
             <tag> MAT </tag>
             
@@ -3402,15 +3439,15 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Memory </tag>
             
             <tag> Android </tag>
             
-            <tag> Memory </tag>
-            
-            <tag> Performance </tag>
+            <tag> Jank </tag>
             
             <tag> RenderThread </tag>
+            
+            <tag> Performance </tag>
             
         </tags>
       
@@ -3435,13 +3472,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
             
-            <tag> Performance </tag>
+            <tag> Android </tag>
             
             <tag> RenderThread </tag>
+            
+            <tag> Performance </tag>
             
             <tag> MAT </tag>
             
@@ -3468,15 +3505,15 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
-            <tag> Linux </tag>
-            
             <tag> Java </tag>
+            
+            <tag> Linux </tag>
             
         </tags>
       
@@ -3501,9 +3538,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3534,9 +3571,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3567,9 +3604,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3625,9 +3662,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
         </tags>
       
@@ -3779,9 +3816,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
         </tags>
       
@@ -3833,9 +3870,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
         </tags>
       
@@ -3860,11 +3897,11 @@
       
         <tags>
             
-            <tag> Android </tag>
+            <tag> Startup </tag>
             
             <tag> Memory </tag>
             
-            <tag> Startup </tag>
+            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -3945,13 +3982,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
-            <tag> Linux </tag>
+            <tag> Android </tag>
             
             <tag> Java </tag>
+            
+            <tag> Linux </tag>
             
         </tags>
       
@@ -3976,9 +4013,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Java </tag>
             

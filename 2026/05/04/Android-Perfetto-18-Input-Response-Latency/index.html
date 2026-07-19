@@ -13,13 +13,13 @@
                           <meta name="description" content="Focus On Android Performance">
                           <meta name="description" content="这篇补一个很容易被启动速度和流畅度盖住的话题：交互首帧响应。它关心用户刚操作完之后，屏幕多久给出第一帧反馈；页面完整加载和动画后半段稳定性要用其他指标衡量。 点一个按钮，多久出现按压态；点微信会话，多久看到会话页第一帧开始动；手指滑动列表，多久看到内容跟着手指移动。这些问题和启动慢有关，也和掉帧有关，但分析口径要单独拎出来。 本文用 Perfetto 拆这段时间：从 InputReader rea">
 <meta property="og:type" content="article">
-<meta property="og:title" content="Android Perfetto 系列 18：从输入事件到首帧反馈">
+<meta property="og:title" content="Android Perfetto 系列 18：响应速度实战，从输入事件到首帧反馈">
 <meta property="og:url" content="https://androidperformance.com/2026/05/04/Android-Perfetto-18-Input-Response-Latency/index.html">
 <meta property="og:site_name" content="Android Performance">
 <meta property="og:description" content="这篇补一个很容易被启动速度和流畅度盖住的话题：交互首帧响应。它关心用户刚操作完之后，屏幕多久给出第一帧反馈；页面完整加载和动画后半段稳定性要用其他指标衡量。 点一个按钮，多久出现按压态；点微信会话，多久看到会话页第一帧开始动；手指滑动列表，多久看到内容跟着手指移动。这些问题和启动慢有关，也和掉帧有关，但分析口径要单独拎出来。 本文用 Perfetto 拆这段时间：从 InputReader rea">
 <meta property="og:locale">
 <meta property="article:published_time" content="2026-05-04T02:18:00.000Z">
-<meta property="article:modified_time" content="2026-05-10T23:56:31.894Z">
+<meta property="article:modified_time" content="2026-07-18T14:50:46.178Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Android">
 <meta property="article:tag" content="Perfetto">
@@ -31,7 +31,7 @@
                             <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
                             <link rel="icon" href="/assets/favicon.ico">
                                 <title>
-                                  Android Perfetto 系列 18：从输入事件到首帧反馈 · Android Performance
+                                  Android Perfetto 系列 18：响应速度实战，从输入事件到首帧反馈 · Android Performance
                                 </title><meta name="robots" content="noindex">
                                 
 <link rel="canonical" href="https://androidperformance.com/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">
@@ -174,7 +174,7 @@
                             </a>
                         </div>
                         <div class="post-title header-element">
-                            <a href="#" class="post-name">Android Perfetto 系列 18：从输入事件到首帧反馈</a>
+                            <a href="#" class="post-name">Android Perfetto 系列 18：响应速度实战，从输入事件到首帧反馈</a>
                         </div>
                 </div>
 </header>
@@ -234,7 +234,7 @@ loading="lazy"             decoding="async"
         <!-- 标题  -->
         <h1 class="intro-title">
             <!-- 主页  -->
-                Android Perfetto 系列 18：从输入事件到首帧反馈
+                Android Perfetto 系列 18：响应速度实战，从输入事件到首帧反馈
             <!-- 404 -->
         </h1>
         <!-- 副标题 -->
@@ -261,7 +261,7 @@ loading="lazy"             decoding="async"
 
                 <!-- 文章字数统计 -->
                     <div class="post-intro-read">
-                        <span>Word count: <span class="post-count word-count">7k</span>Reading time: <span class="post-count reading-time">30 min</span></span>
+                        <span>Word count: <span class="post-count word-count">7.1k</span>Reading time: <span class="post-count reading-time">30 min</span></span>
                     </div>
                 <div class="post-intro-meta">
                     <!-- 撰写日期 -->
@@ -330,10 +330,10 @@ loading="lazy"             decoding="async"
         <p>这篇补一个很容易被启动速度和流畅度盖住的话题：交互首帧响应。它关心用户刚操作完之后，屏幕多久给出第一帧反馈；页面完整加载和动画后半段稳定性要用其他指标衡量。</p>
 <p>点一个按钮，多久出现按压态；点微信会话，多久看到会话页第一帧开始动；手指滑动列表，多久看到内容跟着手指移动。这些问题和启动慢有关，也和掉帧有关，但分析口径要单独拎出来。</p>
 <p>本文用 Perfetto 拆这段时间：从 InputReader <code>read_time</code> 起算，到 App 收到事件，再到第一帧 present。主指标叫 <code>input_to_present_ms</code>，只度量 input read 到关联帧 present；它不覆盖触控 IC、驱动上报前延迟、显示扫描和面板响应。读完之后，你应该能给一个点击或滑动场景定义起点、终点、采集配置、SQL 指标和 App 侧补充 marker。</p>
-<p>文章会把响应慢拆成 read&#x2F;dispatch、handling、ACK→first frame、滑动跟手四个独立指标，分别对应 InputReader&#x2F;InputDispatcher、App 主线程、RenderThread&#x2F;SurfaceFlinger 和滑动场景的位移延迟；给出对应的 Trace 采集配置、Perfetto UI 上要先看哪几条轨道、点击和滑动两类场景的起点终点定义、用 SQL 量化 <code>input_to_present_ms</code> 的写法；最后归纳 Read&#x2F;dispatch 慢、Handling 慢、ACK 快但首帧慢、ANR 与亚 ANR、滑动不跟手这五条常见归因路径，以及高速相机和 Perfetto 各自的边界。</p>
+<p>文章把响应慢拆成 read&#x2F;dispatch、handling、ACK→first frame、滑动跟手四个独立指标，每个指标都配上采集配置、UI 上先看哪几条轨道和 SQL 写法，最后归纳五条常见归因路径，以及高速相机和 Perfetto 各自的边界。</p>
 <span id="more"></span>
 
-<h2 id="本文只看交互后的第一帧"><a href="#本文只看交互后的第一帧" class="headerlink" title="本文只看交互后的第一帧"></a>本文只看交互后的第一帧</h2><p>旧的 Systrace 响应速度系列已经讲过广义响应慢：启动、页面跳转、亮灭屏、解锁、系统繁忙、Binder 等场景。流畅度系列讲连续帧是否稳定。Perfetto 7 和 8 又把 MainThread、RenderThread、Vsync、SurfaceFlinger 的帧路径拆过一轮。</p>
+<h2 id="本文只看交互后的第一帧"><a href="#本文只看交互后的第一帧" class="headerlink" title="本文只看交互后的第一帧"></a>本文只看交互后的第一帧</h2><p>旧的 Systrace 响应速度系列已经讲过广义响应慢：启动、页面跳转、亮灭屏、解锁、系统繁忙、Binder 等场景。流畅度系列讲连续帧是否稳定。Perfetto 系列第 07、08 篇又把 MainThread、RenderThread、Vsync、SurfaceFlinger 的帧路径拆过一轮。</p>
 <p>这一篇只补一段：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">用户输入</span><br><span class="line">  -&gt; InputReader 读到事件</span><br><span class="line">  -&gt; InputDispatcher 派发给目标窗口</span><br><span class="line">  -&gt; App 主线程收到 input</span><br><span class="line">  -&gt; App 处理 input 并请求下一帧</span><br><span class="line">  -&gt; RenderThread 提交 buffer</span><br><span class="line">  -&gt; SurfaceFlinger 合成并 present</span><br><span class="line">  -&gt; 用户看到第一帧反馈</span><br></pre></td></tr></table></figure>
 
@@ -394,7 +394,8 @@ loading="lazy"             decoding="async"
 <p>在写 SQL 前，还要把本次场景的对象字典固定下来。至少包括目标包名、InputChannel、目标窗口、目标 layer、业务 marker 和预期终点：</p>
 <figure class="highlight yaml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="attr">scenario_id:</span> <span class="string">conversation_click</span></span><br><span class="line"><span class="attr">process_name:</span> <span class="string">com.example.app</span></span><br><span class="line"><span class="attr">input_channel:</span> <span class="string">com.example.app/com.example.ChatActivity</span></span><br><span class="line"><span class="attr">target_window:</span> <span class="string">ChatActivity</span></span><br><span class="line"><span class="attr">target_layer:</span> <span class="string">TX</span> <span class="bullet">-</span> <span class="string">com.example.app/com.example.ChatActivity#0</span></span><br><span class="line"><span class="attr">business_markers:</span></span><br><span class="line">  <span class="attr">click:</span> <span class="string">Conversation#Click</span></span><br><span class="line">  <span class="attr">transition_start:</span> <span class="string">Conversation#TransitionStart</span></span><br><span class="line">  <span class="attr">first_content_drawn:</span> <span class="string">Conversation#FirstContentDrawn</span></span><br><span class="line"><span class="attr">expected_endpoint:</span> <span class="string">transition_first_presented_frame</span></span><br><span class="line"><span class="attr">owner_confirmed:</span> <span class="literal">true</span></span><br></pre></td></tr></table></figure>
 
-<p>自动化脚本可以先按包名和窗口名生成候选对象，但报告只使用人工确认过的对象。否则一次 trace 里有多个窗口、弹窗、SurfaceView 或 overlay 时，SQL 很容易把输入事件关联到错误的 layer。</p>
+<p>自动化脚本可以先按包名和窗口名生成候选对象，但报告只使用人工确认过的对象。否则一次 Trace 里有多个窗口、弹窗、SurfaceView 或 overlay 时，SQL 很容易把输入事件关联到错误的 layer。</p>
+<p>多显示器和折叠屏要在字典层面单独处理。输入事件是按 display 派发的：外接屏、多屏车机、折叠屏内外屏上可能同时存在同名窗口和同名 channel。<code>android_motion_events</code> &#x2F; <code>android_key_events</code> 里有 <code>display_id</code> 列，可以按 event id 确认事件落在哪个 display；round-trip 视图 <code>android_input_events</code> 没有 display 列，必要时回这两张表对。折叠屏开合还会触发 display 切换和窗口重建，layer 名和 channel 名会换代，跨形态的数据不要合进同一条基线；scenario 字典里把 posture（折叠&#x2F;展开）当成独立维度记录，横向比较只在同形态内做。</p>
 <p>交互场景也要版本化成 schema。点击场景的最小契约可以这样写：</p>
 <figure class="highlight yaml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br></pre></td><td class="code"><pre><span class="line"><span class="attr">schema_version:</span> <span class="string">input_response_v1</span></span><br><span class="line"><span class="attr">scenario_id:</span> <span class="string">conversation_click</span></span><br><span class="line"><span class="attr">interaction_type:</span> <span class="string">click</span></span><br><span class="line"><span class="attr">start_event_policy:</span></span><br><span class="line">  <span class="attr">preferred:</span> <span class="string">ACTION_UP</span></span><br><span class="line">  <span class="attr">fallback:</span> <span class="string">Conversation#Click</span></span><br><span class="line"><span class="attr">endpoint_policy:</span></span><br><span class="line">  <span class="attr">visual_endpoint:</span> <span class="string">transition_first_presented_frame</span></span><br><span class="line">  <span class="attr">business_state_marker:</span> <span class="string">Conversation#FirstContentDrawn</span></span><br><span class="line"><span class="attr">process_name:</span> <span class="string">com.example.app</span></span><br><span class="line"><span class="attr">input_channel:</span> <span class="string">com.example.app/com.example.ChatActivity</span></span><br><span class="line"><span class="attr">target_layer:</span> <span class="string">TX</span> <span class="bullet">-</span> <span class="string">com.example.app/com.example.ChatActivity#0</span></span><br><span class="line"><span class="attr">required_markers:</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">Conversation#Click</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">Conversation#TransitionStart</span></span><br><span class="line"><span class="attr">required_counters:</span> []</span><br><span class="line"><span class="attr">association_method:</span></span><br><span class="line">  <span class="attr">primary:</span> <span class="string">android_input_events.frame_id</span></span><br><span class="line">  <span class="attr">fallback:</span> <span class="string">target_layer_present_after_marker</span></span><br><span class="line"><span class="attr">fallback_policy:</span></span><br><span class="line">  <span class="attr">missing_inputevent:</span> <span class="string">app_marker_plus_frametimeline</span></span><br><span class="line">  <span class="attr">missing_frametimeline:</span> <span class="string">app_marker_plus_external_video</span></span><br><span class="line"><span class="attr">evidence_grade_rules:</span></span><br><span class="line">  <span class="attr">confirmed:</span> <span class="string">non_speculative_frame_and_owner_confirmed_layer</span></span><br><span class="line">  <span class="attr">likely:</span> <span class="string">frame_associated_but_no_external_video</span></span><br><span class="line">  <span class="attr">degraded:</span> <span class="string">missing_inputevent_or_frametimeline</span></span><br><span class="line"><span class="attr">privacy_notes:</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">do_not_log_conversation_id</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">channel_and_layer_name_allowed</span></span><br></pre></td></tr></table></figure>
 
@@ -660,7 +661,7 @@ loading="lazy"             decoding="async"
 <li>主线程或 RenderThread 是否 Runnable 等待 CPU。</li>
 </ul>
 <p>这里要把 input round trip 和帧生产分开看。ACK 快只说明 App 处理输入完成，不等于第一帧已经显示。</p>
-<h3 id="ANR-和亚-ANR"><a href="#ANR-和亚-ANR" class="headerlink" title="ANR 和亚 ANR"></a>ANR 和亚 ANR</h3><p>交互响应慢多数是亚 ANR 问题：用户已经感到慢，但还没到系统弹 ANR 的程度。Input ANR 主要要分两类看：</p>
+<h3 id="ANR-和亚-ANR"><a href="#ANR-和亚-ANR" class="headerlink" title="ANR 和亚 ANR"></a>ANR 和亚 ANR</h3><p>交互响应慢多数是亚 ANR 问题：用户已经感到慢，但还没到系统弹 ANR 的程度。Input ANR 主要分两类看：</p>
 <ul>
 <li>事件已经发给连接，App 长时间没有 ACK，通常会体现在 <code>handling_latency_dur</code> 或 ACK 相关时间异常。</li>
 <li>focused event 一直等不到 focused window，通常要看 WindowManager &#x2F; ActivityTaskManager、窗口创建、焦点切换和 InputDispatcher 状态。</li>
@@ -685,7 +686,7 @@ loading="lazy"             decoding="async"
 <p>一份响应速度报告可以固定成下面的格式：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br></pre></td><td class="code"><pre><span class="line">scenario: conversation click</span><br><span class="line">trace_id: camera-free-chat-click-run03</span><br><span class="line">config_version: input_response_lab_v2</span><br><span class="line">query_id: input_to_present_v3</span><br><span class="line">collection:</span><br><span class="line">  mode: lab</span><br><span class="line">  build_type: userdebug</span><br><span class="line">  input_trace_mode: TRACE_MODE_TRACE_ALL</span><br><span class="line">  raw_trace_upload: local_only</span><br><span class="line">  consent: lab_device</span><br><span class="line">data_quality:</span><br><span class="line">  stats: clean</span><br><span class="line">  required_signals:</span><br><span class="line">    android.input.inputevent: present</span><br><span class="line">    FrameTimeline: present</span><br><span class="line">    sched: present</span><br><span class="line">scenario_objects:</span><br><span class="line">  process_name: com.example.app</span><br><span class="line">  input_channel: com.example.app/com.example.ChatActivity</span><br><span class="line">target_layer: TX - com.example.app/com.example.ChatActivity#0</span><br><span class="line">endpoint_definition: transition_first_presented_frame</span><br><span class="line">measurement_window: read_time..present_ts</span><br><span class="line">start_clock: read_time</span><br><span class="line">end_clock: present</span><br><span class="line">input_event:</span><br><span class="line">  input_event_id: &quot;21847&quot;</span><br><span class="line">  event_seq: 77</span><br><span class="line">  action: ACTION_UP</span><br><span class="line">  event_time: 12.342s</span><br><span class="line">  read_time: 12.345s</span><br><span class="line">  dispatch_ts: 12.348s</span><br><span class="line">  receive_ts: 12.352s</span><br><span class="line">  event_channel: com.example.app/com.example.ChatActivity</span><br><span class="line">  normalized_event_channel: com.example.app/com.example.ChatActivity</span><br><span class="line">  selection_reason: nearest Conversation#Click marker on confirmed channel</span><br><span class="line">  candidate_count: 1</span><br><span class="line">business_marker:</span><br><span class="line">  name: Conversation#TransitionStart</span><br><span class="line">  ts: 12.371s</span><br><span class="line">associated_frame:</span><br><span class="line">  frame_id: 912344</span><br><span class="line">  association_method: exact_vsync_id</span><br><span class="line">  speculative: false</span><br><span class="line">  present_ts: 12.421s</span><br><span class="line">internal_input_read_to_present_ms: 76</span><br><span class="line">user_visible_latency_ms: null</span><br><span class="line">breakdown:</span><br><span class="line">  read_to_dispatch: 3ms</span><br><span class="line">  dispatch: 4ms</span><br><span class="line">  handling: 18ms</span><br><span class="line">  ack: 1ms</span><br><span class="line">  frame_after_ack: 53ms</span><br><span class="line">evidence:</span><br><span class="line">  - App main thread Runnable 21ms before doFrame</span><br><span class="line">  - RenderThread DrawFrame 7ms</span><br><span class="line">  - FrameTimeline actual present missed expected by 1 vsync</span><br><span class="line">review_points:</span><br><span class="line">  - ts=12.345s track=android_input_events input_event_id=21847</span><br><span class="line">  - ts=12.389s process=com.example.app thread=main state=Runnable dur=21ms</span><br><span class="line">  - ts=12.421s frame_id=912344 layer=ChatActivity</span><br><span class="line">evidence_grade: likely</span><br><span class="line">boundary:</span><br><span class="line">  fallback_used: none</span><br><span class="line">  missing_signals: []</span><br><span class="line">  external_measurement:</span><br><span class="line">    video: not_captured</span><br><span class="line">    touch_actuator: none</span><br><span class="line">    video_fps: none</span><br><span class="line">    display_refresh: 120hz</span><br><span class="line">    sync_method: none</span><br><span class="line">    error_bound_ms: unknown</span><br><span class="line">owner_hint: App UI</span><br><span class="line">owner_reason: main thread Runnable before doFrame</span><br></pre></td></tr></table></figure>
 
-<p>这个格式要求报告同时写起点、终点、拆分、证据和边界。证据等级固定为：确认 confirmed、倾向 likely、排除 excluded、降级 degraded、未知 unknown。后文只用英文等级。<code>is_speculative_frame = true</code>、缺 FrameTimeline、缺外部视频、data loss、fallback 路径都会降低等级。响应速度问题不能只给一个总耗时；总耗时说明用户慢在哪里感知到，拆分才说明工程上该找谁。没有外部测量时，报告只能写系统内部延迟，不能写用户可见绝对延迟。</p>
+<p>这个格式要求报告同时写起点、终点、拆分、证据和边界。证据等级固定为：确认 confirmed、倾向 likely、排除 excluded、降级 degraded、未知 unknown，报告字段里统一使用英文等级。<code>is_speculative_frame = true</code>、缺 FrameTimeline、缺外部视频、data loss、fallback 路径都会降低等级。响应速度问题不能只给一个总耗时；总耗时说明用户慢在哪里感知到，拆分才说明工程上该找谁。没有外部测量时，报告只能写系统内部延迟，不能写用户可见绝对延迟。</p>
 <h2 id="收束"><a href="#收束" class="headerlink" title="收束"></a>收束</h2><p>交互首帧响应的分析顺序可以固定下来：</p>
 <ol>
 <li>定义起点：DOWN、UP、有效 MOVE、业务 click。</li>
@@ -718,7 +719,7 @@ loading="lazy"             decoding="async"
             <p>Author：<a href="https://androidperformance.com">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">https://androidperformance.com/2026/05/04/Android-Perfetto-18-Input-Response-Latency/</a>
             <p>Publish date：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">May 4th 2026, 10:18:00 am</a>
-            <p>Update date：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">May 11th 2026, 7:56:31 am</a>
+            <p>Update date：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">July 18th 2026, 10:50:46 pm</a>
             <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     <!-- paginator -->
@@ -927,21 +928,26 @@ loading="lazy"             decoding="async"
         
         
         
+        
     <div class="total-and-search">
         <div class="total-archive">
-        Total : 128
+        Total : 129
         </div>
     </div>
     <div class="post-archive">
             <div class="archive-year"> 2026 </div>
             <ul class="year-list">
         <li class="archive-post-item">
+            <span class="archive-post-date">07/17</span>
+            <a class="archive-post-title" href="/2026/07/17/SmartPerfetto-Six-Week-Update/">SmartPerfetto 2026.06.04-07.17 六周更新复盘：从 v1.0.28 到 v1.1.1</a>
+        </li>
+        <li class="archive-post-item">
             <span class="archive-post-date">06/04</span>
-            <a class="archive-post-title" href="/2026/06/04/SmartPerfetto-Three-Week-Update/">SmartPerfetto 2026.05.17-06.04 更新：Smart 模式、证据规则和四条 Runtime</a>
+            <a class="archive-post-title" href="/2026/06/04/SmartPerfetto-Three-Week-Update/">SmartPerfetto 2026.05.17-06.04 三周更新：Smart 模式、证据规则和四条 Runtime</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/17</span>
-            <a class="archive-post-title" href="/2026/05/17/SmartPerfetto-Two-Week-Update/">SmartPerfetto 两周更新：从 Perfetto AI Assistant 到可复用的 Trace 分析平台</a>
+            <a class="archive-post-title" href="/2026/05/17/SmartPerfetto-Two-Week-Update/">SmartPerfetto 2026.04.29-05.17 两周更新：从 Perfetto AI Assistant 到可复用的 Trace 分析平台</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/05</span>
@@ -976,11 +982,11 @@ loading="lazy"             decoding="async"
             <ul class="year-list">
         <li class="archive-post-item">
             <span class="archive-post-date">11/16</span>
-            <a class="archive-post-title" href="/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto 系列 10 - Binder 调度与锁竞争</a>
+            <a class="archive-post-title" href="/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto 系列 10：Binder 调度与锁竞争</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">11/12</span>
-            <a class="archive-post-title" href="/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 9 - CPU 信息解读</a>
+            <a class="archive-post-title" href="/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 9：CPU 信息解读</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">08/05</span>
@@ -988,7 +994,7 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">08/02</span>
-            <a class="archive-post-title" href="/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7 - MainThread 和 RenderThread 解读</a>
+            <a class="archive-post-title" href="/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7：MainThread 和 RenderThread 解读</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/26</span>
@@ -1529,6 +1535,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 随笔
             </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
             <span class="sidebar-tag-name" data-tags="Agent OS">
                 <span class="iconfont-archer">&#xe606;</span>
                 Agent OS
@@ -1545,14 +1555,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Mobile OS
             </span>
-            <span class="sidebar-tag-name" data-tags="ANR">
-                <span class="iconfont-archer">&#xe606;</span>
-                ANR
-            </span>
-            <span class="sidebar-tag-name" data-tags="RenderThread">
-                <span class="iconfont-archer">&#xe606;</span>
-                RenderThread
-            </span>
             <span class="sidebar-tag-name" data-tags="Performance">
                 <span class="iconfont-archer">&#xe606;</span>
                 Performance
@@ -1560,6 +1562,10 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Tools">
                 <span class="iconfont-archer">&#xe606;</span>
                 Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
             </span>
             <span class="sidebar-tag-name" data-tags="Framework">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1625,6 +1631,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Singleton
             </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
             <span class="sidebar-tag-name" data-tags="OpenClaw">
                 <span class="iconfont-archer">&#xe606;</span>
                 OpenClaw
@@ -1636,10 +1646,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="本地模型">
                 <span class="iconfont-archer">&#xe606;</span>
                 本地模型
-            </span>
-            <span class="sidebar-tag-name" data-tags="Nexus">
-                <span class="iconfont-archer">&#xe606;</span>
-                Nexus
             </span>
             <span class="sidebar-tag-name" data-tags="AI Agent">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1657,6 +1663,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Open Source
             </span>
+            <span class="sidebar-tag-name" data-tags="Android Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android Performance
+            </span>
             <span class="sidebar-tag-name" data-tags="Gracker">
                 <span class="iconfont-archer">&#xe606;</span>
                 Gracker
@@ -1665,13 +1675,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 设计规范
             </span>
-            <span class="sidebar-tag-name" data-tags="Compose">
-                <span class="iconfont-archer">&#xe606;</span>
-                Compose
-            </span>
             <span class="sidebar-tag-name" data-tags="Kotlin">
                 <span class="iconfont-archer">&#xe606;</span>
                 Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
             </span>
             <span class="sidebar-tag-name" data-tags="Process">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1693,25 +1703,25 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 设计原则
             </span>
-            <span class="sidebar-tag-name" data-tags="测试">
-                <span class="iconfont-archer">&#xe606;</span>
-                测试
-            </span>
             <span class="sidebar-tag-name" data-tags="了解你的用户">
                 <span class="iconfont-archer">&#xe606;</span>
                 了解你的用户
+            </span>
+            <span class="sidebar-tag-name" data-tags="测试">
+                <span class="iconfont-archer">&#xe606;</span>
+                测试
             </span>
             <span class="sidebar-tag-name" data-tags="互联网那些事">
                 <span class="iconfont-archer">&#xe606;</span>
                 互联网那些事
             </span>
-            <span class="sidebar-tag-name" data-tags="阅读之美">
-                <span class="iconfont-archer">&#xe606;</span>
-                阅读之美
-            </span>
             <span class="sidebar-tag-name" data-tags="游戏与编程">
                 <span class="iconfont-archer">&#xe606;</span>
                 游戏与编程
+            </span>
+            <span class="sidebar-tag-name" data-tags="阅读之美">
+                <span class="iconfont-archer">&#xe606;</span>
+                阅读之美
             </span>
             <span class="sidebar-tag-name" data-tags="利器">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1759,21 +1769,21 @@ loading="lazy"             decoding="async"
             <span class="iconfont-archer">&#xe60a;</span>
             Android
         </span>
-        <span class="sidebar-category-name" data-categories="AI">
-            <span class="iconfont-archer">&#xe60a;</span>
-            AI
-        </span>
         <span class="sidebar-category-name" data-categories="Java">
             <span class="iconfont-archer">&#xe60a;</span>
             Java
         </span>
-        <span class="sidebar-category-name" data-categories="iOS">
+        <span class="sidebar-category-name" data-categories="AI">
             <span class="iconfont-archer">&#xe60a;</span>
-            iOS
+            AI
         </span>
         <span class="sidebar-category-name" data-categories="Android性能优化">
             <span class="iconfont-archer">&#xe60a;</span>
             Android性能优化
+        </span>
+        <span class="sidebar-category-name" data-categories="SmartPerfetto">
+            <span class="iconfont-archer">&#xe60a;</span>
+            SmartPerfetto
         </span>
         <span class="sidebar-category-name" data-categories="个人页">
             <span class="iconfont-archer">&#xe60a;</span>

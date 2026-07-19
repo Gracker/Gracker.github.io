@@ -4,7 +4,36 @@
   
     
     <entry>
-      <title>SmartPerfetto 2026-05-17 to 2026-06-04 Update: Smart Mode, Evidence Rules, and Four Runtimes</title>
+      <title>SmartPerfetto 2026-06-04 to 2026-07-17 Six-Week Update: From v1.0.28 to v1.1.1</title>
+      <link href="/en/2026/07/17/SmartPerfetto-Six-Week-Update/"/>
+      <url>/en/2026/07/17/SmartPerfetto-Six-Week-Update/</url>
+      
+        <content type="html"><![CDATA[<p>This post reviews every major SmartPerfetto change since the <a href="https://www.androidperformance.com/en/2026/06/04/SmartPerfetto-Three-Week-Update/">previous three-week update</a> (2026-06-04, v1.0.28), through 2026-07-17 (v1.1.1). By the end, you will understand the problem each feature solved over these six weeks, where its boundaries lie, and the full feature map of the current release. Project repository: <a href="https://github.com/Gracker/SmartPerfetto">github.com&#x2F;Gracker&#x2F;SmartPerfetto</a>.</p><span id="more"></span><h2 id="1-Overview-of-Changes-2026-06-04-to-2026-07-17"><a href="#1-Overview-of-Changes-2026-06-04-to-2026-07-17" class="headerlink" title="1. Overview of Changes (2026-06-04 to 2026-07-17)"></a>1. Overview of Changes (2026-06-04 to 2026-07-17)</h2><p><img src="/en/images/SmartPerfetto-Six-Week-Update/01-six-week-overview.png" alt="Six weeks of SmartPerfetto changes from v1.0.28 to v1.1.1"></p><p>Over these six weeks, approximately 150 commits were merged (excluding merge commits), spanning 13 releases (v1.0.29 → v1.1.1). If the main theme of the previous post was “getting all four Agent runtimes working,” this period focused on <strong>converging those four runtimes on one shared contract</strong>, while continuing to expand the analysis experience, scene knowledge, and public ecosystem.</p><p>First, here are several quantifiable changes, calculated with the repository’s documented counting commands:</p><table><thead><tr><th>Metric</th><th>2026-06-04 (v1.0.28)</th><th>2026-07-17 (v1.1.1)</th></tr></thead><tbody><tr><td>Skill YAML (<code>*.skill.yaml</code>)</td><td>226</td><td>239</td></tr><tr><td>Scene strategies (<code>*.strategy.md</code>)</td><td>20</td><td>21</td></tr><tr><td>Strategy&#x2F;prompt templates (<code>*.template.md</code>)</td><td>—</td><td>80</td></tr><tr><td>Perfetto upstream syncs</td><td>—</td><td>Three syncs during this period: v56.0 → v57.1 → v57.2</td></tr><tr><td>Agent runtimes</td><td>4 parallel implementations</td><td>4, sharing a unified run specification</td></tr></tbody></table><p>The sections below follow their impact on everyday analysis workflows, from largest to smallest. We will start with features that changed how SmartPerfetto is used—the dual-trace workspace and Quick Mode—then move to features that raised its capability ceiling, including private analysis context and runtime unification, before covering scenes, knowledge, the ecosystem, and engineering delivery.</p><h2 id="2-Dual-Trace-Analysis-Workspace"><a href="#2-Dual-Trace-Analysis-Workspace" class="headerlink" title="2. Dual-Trace Analysis Workspace"></a>2. Dual-Trace Analysis Workspace</h2><p><img src="/en/images/SmartPerfetto-Six-Week-Update/02-dual-trace-workspace.png" alt="Dual-trace workspace windows, run identity, and exit semantics"></p><p>Comparison is at the heart of performance optimization: before versus after a change, your product versus a competitor, or regression analysis after a system upgrade. SmartPerfetto already allowed an AI session to attach a reference trace, but the UI exposed only one timeline window. The most natural workflow—viewing two traces side by side—was not possible. The dual-window workspace, shipped on July 10–11 (v1.0.39), filled that gap.</p><p>The interaction path is deliberately short:</p><ul><li><strong>Enter with one click</strong>: A direct “Open Dual Window” button sits at the top of the AI Panel. Clicking it immediately opens two windows: one showing the current trace and the other initially empty. Select a reference trace from the workspace history without first going through the trace picker.</li><li><strong>Atomic window identity swap</strong>: Both windows have trace selectors, so users can freely decide which window displays the current trace and which displays the reference trace. If a historical trace is selected in the current window, the current trace moves atomically to the other window. The workspace never shows the same trace in both windows or enters an intermediate state with no current trace.</li><li><strong>Run identity protection</strong>: During analysis, the “current trace + reference trace + Agent session” form a single run identity. Switching traces, exiting comparison mode, changing Providers, or changing workspaces is rejected while the run is active. Only an explicit Stop invokes the backend cancellation protocol. Layout changes, maximization, dragging, and collapsing the AI Panel affect presentation state only: they neither destroy the iframe nor transfer ownership of the streaming connection. This rule ensures that moving a window midway through an analysis cannot destroy an in-progress run.</li><li><strong>Separate exit semantics</strong>: Exiting dual-window mode closes only the visual workspace; the reference trace and AI comparison context remain available. Exiting comparison mode additionally clears the reference trace, comparison context, and comparison session.</li></ul><p>At the contract level, the <code>smp compare</code> CLI command and the frontend dual-window workspace use the same backend comparison identity, evidence package, and report section. There is no private path that could cause CLI and web comparison results to diverge. The product boundary is equally explicit: comparison always means “the current trace + one reference trace from workspace history.” Comparing any two arbitrary historical traces is not supported; that belongs to the domain of comparing multiple analysis results through snapshot comparison.</p><p>For the full interaction model, including its state machine and boundary conditions, see <code>docs/architecture/dual-trace-workspace.md</code> in the repository.</p><h2 id="3-Quick-Mode-Evidence-Backed-Direct-Answers-and-Analysis-Receipts"><a href="#3-Quick-Mode-Evidence-Backed-Direct-Answers-and-Analysis-Receipts" class="headerlink" title="3. Quick Mode: Evidence-Backed Direct Answers and Analysis Receipts"></a>3. Quick Mode: Evidence-Backed Direct Answers and Analysis Receipts</h2><p><img src="/en/images/SmartPerfetto-Six-Week-Update/03-quick-mode.png" alt="Quick Mode from intent recognition to a zero-turn direct answer and analysis receipt"></p><p>Many everyday questions ask for straightforward facts: “What is the frame rate?”, “Which app is in the foreground?”, or “How severe is the jank?” Sending these questions through a full Agent loop—planning, multiple tool calls, and verification—is both slow and token-intensive. Over these six weeks, the fast path was rebuilt as a genuine evidence-backed direct-answer product. Analysis receipts became a product surface on June 29, the four runtimes were aligned on July 3, and v1.0.38 followed.</p><p>The flow has three steps:</p><ol><li><strong>Intent recognition</strong>: A local classifier identifies direct-answer intents, including trace facts such as frame count, duration, processes, and threads; the foreground app; and an initial scrolling-smoothness assessment. It also handles mixed intents. For example, “What is the frame rate? Is it smooth overall?” matches both trace-fact and scrolling-assessment intents and combines the evidence for both in one answer.</li><li><strong>Deterministic evidence collection</strong>: The backend executes the corresponding SQL&#x2F;Skill directly to collect evidence, bypassing the model’s tool-call loop.</li><li><strong>Direct-answer assembly</strong>: SmartPerfetto assembles the answer directly from evidence tables, adds sentence-level data citations, and returns it after <strong>zero model conversation turns</strong>. An analysis receipt at the end records which evidence was used and the state of the quality gates.</li></ol><p>End-to-end validation covered nine cases against the real DeepSeek API: identity questions, compound facts, global frame count plus jank, initial scrolling assessment, foreground app, the presence of CPU frequency data, questions in English, and more. Eight cases used zero actual model conversation turns, and every case passed claim-by-claim verification.</p><p>Two engineering details are worth calling out:</p><ul><li><strong>Consistent behavior across all four runtimes</strong>. Direct-answer intent derivation, evidence assembly, and the contract governing the number of conclusions converged on shared modules across Claude, OpenAI, Pi Agent Core, and OpenCode. The Claude path had previously assembled these by hand and silently dropped scrolling evidence for mixed intents, diverging from the other three runtimes. The alignment eliminated this class of drift structurally. Contract values such as the maximum number of conclusions are now injected as template variables from a single source of truth.</li><li><strong>No false activation</strong>. Direct answers cover only questions that deterministic evidence can resolve. Questions outside that scope, such as the open-ended request “Give me a quick analysis,” fall back to the normal Agent path instead of being forced into the direct-answer framework and receiving an incomplete answer.</li></ul><h2 id="4-Private-Analysis-Context-Local-Source-Code-the-Android-Internals-Knowledge-Base"><a href="#4-Private-Analysis-Context-Local-Source-Code-the-Android-Internals-Knowledge-Base" class="headerlink" title="4. Private Analysis Context: Local Source Code + the Android Internals Knowledge Base"></a>4. Private Analysis Context: Local Source Code + the Android Internals Knowledge Base</h2><p><img src="/en/images/SmartPerfetto-Six-Week-Update/04-private-context.png" alt="Authorization boundaries for private context from local source code and Android Internals"></p><p>A trace can show you <em>where</em> performance degrades, but explaining <em>why</em> often requires returning to source code and system internals. Over these six weeks, SmartPerfetto integrated two types of private context into the analysis pipeline and unified their authorization model in v1.1.0. This was the main reason for the version jump from 1.0 to 1.1.</p><p><strong>Local source code (Code-Aware)</strong>. After a local codebase is registered with SmartPerfetto, AI analysis can map trace behavior to specific classes and functions. The privacy boundary is intentionally strict: the model sees CodeRef metadata—chunk ID, relative path, line range, and symbol name—not raw source text. Raw text is available only through an access-controlled endpoint for the user to inspect. <code>metadata_only</code> and <code>provider_send</code> are separate consent levels; the former guarantees that source snippets are never sent to the model provider. SmartPerfetto also supports patch proposals on top of this model. The AI can propose changes only against source context it has already looked up, and a patch must pass <code>git apply --check</code> before it can be returned with “verified” status.</p><p><strong>External Android Internals knowledge base</strong> (July 14). A local checkout of <code>android-internals-wiki</code> can be registered as a versioned external knowledge source. The retrieval pipeline enforces the following constraints:</p><ul><li>Paths are denied by default. Only Markdown files under an environment-variable allowlist can be previewed and indexed.</li><li>Registration requires confirmation of content rights (<code>rightsAcknowledged</code>). Sending content to the model provider requires separate, revocable privacy consent (<code>sendToProvider</code>). Once revoked, new indexing and retrieval requests are rejected immediately.</li><li>Only strictly parsed, finalized articles enter retrieval. Drafts and articles awaiting review appear only in the audit trail.</li><li>The model receives only budget-controlled, redacted matching excerpts. Logs and streaming events expose metadata projections only.</li><li>Wiki matches provide system background but <strong>cannot replace evidence from the current trace</strong>. Diagnostic conclusions must still cite actual SQL&#x2F;Skill query results.</li></ul><p><strong>Combined semantics (v1.1.0)</strong>. Source code and the knowledge base have independent authorization lists; either can be used alone or both can be combined. Whenever any private context is present, fast&#x2F;auto mode is forced to resolve to full mode, where the necessary tools and evidence gates are available. Tenant, workspace, user, authorization list, index generation, content fingerprint, and consent state all contribute to a single authorization fingerprint. If any of these changes at a tool-call or run boundary, execution is rejected immediately—fail closed—rather than silently falling back to a different analysis mode. The practical effect is important: after consent is revoked, an index is rebuilt, or permissions change, there is no window in which stale authorization remains active in an existing session.</p><h2 id="5-Unifying-the-Agent-Runtime-Architecture"><a href="#5-Unifying-the-Agent-Runtime-Architecture" class="headerlink" title="5. Unifying the Agent Runtime Architecture"></a>5. Unifying the Agent Runtime Architecture</h2><p><img src="/en/images/SmartPerfetto-Six-Week-Update/05-runtime-unification.png" alt="Four Agent runtimes consuming a unified Run Spec and output contract"></p><p>This was the largest body of code changed during the six-week period, delivered in two stages.</p><p><strong>The early-June refactoring</strong> (around v1.0.32, across more than twenty refactoring commits):</p><ul><li>The four runtimes moved into independent engine directories, while shared logic—including diagnostics, hypothesis projection, and runtime descriptors—moved into a common layer.</li><li>Cancellation semantics were extended all the way down to the SQL tool layer. When a user clicks Stop, an in-progress query is actually canceled instead of being allowed to finish before its result is discarded.</li><li>The two third-party runtimes, Pi Agent Core and OpenCode, regained resumability for opaque session state, allowing a restored session to continue with its previous context.</li><li>Provider snapshots are bound to the runtime environment. Restoring a session cannot silently switch models merely because the user has changed the active Provider.</li><li>The verifier’s misdiagnosis-pattern library is loaded from strategy files, so adding a new pattern no longer requires a TypeScript change.</li></ul><p><strong>The v1.1.0 consolidation on July 17</strong>: All four runtimes now consume the same Provider-independent run specification and comparison-context builder. This structurally eliminates a typical class of bug in which an analysis option takes effect on the Claude path but is silently ignored on the OpenAI path, because options are now parsed in one place. The release also introduced reproducible Perfetto UI prebuild artifacts and a backend regression CI gate (<code>backend-agent-regression-gate</code> in GitHub Actions).</p><p>Before v1.1.0 shipped, the project completed two rounds of independent review: a weekly review on July 15 and a clean-room review on July 16, with reports stored under <code>docs/reviews/</code> in the repository. The release proceeded only after confirming there were no known P0&#x2F;P1 blockers. v1.1.1, released the same day, fixed more than ten remaining findings from those reviews, including source-reference locatability checks, OpenAI tool-output normalization, verifier evidence-label parsing, and restored scrolling-metric semantics.</p><h2 id="6-Token-Cost-Optimization"><a href="#6-Token-Cost-Optimization" class="headerlink" title="6. Token Cost Optimization"></a>6. Token Cost Optimization</h2><p><img src="/en/images/SmartPerfetto-Six-Week-Update/06-token-optimization.png" alt="From always-resident full strategies to an always-resident Core with Detail loaded on demand"></p><p>In mid-June, we identified the largest source of token consumption in full mode: the methodology section of the system prompt embedded the <strong>entire</strong> scene strategy—approximately 51K tokens for the launch scene—and the existing prompt-budget mechanism trimmed only supporting sections, never this one. In effect, every full analysis was paying for an entire “textbook on launch analysis.” A complete optimization package landed on June 18–19 in v1.0.35:</p><ul><li><strong>Strategy split</strong>: Scene strategies are divided into core and detail layers. The core remains in the prompt and is limited to a few thousand tokens; detail is delivered on demand as the analysis advances through its stages. Quality requirements moved into expected tool-call lists in plan templates and into the verifier, ensuring that a shorter prompt does not produce a shallower analysis.</li><li><strong>Regression baselines using real token counts</strong>: New token-baseline tests load the actual strategy files and cover the worst-case combination—scene + architecture + completeness + selection + comparison + source awareness all enabled at once—to prevent future changes from silently inflating prompt size again. The previous unit tests mocked the strategy loader and could not detect size regressions.</li><li><strong>Automatic summarization of large SQL results</strong>: SQL outputs above a threshold are summarized automatically, while the raw data becomes a paginated artifact reference without breaking provenance.</li><li><strong>Compressed tool descriptions and cache boundaries</strong>: MCP tool descriptions were compressed across all four runtimes. Prompt-cache boundaries were added to the runtimes and are now selected according to capability flags declared by Provider adapters, rather than hardcoded Provider names.</li></ul><p>The benefit depends on Provider capabilities. For Providers without prompt caching—OpenAI-compatible endpoints, Pi, and OpenCode—the optimization directly reduces the cost of every request. For Providers with caching, it primarily lowers cache-creation cost and context-window pressure.</p><h2 id="7-Expanded-Scene-Coverage-Camera-Heap-and-GPU"><a href="#7-Expanded-Scene-Coverage-Camera-Heap-and-GPU" class="headerlink" title="7. Expanded Scene Coverage: Camera, Heap, and GPU"></a>7. Expanded Scene Coverage: Camera, Heap, and GPU</h2><p><img src="/en/images/SmartPerfetto-Six-Week-Update/07-camera-heap-gpu.png" alt="Camera, Heap, and GPU scenes probe for evidence before reaching conclusions"></p><p>All three new scenes follow the same principle: <strong>evidence first; when data is insufficient, say so explicitly instead of inventing a conclusion</strong>.</p><ul><li><strong>Camera analysis</strong> (July 12): SmartPerfetto added an evidence-oriented camera capture preset, available directly through <code>smp capture</code>, along with a camera-trace evidence Skill. The key design is conditional tracepoint availability. Tracepoints for different stages of the camera pipeline vary significantly across vendors and platform versions. The Skill first probes the current trace to determine which evidence sources exist, reaches conclusions only for stages backed by data, and explicitly marks data-starved stages as unavailable instead of forcing them through a template.</li><li><strong>Heap dominator-path analysis</strong> (July 14): A new deterministic Skill clusters and extracts heap dominator paths. It extracts dominator paths from the managed heap graph, groups isomorphic paths into clusters, and answers, “Which reference chains are retaining this memory?” Batch trace runs automatically aggregate heap paths across traces and present the cross-trace distribution of memory clusters in the batch report, backed by regression cases using real heap-graph traces.</li><li><strong>GPU compute evidence</strong> (July 14): A vendor-neutral GPU compute evidence Skill that does not depend on proprietary counters from any specific GPU vendor, backed by real-trace regression coverage.</li><li><strong>Existing-scene hardening</strong> (early June): Memory-analysis evidence handling was hardened, and the evidence semantics for thread blocked reasons were corrected. The latter fixed incorrect attribution in the “blocked reason” field.</li></ul><h2 id="8-RFC-0025-Eight-AI-Workflow-Surfaces"><a href="#8-RFC-0025-Eight-AI-Workflow-Surfaces" class="headerlink" title="8. RFC-0025: Eight AI Workflow Surfaces"></a>8. RFC-0025: Eight AI Workflow Surfaces</h2><p><img src="/en/images/SmartPerfetto-Six-Week-Update/08-rfc-0025.png" alt="RFC-0025 organizing eight AI surfaces into auditable workflows"></p><p>Eight capabilities defined by RFC-0025 were merged on July 7. The goal was to extend AI analysis from a question-and-answer interaction into auditable, batch-oriented, collaborative workflows. Design and implementation documents live under <code>docs/architecture/perfetto-ai-rfc-0025/</code> in the repository. Before integration, each capability went through a complete independent review, and every P1 finding was fixed.</p><table><thead><tr><th>#</th><th>Capability</th><th>Description</th></tr></thead><tbody><tr><td>1</td><td>Analysis receipts and evidence audits</td><td>Every analysis produces a structured receipt covering tool calls, evidence coverage, and quality-gate status, answering “What did this analysis do, and what evidence supports it?”</td></tr><tr><td>2</td><td>Capture-configuration recommendations</td><td>When analysis finds an evidence gap, it generates recommendations for the next trace capture: “Which data sources should I enable next time to verify this conclusion?”</td></tr><tr><td>3</td><td>UI navigation recommendation protocol</td><td>The AI emits structured timeline navigation recommendations—a timestamp or range—that users can click to apply; the AI never manipulates the UI directly</td></tr><tr><td>4</td><td>Similar-case retrieval for snapshots</td><td>MVP retrieval of similar cases across completed analysis snapshots, allowing a new investigation to check for comparable historical cases first</td></tr><tr><td>5</td><td>SQL query review layer</td><td>Reviews a query intermediate representation (IR) and rejects obviously invalid query shapes before execution</td></tr><tr><td>6</td><td>External Skill package extensions</td><td>Distribution and installation for external Skill packages with a hash-verification chain, allowing teams to maintain their own private Skill packages</td></tr><tr><td>7</td><td>Batch trace lifecycle</td><td>Batch submission, concurrency control, progress tracking, and result aggregation; the heap-cluster aggregation report described earlier runs on this pipeline</td></tr><tr><td>8</td><td>AI capability controls and disclosure</td><td>Enterprise environments can disable AI entirely or turn off individual capabilities; failed capability-policy validation is rejected immediately (fail closed)</td></tr></tbody></table><h2 id="9-Knowledge-Foundation-Android-17-Rendering-Pipelines-and-the-Trace-Case-Corpus"><a href="#9-Knowledge-Foundation-Android-17-Rendering-Pipelines-and-the-Trace-Case-Corpus" class="headerlink" title="9. Knowledge Foundation: Android 17 Rendering Pipelines and the Trace Case Corpus"></a>9. Knowledge Foundation: Android 17 Rendering Pipelines and the Trace Case Corpus</h2><p><img src="/en/images/SmartPerfetto-Six-Week-Update/09-knowledge-foundation.png" alt="A dual-track knowledge foundation of authoritative Android 17 documentation and trace cases"></p><ul><li><strong>Android 17 rendering-pipeline knowledge sync</strong> (July 13): The authoritative S01–S14 content under <code>docs/rendering_pipelines/</code> is now synchronized from a source repository pinned to a specific commit (<code>npm run sync:rendering-pipelines</code>). Manual edits are prohibited, preventing the knowledge base from drifting from its source. These are not ordinary documentation files: rendering-pipeline detection, teaching mode, and some Skills read them directly at runtime through <code>doc_path</code>. They are therefore bundled into every distribution format, including the Docker image, whose previously missing copy was fixed as part of this work.</li><li><strong>Trace case corpus</strong> (July 13–14): SmartPerfetto introduced the <code>Trace/catalog.json</code> corpus catalog contract and migrated all real traces into a directory-structured corpus. It also introduced <strong>deterministically constructed traces</strong>: scenarios such as binder I&#x2F;O blocking, GPU load, and framework pipelines are represented as reproducibly generated synthetic traces, each with a file of expected conclusions. Scene regression coverage expanded from “six fixed traces” to “catalog-driven corpus regression.” Adding a new scene now requires only registering its case in the catalog, without changing the regression framework.</li></ul><h2 id="10-The-Case-Knowledge-Platform-and-Self-Evolution-V1"><a href="#10-The-Case-Knowledge-Platform-and-Self-Evolution-V1" class="headerlink" title="10. The Case Knowledge Platform and Self-Evolution V1"></a>10. The Case Knowledge Platform and Self-Evolution V1</h2><p><img src="/en/images/SmartPerfetto-Six-Week-Update/10-case-knowledge-loop.png" alt="The Case Knowledge loop from curated cases through pattern extraction to analysis reuse"></p><p>The first version of the Case Knowledge platform landed on June 20–22 (v1.0.36&#x2F;37), with the goal of making analysis experience persistent and reusable:</p><ul><li><strong>Curated case ingestion</strong>: Typical performance-problem cases can be organized into structured knowledge and retrieved for citation during analysis.</li><li><strong>Self-Evolution V1</strong>: Patterns confirmed during analysis can be captured as reusable knowledge entries. Hardening this pipeline accounted for most of the work: a research report and multiple rounds of independent review drove fixes for 14 gaps, including automatic confirmation scans for patterns, serialized writes to pattern storage so concurrent analyses cannot overwrite one another, and SQL-result persistence.</li><li><strong>Runtime memory-layer hardening</strong>: SmartPerfetto now records previously silent state such as Provider continuity breaks and CLI fallback sources. When something goes wrong, users can reconstruct which model was actually used and which fallback path the run took.</li></ul><h2 id="11-Ecosystem-Eight-Repositories-Form-a-Complete-Path"><a href="#11-Ecosystem-Eight-Repositories-Form-a-Complete-Path" class="headerlink" title="11. Ecosystem: Eight Repositories Form a Complete Path"></a>11. Ecosystem: Eight Repositories Form a Complete Path</h2><p><img src="/en/images/SmartPerfetto-Six-Week-Update/11-ecosystem.png" alt="The Android performance ecosystem, from navigation, instrumentation, and capture to analysis, knowledge, and reproduction"></p><p>SmartPerfetto is no longer an isolated project. Launched on July 14, the <a href="https://github.com/Gracker/android-performance-ecosystem">Android Performance Ecosystem</a> connects eight repositories across instrumentation, capture, analysis, knowledge, and reproduction into a complete Android performance analysis path:</p><table><thead><tr><th>Stage</th><th>Project</th><th>Role</th><th>Link</th></tr></thead><tbody><tr><td>Navigation</td><td>Android Performance Ecosystem</td><td>Unified project map, handoff metadata, README navigation blocks, and drift checks</td><td><a href="https://github.com/Gracker/android-performance-ecosystem">GitHub</a></td></tr><tr><td>Instrumentation</td><td>TraceFix</td><td>Injects app-side <code>android.os.Trace</code> sections at compile time so method execution is visible in traces</td><td><a href="https://github.com/Gracker/TraceFix">GitHub</a></td></tr><tr><td>Capture and measurement</td><td>Perfetto Tools</td><td>Captures reproducible Perfetto traces and collects FPS or Simpleperf measurements</td><td><a href="https://github.com/Gracker/perfetto-tools">GitHub</a></td></tr><tr><td>Analysis</td><td>SmartPerfetto</td><td>AI-assisted Web UI, CLI, reports, sessions, comparison, and evidence workflows</td><td><a href="https://github.com/Gracker/SmartPerfetto">GitHub</a></td></tr><tr><td>Agent analysis</td><td>Perfetto Skills</td><td>Portable Android&#x2F;Linux&#x2F;Chromium Perfetto analysis Skills for direct use by Agents such as Codex, Claude Code, and OpenCode</td><td><a href="https://github.com/Gracker/Perfetto-Skills">GitHub</a></td></tr><tr><td>Learning</td><td>Android Performance Blog</td><td>Articles, system internals, and case studies</td><td><a href="https://www.androidperformance.com/en/">AndroidPerformance.com</a></td></tr><tr><td>System knowledge</td><td>Android Internal Wiki</td><td>An alpha-stage Android system knowledge base covering App, Framework, Native, and Kernel mechanisms</td><td>Coming soon</td></tr><tr><td>Reproduction</td><td>Trace for Blog (SystraceForBlog)</td><td>Perfetto&#x2F;Systrace case files used in articles for hands-on reproduction</td><td><a href="https://github.com/Gracker/SystraceForBlog">GitHub</a></td></tr></tbody></table><p>The relationship between SmartPerfetto and Perfetto-Skills deserves a closer look. The two repositories evolve independently but share a portable analysis contract:</p><ul><li><strong>Public Skill export system</strong> (July 11-12): <code>backend/skills/public-export.yaml</code> explicitly classifies every runtime asset. Portable workflows, SQL, methodology, and pipeline knowledge enter the public projection, while product-specific Provider, session, and streaming semantics remain in SmartPerfetto. <code>npm run verify:public-skills</code> verifies the exported result.</li><li><strong>Bidirectional impact review gate</strong>: <code>npm run check:perfetto-skills-impact</code> identifies every commit that touches a shared contract—including Skills, strategies, evidence contracts, SQL services, pipeline knowledge, and export policies—and requires the author to explicitly record a coordination decision: sync required, sync not required, or deferred with a handoff link. Contract drift no longer depends on human memory.</li><li><strong>Perfetto upstream syncs</strong>: This period included three upstream syncs (v56.0 → v57.1 → v57.2). Each followed the repository’s sync rules for merging the fork, refreshing the UI prebuild, and running scene regressions.</li></ul><h2 id="12-Engineering-and-Usability"><a href="#12-Engineering-and-Usability" class="headerlink" title="12. Engineering and Usability"></a>12. Engineering and Usability</h2><p><img src="/en/images/SmartPerfetto-Six-Week-Update/12-engineering-delivery.png" alt="From real E2E testing, independent review, and CI gates to reproducible delivery"></p><ul><li><strong>Real-path DeepSeek end-to-end verification</strong>: Agent SSE end-to-end tests now use the real DeepSeek API by default (<code>npm run verify:e2e:deepseek*</code>), with a manually triggered GitHub Actions workflow also available. Only a real Provider path can expose behavioral differences in tool-call formats and streaming chunks.</li><li><strong>Institutionalized review</strong>: Weekly architecture reviews are paired with clean-room reviews before releases, with reports committed under <code>docs/reviews/</code>. Quick Mode, RFC-0025, and v1.1.0 all had independent review records before these major features shipped.</li><li><strong>Usability fixes</strong>: Portable packages exclude runtime data (v1.0.33); macOS signing resources are staged correctly (v1.0.37); the launcher has a port fallback; Bedrock model IDs are normalized across regions; the OpenCode runtime is linked correctly inside Docker; and Agent turn budgets have been adjusted.</li><li><strong>Dependency maintenance</strong>: Core dependencies—including the Claude Agent SDK, OpenAI Agents, Pi Agent Core, and OpenCode SDK—have been upgraded continuously.</li></ul><h2 id="13-The-Complete-SmartPerfetto-Feature-Map"><a href="#13-The-Complete-SmartPerfetto-Feature-Map" class="headerlink" title="13. The Complete SmartPerfetto Feature Map"></a>13. The Complete SmartPerfetto Feature Map</h2><p><img src="/en/images/SmartPerfetto-Six-Week-Update/13-feature-map.png" alt="SmartPerfetto&#39;s eight-layer feature map, from entry points and analysis to extensibility and distribution"></p><p>As of v1.1.1, SmartPerfetto’s complete feature map is organized into eight layers: “entry points → analysis → evidence and quality → knowledge → comparison and code awareness → output → extensibility and governance → distribution.”</p><table><thead><tr><th>Layer</th><th>Feature</th><th>Description</th></tr></thead><tbody><tr><td><strong>Entry points</strong></td><td>Perfetto UI AI Assistant</td><td>The forked Perfetto UI includes a built-in AI panel&#x2F;sidebar&#x2F;floating window, placing timeline inspection and AI analysis on the same screen</td></tr><tr><td></td><td>Smart Mode</td><td>Reconstructs the scene timeline of a mixed trace, then lets users drill into all scenes or an individual one (startup&#x2F;scroll&#x2F;click&#x2F;navigation&#x2F;ANR, and more)</td></tr><tr><td></td><td>Selection-based quick questions</td><td>Select a timeline region or slice and ask questions against that selected context</td></tr><tr><td></td><td>Dual-trace comparison workspace</td><td>Loads the current and historical traces side by side, allowing AI to compare them in real time within the same session</td></tr><tr><td></td><td>CLI</td><td><code>smp run / ask / repl / capture / compare / report / query / skill / doctor</code>, including Android capture presets and automatic post-capture analysis</td></tr><tr><td></td><td>HTTP + SSE API</td><td><code>/api/agent/v1/*</code>, <code>/api/traces/*</code>, and <code>/api/reports/*</code> for integrations and the frontend</td></tr><tr><td></td><td>Batch analysis</td><td>Batch submission, concurrency control, and result aggregation, including aggregate reports for heap clusters</td></tr><tr><td><strong>Analysis</strong></td><td>Three analysis modes</td><td>fast (lightweight direct answers) &#x2F; full (complete planning + verification) &#x2F; auto (semantic routing)</td></tr><tr><td></td><td>Quick Mode evidence-backed direct answer</td><td>Zero-round direct answers from deterministic evidence collection, with sentence-level data citations and an analysis receipt</td></tr><tr><td></td><td>Scene strategies</td><td>21 Markdown scene strategies (including the final report contract), with scene classification driven by frontmatter</td></tr><tr><td></td><td>YAML Skill engine</td><td>239 deterministic Skills (atomic&#x2F;composite&#x2F;deep&#x2F;modules&#x2F;pipelines&#x2F;comparison), with L1-L4 tiered results</td></tr><tr><td></td><td>Rendering pipeline detection and guidance</td><td>Covers View, Compose, Flutter, WebView, game, and other pipeline types, with authoritative Android 17 knowledge (S01-S14) available to the runtime</td></tr><tr><td></td><td>Four Agent runtimes</td><td>claude-agent-sdk &#x2F; openai-agents-sdk &#x2F; pi-agent-core &#x2F; opencode, with a unified run specification, MCP tool registry, and plan evidence log</td></tr><tr><td></td><td>Provider management</td><td>Manages multiple Provider profiles in the UI, with runtime switching, session-level binding, and environment isolation</td></tr><tr><td><strong>Evidence and quality</strong></td><td>DataEnvelope structured results</td><td>A self-describing table&#x2F;chart contract rendered by the frontend from its schema and consumed by reports, snapshots, and the CLI</td></tr><tr><td></td><td>Evidence contracts and conclusion validation</td><td>Conclusions must be backed by Skill&#x2F;SQL evidence; deterministic conclusions are validated individually, with process and thread identity resolution</td></tr><tr><td></td><td>Report contract gates</td><td>Strategy frontmatter declares required report sections, and completeness is checked programmatically</td></tr><tr><td></td><td>Validator and misdiagnosis pattern library</td><td>An independent validation pass in full mode, with misdiagnosis patterns loaded from strategy files</td></tr><tr><td></td><td>SQL query review</td><td>An intermediate-representation review layer that blocks obviously incorrect queries before execution</td></tr><tr><td><strong>Knowledge</strong></td><td>Perfetto SQL&#x2F;stdlib index</td><td>Schema and standard-library symbol indexes plus knowledge-query tools, regenerated with each upstream sync</td></tr><tr><td></td><td>Case Knowledge and self-evolution</td><td>Curated case ingestion plus automatic pattern extraction from confirmed analyses (V1)</td></tr><tr><td></td><td>Android Internals external knowledge base</td><td>Registers a local wiki checkout as a versioned knowledge source, with dual consent, metadata projection, and fail-closed enforcement</td></tr><tr><td></td><td>Trace case corpus</td><td>A <code>Trace/catalog.json</code> catalog contract for scene regressions across real and deterministically constructed traces</td></tr><tr><td><strong>Comparison and code awareness</strong></td><td>Raw trace comparison</td><td>The dual-window workspace plus CLI <code>smp compare</code>, using the same backend comparison identity and evidence bundle</td></tr><tr><td></td><td>Comparison across analysis results</td><td>Compares the user’s completed snapshots across traces, windows, and workspaces</td></tr><tr><td></td><td>Similar-case retrieval</td><td>Retrieves similar cases across analysis snapshots (MVP)</td></tr><tr><td></td><td>Code-Aware source analysis</td><td>Registers local codebases and resolves symbols; the model sees only CodeRef metadata, while source text is visible only through permission-controlled endpoints; patch suggestions are validated with <code>git apply --check</code></td></tr><tr><td><strong>Output</strong></td><td>Real-time SSE projection</td><td>Streams progress, conclusions, and UI navigation suggestions while keeping chat readable instead of burying it in raw SQL</td></tr><tr><td></td><td>HTML reports</td><td>Complete reports that preserve evidence, conclusion validation, identity resolution, and appendix details</td></tr><tr><td></td><td>Analysis result snapshots</td><td>Persistent snapshots for later comparison, similar-case retrieval, and reinspection</td></tr><tr><td></td><td>CLI Turn Artifacts</td><td>Session and report files under <code>~/.smartperfetto/</code> for scripted consumption</td></tr><tr><td><strong>Extensibility and governance</strong></td><td>External Skill packages</td><td>Skill package distribution and installation with a hash-verification chain</td></tr><tr><td></td><td>Capture configuration suggestions</td><td>Derives trace capture configuration suggestions from gaps in an analysis</td></tr><tr><td></td><td>UI navigation suggestions</td><td>Structured navigation suggestions from AI that execute only after user confirmation</td></tr><tr><td></td><td>AI capability controls and disclosure</td><td>Disables AI globally or per capability, with fail-closed enforcement when policy validation fails</td></tr><tr><td></td><td>Public Skill export</td><td>Explicitly classified exports to the public Perfetto-Skills repository, guarded by a bidirectional impact review gate</td></tr><tr><td><strong>Distribution</strong></td><td>Docker Hub</td><td><code>docker compose -f docker-compose.hub.yml up -d</code>, with no host installation of Node.js required</td></tr><tr><td></td><td>Portable packages</td><td>Windows&#x2F;macOS&#x2F;Linux packages bundling Node.js 24 and a pinned trace processor</td></tr><tr><td></td><td>npm CLI</td><td><code>npm install -g @gracker/smartperfetto</code>, exposing the <code>smp</code> &#x2F; <code>smartperfetto</code> commands</td></tr><tr><td></td><td>Source</td><td><code>./start.sh</code>, using the committed prebuilt UI without building the Perfetto submodule</td></tr></tbody></table><h2 id="14-Release-Timeline"><a href="#14-Release-Timeline" class="headerlink" title="14. Release Timeline"></a>14. Release Timeline</h2><p><img src="/en/images/SmartPerfetto-Six-Week-Update/14-version-timeline.png" alt="SmartPerfetto release timeline from v1.0.29 to v1.1.1"></p><table><thead><tr><th>Version</th><th>Date</th><th>Highlights</th></tr></thead><tbody><tr><td>v1.0.29</td><td>2026-06-05</td><td>Stronger evidence for memory analysis and corrected evidence semantics for thread blocking reasons</td></tr><tr><td>v1.0.30</td><td>2026-06-06</td><td>Perfetto upstream sync to v56.0</td></tr><tr><td>v1.0.31</td><td>2026-06-06</td><td>Agent end-to-end verification moved to the real DeepSeek path</td></tr><tr><td>v1.0.32</td><td>2026-06-07</td><td>Runtime engines organized into directories, end-to-end cancellation semantics, state continuation for third-party runtimes, and a validator misdiagnosis pattern library</td></tr><tr><td>v1.0.33</td><td>2026-06-07</td><td>Runtime data excluded from portable packages</td></tr><tr><td>v1.0.34</td><td>2026-06-17</td><td>DeepSeek trace analysis alignment and turn-budget adjustments</td></tr><tr><td>v1.0.35</td><td>2026-06-19</td><td>Token optimizations shipped: strategy core&#x2F;detail split, SQL summaries, compressed tool descriptions, and cache boundaries</td></tr><tr><td>v1.0.36</td><td>2026-06-22</td><td>Case Knowledge platform + self-evolution V1 + memory-layer fixes</td></tr><tr><td>v1.0.37</td><td>2026-06-22</td><td>Fixed signing resources for macOS portable packages</td></tr><tr><td>v1.0.38</td><td>2026-07-04</td><td>Productized Quick Mode direct answers and analysis receipts, refreshed Provider presets, and Perfetto v57.1</td></tr><tr><td>v1.0.39</td><td>2026-07-11</td><td>RFC-0025’s eight AI workflow surfaces and the dual-trace workspace</td></tr><tr><td>v1.1.0</td><td>2026-07-17</td><td>Unified analysis context and runtime architecture, private-context authorization fingerprints, Camera&#x2F;Heap&#x2F;GPU scenes, Android 17 rendering knowledge, trace corpus, public Skill export, regression-gate CI, and Perfetto v57.2</td></tr><tr><td>v1.1.1</td><td>2026-07-17</td><td>Review-driven fixes for source-reference locatability, validator evidence binding, restored scroll-metric semantics, and more</td></tr></tbody></table><h2 id="15-Try-It-and-Send-Feedback"><a href="#15-Try-It-and-Send-Feedback" class="headerlink" title="15. Try It and Send Feedback"></a>15. Try It and Send Feedback</h2><p><img src="/en/images/SmartPerfetto-Six-Week-Update/15-try-feedback.png" alt="Docker, portable packages, the npm CLI, and source entry points converge into reproducible feedback"></p><p>Choose the distribution format that fits your use case (see the repository README and <code>docs/getting-started/quick-start.md</code> for details):</p><ul><li><strong>For the fastest trial</strong>: Use the Docker Hub image with <code>docker compose -f docker-compose.hub.yml up -d</code>; no host installation of Node.js is required.</li><li><strong>If you do not want Docker</strong>: Use a GitHub Release portable package for Windows, macOS, or Linux; it includes every runtime.</li><li><strong>For terminal and scripting workflows</strong>: Run <code>npm install -g @gracker/smartperfetto</code>; Node.js 24 is required on the host.</li><li><strong>If you want to modify the code</strong>: Check out the source and run <code>./start.sh</code>; use <code>./scripts/start-dev.sh</code> for plugin UI development.</li></ul><p>When reporting a bug, please include as much of the following as possible: a reproducible trace, the exact evidence location (timestamp&#x2F;process&#x2F;thread), and the difference between the expected and actual analysis conclusions. Issues that include a trace receive the highest priority.</p>]]></content>
+      
+      
+      <categories>
+          
+          <category> SmartPerfetto </category>
+          
+      </categories>
+      
+      
+        <tags>
+            
+            <tag> Perfetto </tag>
+            
+            <tag> SmartPerfetto </tag>
+            
+            <tag> Android Performance </tag>
+            
+        </tags>
+      
+    </entry>
+    
+    
+    
+    <entry>
+      <title>SmartPerfetto 2026-05-17 to 2026-06-04 Three-Week Update: Smart Mode, Evidence Rules, and Four Runtimes</title>
       <link href="/en/2026/06/04/SmartPerfetto-Three-Week-Update/"/>
       <url>/en/2026/06/04/SmartPerfetto-Three-Week-Update/</url>
       
@@ -41,7 +70,7 @@
     
     
     <entry>
-      <title>SmartPerfetto Two-Week Update: From Perfetto AI Assistant to a Reusable Trace Analysis Platform</title>
+      <title>SmartPerfetto 2026-04-29 to 2026-05-17 Two-Week Update: From Perfetto AI Assistant to a Reusable Trace Analysis Platform</title>
       <link href="/en/2026/05/17/SmartPerfetto-Two-Week-Update/"/>
       <url>/en/2026/05/17/SmartPerfetto-Two-Week-Update/</url>
       
@@ -405,11 +434,11 @@
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -438,11 +467,11 @@
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -471,11 +500,11 @@
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Jank </tag>
             
             <tag> RenderThread </tag>
             
@@ -502,13 +531,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -535,11 +564,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> ANR </tag>
             
@@ -568,13 +597,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> ANR </tag>
             
@@ -601,13 +630,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> ANR </tag>
             
@@ -634,13 +663,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -667,13 +696,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -700,13 +729,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -826,9 +855,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> RenderThread </tag>
             
@@ -859,13 +888,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -925,13 +954,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -958,13 +987,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> Jank </tag>
             
-            <tag> Systrace </tag>
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -993,11 +1022,11 @@
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -1051,9 +1080,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Framework </tag>
             
@@ -1080,15 +1109,15 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
-            
-            <tag> Jank </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Jank </tag>
             
         </tags>
       
@@ -1113,13 +1142,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> ANR </tag>
             
@@ -1146,9 +1175,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Linux </tag>
             
@@ -1175,13 +1204,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> ANR </tag>
             
@@ -1208,13 +1237,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> ANR </tag>
             
@@ -1241,13 +1270,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> ANR </tag>
             
@@ -1274,13 +1303,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> ANR </tag>
             
@@ -1307,13 +1336,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> ANR </tag>
             
@@ -1340,13 +1369,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> ANR </tag>
             
@@ -1433,11 +1462,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
         </tags>
       
@@ -1462,13 +1491,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -1495,9 +1524,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Java </tag>
             
@@ -1553,13 +1582,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -1586,13 +1615,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -1619,13 +1648,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -1683,48 +1712,15 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
-            
-            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
-            <tag> Performance </tag>
-            
-        </tags>
-      
-    </entry>
-    
-    
-    
-    <entry>
-      <title>Comprehensive Record of Android App Startup Optimization</title>
-      <link href="/en/2019/11/18/Android-App-Lunch-Optimize/"/>
-      <url>/en/2019/11/18/Android-App-Lunch-Optimize/</url>
-      
-        <content type="html"><![CDATA[<p>This article summarizes major Android app startup optimization strategies available today. If you need to optimize your app’s launch performance, use this as a checklist to identify gaps in your current implementation. Since many solutions depend on specific business requirements, I focus on presenting the options rather than deep-diving into every implementation detail. You can easily find specific technical guides for each method online.</p><p>I’ve also included some optimizations performed by system manufacturers. Understanding what happens at the OS level can help you make better decisions, such as requesting whitelisting or integrating manufacturer SDKs.</p><span id="more"></span><p>First update the startup measurement workflow. <code>adb shell am start -W</code> is still useful for quick local <code>ThisTime</code>&#x2F;<code>TotalTime</code>&#x2F;<code>WaitTime</code> checks, but it is not a stable release-quality metric and does not cover complex first-frame, first-content, login-state, warmup, or device-load scenarios. Encode important startup paths as Macrobenchmark tests and use <code>StartupTimingMetric</code> for repeatable cold, warm, and hot startup measurement. Use Baseline Profiles&#x2F;Startup Profiles to improve first-launch and critical-path compilation, Android Vitals to monitor app startup time, ANR, slow&#x2F;frozen frames, and LMK in the field, and Perfetto&#x2F;System Trace to align SystemServer, app main thread, RenderThread, I&#x2F;O, Binder, GC, and first-frame evidence.</p><h1 id="Application-Startup-Overview"><a href="#Application-Startup-Overview" class="headerlink" title="Application Startup Overview"></a>Application Startup Overview</h1><h2 id="General-Startup-Workflow"><a href="#General-Startup-Workflow" class="headerlink" title="General Startup Workflow"></a>General Startup Workflow</h2><p>The journey from tapping an app icon to the main interface becoming interactive follows this general flow:</p><p><img src="/en/images/15740895170994.jpg"></p><p>The two most critical processes during startup are <strong>SystemServer</strong> and the <strong>App Process</strong>.</p><ul><li><strong>SystemServer</strong>: Handles startup scheduling, process creation&#x2F;management, and window creation&#x2F;management (StartingWindow and AppWindow).</li><li><strong>App Process</strong>: Once created, it performs process initialization, component initialization (Activity, Service, ContentProvider, Broadcast), main UI construction, and content inflation.</li></ul><h2 id="Cold-vs-Hot-Startup"><a href="#Cold-vs-Hot-Startup" class="headerlink" title="Cold vs. Hot Startup"></a>Cold vs. Hot Startup</h2><p>These are two fundamental concepts in performance optimization:</p><ul><li><strong>Cold Startup</strong>: Starting an app when its process isn’t running in the background. The system must create a new process and initialize components from scratch.</li><li><strong>Hot Startup</strong>: Starting an app when its process is already alive in the background (e.g., after the user pressed Back or Home). The system simply brings the existing process to the foreground and restarts the activity.</li></ul><h2 id="Measuring-Startup-Speed"><a href="#Measuring-Startup-Speed" class="headerlink" title="Measuring Startup Speed"></a>Measuring Startup Speed</h2><p>While every team has its own method, the challenge lies in defining the “end point” of a startup. Simple tools like <code>adb shell am start -W</code> are fun but unsuitable for production. Screen recording introduces performance overhead.</p><p>I recommend the methodology used by the Mobile Taobao team: <strong>Automated, Stable, and CI-integrated</strong>. They use OCR to extract text from screenshots as key features. When text appears, the image is considered “loaded,” which aligns with actual user perception.</p><h1 id="App-Level-Optimizations"><a href="#App-Level-Optimizations" class="headerlink" title="App-Level Optimizations"></a>App-Level Optimizations</h1><h2 id="1-Startup-Window-Optimization"><a href="#1-Startup-Window-Optimization" class="headerlink" title="1. Startup Window Optimization"></a>1. Startup Window Optimization</h2><p>The <strong>StartingWindow</strong> (also known as SplashWindow or Preview Window) is shown immediately by the system when the user taps the icon.</p><ul><li><strong>Do not disable the system’s default preview window</strong>: Avoid setting <code>android:windowDisablePreview</code> to <code>true</code> in your theme. Disabling it causes a jarring lag between the icon tap and the first frame of your app.</li><li><strong>Customize the StartingWindow</strong>: Set the splash theme’s background to match your app’s primary color or brand logo.</li><li><strong>Merge Splash and Main Activity</strong>: This reduces one activity transition, though it requires careful management of internal state.</li></ul><h2 id="2-Thread-Optimization"><a href="#2-Thread-Optimization" class="headerlink" title="2. Thread Optimization"></a>2. Thread Optimization</h2><p>Excessive concurrent threads during startup strain the CPU, especially on low-end devices. This leads to more Sleep and Runnable states for the main thread, slowing down the launch.</p><ul><li>Control thread counts using thread pools.</li><li>Audit locks to prevent dependency deadlocks.</li><li>Use a structured startup framework (e.g., mmkernel, Alpha).</li></ul><h2 id="3-System-Schedule-Optimization"><a href="#3-System-Schedule-Optimization" class="headerlink" title="3. System Schedule Optimization"></a>3. System Schedule Optimization</h2><p>Avoid making the main thread too busy.</p><ul><li><strong>Minimize system calls</strong>: Avoid excessive communication with AMS&#x2F;WMS during launch to prevent lock competition in <code>SystemServer</code>.</li><li><strong>Avoid starting sub-processes</strong>: Multiplying processes during startup doubles the system burden.</li><li><strong>Be cautious with other components</strong>: Activity, Service, ContentProvider, and BroadcastReceiver initializations all happen on the main thread.</li><li>Asynchronously initialize non-critical code in <code>Application</code> and <code>MainActivity</code>.</li></ul><h2 id="4-GC-Optimization"><a href="#4-GC-Optimization" class="headerlink" title="4. GC Optimization"></a>4. GC Optimization</h2><p>Reduce the number of GC cycles during startup.</p><ul><li>Avoid heavy string manipulations, especially serialization&#x2F;deserialization.</li><li>Reuse frequently created objects.</li><li>Move logic to Native code if possible.</li></ul><h2 id="5-IO-Optimization"><a href="#5-IO-Optimization" class="headerlink" title="5. IO Optimization"></a>5. IO Optimization</h2><p>IO performance drops significantly under the high load of startup.</p><ul><li>Monitor exactly which files are read, the buffer sizes used, and on which threads.</li><li>Avoid network IO during initial launch.</li><li>Optimize disk IO, especially for large database files.</li></ul><h2 id="6-Resource-Reordering"><a href="#6-Resource-Reordering" class="headerlink" title="6. Resource Reordering"></a>6. Resource Reordering</h2><p>Use Linux’s <strong>PageCache</strong> and <strong>ReadAhead</strong> mechanisms. By reordering files in the APK to match their read sequence during startup, you can minimize disk seeks and improve performance.</p><h2 id="7-Class-Reordering"><a href="#7-Class-Reordering" class="headerlink" title="7. Class Reordering"></a>7. Class Reordering</h2><p>Use tools like <strong>ReDex (Interdex)</strong> to adjust the order of classes within the Dex file. Moving classes needed during startup to the primary Dex file can provide a noticeable speed boost.</p><h2 id="8-Layout-Optimization"><a href="#8-Layout-Optimization" class="headerlink" title="8. Layout Optimization"></a>8. Layout Optimization</h2><ul><li>Decrease view hierarchy depth.</li><li>Use <code>ViewStub</code> for UI elements not needed immediately.</li><li>Use custom Views instead of complex nested layouts.</li></ul><h2 id="9-IdleHandler-Usage"><a href="#9-IdleHandler-Usage" class="headerlink" title="9. IdleHandler Usage"></a>9. IdleHandler Usage</h2><p>Use <code>IdleHandler</code> to execute non-critical tasks (like fetching push tokens or loading secondary UI) only when the message queue is idle.</p><h2 id="10-Class-Loading-Optimization"><a href="#10-Class-Loading-Optimization" class="headerlink" title="10. Class Loading Optimization"></a>10. Class Loading Optimization</h2><p>Watch for <code>verifyClass</code> in Systrace. This verification process can be time-consuming as the system checks every instruction.</p><h2 id="11-App-Thinning"><a href="#11-App-Thinning" class="headerlink" title="11. App Thinning"></a>11. App Thinning</h2><ul><li>Use <strong>Inspect Code</strong> (Lint) for cleanup.</li><li>Use ProGuard&#x2F;R8 for obfuscation and shrinking.</li><li>Prefer <code>RGB_565</code> for images where high quality isn’t critical.</li><li>Use resource obfuscators and reduce the number of Dex files.</li></ul><h2 id="12-Startup-Frameworks"><a href="#12-Startup-Frameworks" class="headerlink" title="12. Startup Frameworks"></a>12. Startup Frameworks</h2><p>Structure your startup tasks using a <strong>Directed Acyclic Graph (DAG)</strong>. This allows you to manage dependencies clearly and execute independent tasks in parallel across multiple stages, maximizing hardware utilization while preventing congestion.</p><h2 id="13-Networking-Optimization"><a href="#13-Networking-Optimization" class="headerlink" title="13. Networking Optimization"></a>13. Networking Optimization</h2><ul><li>Batch requests to reduce the number of individual connections.</li><li>Defer non-essential data and resource downloads.</li><li>Optimize JSON parsing; complex strings can block the main thread for seconds on low-end devices.</li></ul><h2 id="14-Pre-loading"><a href="#14-Pre-loading" class="headerlink" title="14. Pre-loading"></a>14. Pre-loading</h2><p>Load data before the Activity is even created, and show it once the UI is ready.</p><h2 id="15-Process-Preservation-Keep-Alive"><a href="#15-Process-Preservation-Keep-Alive" class="headerlink" title="15. Process Preservation (Keep-Alive)"></a>15. Process Preservation (Keep-Alive)</h2><p>While controversial, if a process isn’t killed, the “startup” becomes a hot start. Instead of “black magic” (which OEMs target), focus on being a “good citizen”: release resources in the background, stop unnecessary services&#x2F;animations, and respond to low-memory warnings. This builds trust and might help you get on an OEM’s <strong>Whitelist</strong>.</p><h2 id="16-Business-Component-Review"><a href="#16-Business-Component-Review" class="headerlink" title="16. Business Component Review"></a>16. Business Component Review</h2><p>Audit every module initialized at startup. Use these 4 categories:</p><ul><li><strong>Essential &amp; Time-Consuming</strong>: Move to a background thread.</li><li><strong>Essential &amp; Fast</strong>: Keep on the main thread.</li><li><strong>Non-Essential but Time-Consuming</strong>: Defer or use lazy loading.</li><li><strong>Non-Essential &amp; Fast</strong>: Remove or load on demand.</li></ul><h2 id="17-Activity-Jump-Hierarchy"><a href="#17-Activity-Jump-Hierarchy" class="headerlink" title="17. Activity Jump Hierarchy"></a>17. Activity Jump Hierarchy</h2><p>Always prefer: <code>StartingWindow -&gt; MainActivity</code>.<br>Avoid: <code>StartingWindow -&gt; SplashActivity -&gt; MainActivity</code> if possible, as every transition adds latency.</p><h1 id="OEM-Level-Optimizations"><a href="#OEM-Level-Optimizations" class="headerlink" title="OEM-Level Optimizations"></a>OEM-Level Optimizations</h1><p>System manufacturers also optimize for startup:</p><ul><li><strong>Resource Tipping</strong>: During an app launch, the system tilts CPU, IO, and GPU resources toward that process (VIP treatment).</li><li><strong>Pre-Fork (Android Q+)</strong>: Forking empty processes in advance to save time when an app starts.</li><li><strong>Message Reordering</strong>: Prioritizing startup-related messages in the queue.</li><li><strong>Big Core Allocation</strong>: Forcing the app’s main and render threads onto high-performance CPU cores.</li><li><strong>Startup Prediction</strong>: Learning user habits to pre-warm apps in the background.</li></ul><h1 id="References"><a href="#References" class="headerlink" title="References"></a>References</h1><p>(List of references in original article)</p><h1 id="About-Me-amp-amp-Blog"><a href="#About-Me-amp-amp-Blog" class="headerlink" title="About Me &amp;&amp; Blog"></a>About Me &amp;&amp; Blog</h1><p>(Links and introduction)</p>]]></content>
-      
-      
-      <categories>
-          
-          <category> Android </category>
-          
-      </categories>
-      
-      
-        <tags>
-            
             <tag> Startup </tag>
             
-            <tag> Memory </tag>
-            
-            <tag> Android </tag>
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
-            
-            <tag> Linux </tag>
             
         </tags>
       
@@ -1749,11 +1745,44 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
             
+            <tag> Performance </tag>
+            
+            <tag> Linux </tag>
+            
+        </tags>
+      
+    </entry>
+    
+    
+    
+    <entry>
+      <title>Comprehensive Record of Android App Startup Optimization</title>
+      <link href="/en/2019/11/18/Android-App-Lunch-Optimize/"/>
+      <url>/en/2019/11/18/Android-App-Lunch-Optimize/</url>
+      
+        <content type="html"><![CDATA[<p>This article summarizes major Android app startup optimization strategies available today. If you need to optimize your app’s launch performance, use this as a checklist to identify gaps in your current implementation. Since many solutions depend on specific business requirements, I focus on presenting the options rather than deep-diving into every implementation detail. You can easily find specific technical guides for each method online.</p><p>I’ve also included some optimizations performed by system manufacturers. Understanding what happens at the OS level can help you make better decisions, such as requesting whitelisting or integrating manufacturer SDKs.</p><span id="more"></span><p>First update the startup measurement workflow. <code>adb shell am start -W</code> is still useful for quick local <code>ThisTime</code>&#x2F;<code>TotalTime</code>&#x2F;<code>WaitTime</code> checks, but it is not a stable release-quality metric and does not cover complex first-frame, first-content, login-state, warmup, or device-load scenarios. Encode important startup paths as Macrobenchmark tests and use <code>StartupTimingMetric</code> for repeatable cold, warm, and hot startup measurement. Use Baseline Profiles&#x2F;Startup Profiles to improve first-launch and critical-path compilation, Android Vitals to monitor app startup time, ANR, slow&#x2F;frozen frames, and LMK in the field, and Perfetto&#x2F;System Trace to align SystemServer, app main thread, RenderThread, I&#x2F;O, Binder, GC, and first-frame evidence.</p><h1 id="Application-Startup-Overview"><a href="#Application-Startup-Overview" class="headerlink" title="Application Startup Overview"></a>Application Startup Overview</h1><h2 id="General-Startup-Workflow"><a href="#General-Startup-Workflow" class="headerlink" title="General Startup Workflow"></a>General Startup Workflow</h2><p>The journey from tapping an app icon to the main interface becoming interactive follows this general flow:</p><p><img src="/en/images/15740895170994.jpg"></p><p>The two most critical processes during startup are <strong>SystemServer</strong> and the <strong>App Process</strong>.</p><ul><li><strong>SystemServer</strong>: Handles startup scheduling, process creation&#x2F;management, and window creation&#x2F;management (StartingWindow and AppWindow).</li><li><strong>App Process</strong>: Once created, it performs process initialization, component initialization (Activity, Service, ContentProvider, Broadcast), main UI construction, and content inflation.</li></ul><h2 id="Cold-vs-Hot-Startup"><a href="#Cold-vs-Hot-Startup" class="headerlink" title="Cold vs. Hot Startup"></a>Cold vs. Hot Startup</h2><p>These are two fundamental concepts in performance optimization:</p><ul><li><strong>Cold Startup</strong>: Starting an app when its process isn’t running in the background. The system must create a new process and initialize components from scratch.</li><li><strong>Hot Startup</strong>: Starting an app when its process is already alive in the background (e.g., after the user pressed Back or Home). The system simply brings the existing process to the foreground and restarts the activity.</li></ul><h2 id="Measuring-Startup-Speed"><a href="#Measuring-Startup-Speed" class="headerlink" title="Measuring Startup Speed"></a>Measuring Startup Speed</h2><p>While every team has its own method, the challenge lies in defining the “end point” of a startup. Simple tools like <code>adb shell am start -W</code> are fun but unsuitable for production. Screen recording introduces performance overhead.</p><p>I recommend the methodology used by the Mobile Taobao team: <strong>Automated, Stable, and CI-integrated</strong>. They use OCR to extract text from screenshots as key features. When text appears, the image is considered “loaded,” which aligns with actual user perception.</p><h1 id="App-Level-Optimizations"><a href="#App-Level-Optimizations" class="headerlink" title="App-Level Optimizations"></a>App-Level Optimizations</h1><h2 id="1-Startup-Window-Optimization"><a href="#1-Startup-Window-Optimization" class="headerlink" title="1. Startup Window Optimization"></a>1. Startup Window Optimization</h2><p>The <strong>StartingWindow</strong> (also known as SplashWindow or Preview Window) is shown immediately by the system when the user taps the icon.</p><ul><li><strong>Do not disable the system’s default preview window</strong>: Avoid setting <code>android:windowDisablePreview</code> to <code>true</code> in your theme. Disabling it causes a jarring lag between the icon tap and the first frame of your app.</li><li><strong>Customize the StartingWindow</strong>: Set the splash theme’s background to match your app’s primary color or brand logo.</li><li><strong>Merge Splash and Main Activity</strong>: This reduces one activity transition, though it requires careful management of internal state.</li></ul><h2 id="2-Thread-Optimization"><a href="#2-Thread-Optimization" class="headerlink" title="2. Thread Optimization"></a>2. Thread Optimization</h2><p>Excessive concurrent threads during startup strain the CPU, especially on low-end devices. This leads to more Sleep and Runnable states for the main thread, slowing down the launch.</p><ul><li>Control thread counts using thread pools.</li><li>Audit locks to prevent dependency deadlocks.</li><li>Use a structured startup framework (e.g., mmkernel, Alpha).</li></ul><h2 id="3-System-Schedule-Optimization"><a href="#3-System-Schedule-Optimization" class="headerlink" title="3. System Schedule Optimization"></a>3. System Schedule Optimization</h2><p>Avoid making the main thread too busy.</p><ul><li><strong>Minimize system calls</strong>: Avoid excessive communication with AMS&#x2F;WMS during launch to prevent lock competition in <code>SystemServer</code>.</li><li><strong>Avoid starting sub-processes</strong>: Multiplying processes during startup doubles the system burden.</li><li><strong>Be cautious with other components</strong>: Activity, Service, ContentProvider, and BroadcastReceiver initializations all happen on the main thread.</li><li>Asynchronously initialize non-critical code in <code>Application</code> and <code>MainActivity</code>.</li></ul><h2 id="4-GC-Optimization"><a href="#4-GC-Optimization" class="headerlink" title="4. GC Optimization"></a>4. GC Optimization</h2><p>Reduce the number of GC cycles during startup.</p><ul><li>Avoid heavy string manipulations, especially serialization&#x2F;deserialization.</li><li>Reuse frequently created objects.</li><li>Move logic to Native code if possible.</li></ul><h2 id="5-IO-Optimization"><a href="#5-IO-Optimization" class="headerlink" title="5. IO Optimization"></a>5. IO Optimization</h2><p>IO performance drops significantly under the high load of startup.</p><ul><li>Monitor exactly which files are read, the buffer sizes used, and on which threads.</li><li>Avoid network IO during initial launch.</li><li>Optimize disk IO, especially for large database files.</li></ul><h2 id="6-Resource-Reordering"><a href="#6-Resource-Reordering" class="headerlink" title="6. Resource Reordering"></a>6. Resource Reordering</h2><p>Use Linux’s <strong>PageCache</strong> and <strong>ReadAhead</strong> mechanisms. By reordering files in the APK to match their read sequence during startup, you can minimize disk seeks and improve performance.</p><h2 id="7-Class-Reordering"><a href="#7-Class-Reordering" class="headerlink" title="7. Class Reordering"></a>7. Class Reordering</h2><p>Use tools like <strong>ReDex (Interdex)</strong> to adjust the order of classes within the Dex file. Moving classes needed during startup to the primary Dex file can provide a noticeable speed boost.</p><h2 id="8-Layout-Optimization"><a href="#8-Layout-Optimization" class="headerlink" title="8. Layout Optimization"></a>8. Layout Optimization</h2><ul><li>Decrease view hierarchy depth.</li><li>Use <code>ViewStub</code> for UI elements not needed immediately.</li><li>Use custom Views instead of complex nested layouts.</li></ul><h2 id="9-IdleHandler-Usage"><a href="#9-IdleHandler-Usage" class="headerlink" title="9. IdleHandler Usage"></a>9. IdleHandler Usage</h2><p>Use <code>IdleHandler</code> to execute non-critical tasks (like fetching push tokens or loading secondary UI) only when the message queue is idle.</p><h2 id="10-Class-Loading-Optimization"><a href="#10-Class-Loading-Optimization" class="headerlink" title="10. Class Loading Optimization"></a>10. Class Loading Optimization</h2><p>Watch for <code>verifyClass</code> in Systrace. This verification process can be time-consuming as the system checks every instruction.</p><h2 id="11-App-Thinning"><a href="#11-App-Thinning" class="headerlink" title="11. App Thinning"></a>11. App Thinning</h2><ul><li>Use <strong>Inspect Code</strong> (Lint) for cleanup.</li><li>Use ProGuard&#x2F;R8 for obfuscation and shrinking.</li><li>Prefer <code>RGB_565</code> for images where high quality isn’t critical.</li><li>Use resource obfuscators and reduce the number of Dex files.</li></ul><h2 id="12-Startup-Frameworks"><a href="#12-Startup-Frameworks" class="headerlink" title="12. Startup Frameworks"></a>12. Startup Frameworks</h2><p>Structure your startup tasks using a <strong>Directed Acyclic Graph (DAG)</strong>. This allows you to manage dependencies clearly and execute independent tasks in parallel across multiple stages, maximizing hardware utilization while preventing congestion.</p><h2 id="13-Networking-Optimization"><a href="#13-Networking-Optimization" class="headerlink" title="13. Networking Optimization"></a>13. Networking Optimization</h2><ul><li>Batch requests to reduce the number of individual connections.</li><li>Defer non-essential data and resource downloads.</li><li>Optimize JSON parsing; complex strings can block the main thread for seconds on low-end devices.</li></ul><h2 id="14-Pre-loading"><a href="#14-Pre-loading" class="headerlink" title="14. Pre-loading"></a>14. Pre-loading</h2><p>Load data before the Activity is even created, and show it once the UI is ready.</p><h2 id="15-Process-Preservation-Keep-Alive"><a href="#15-Process-Preservation-Keep-Alive" class="headerlink" title="15. Process Preservation (Keep-Alive)"></a>15. Process Preservation (Keep-Alive)</h2><p>While controversial, if a process isn’t killed, the “startup” becomes a hot start. Instead of “black magic” (which OEMs target), focus on being a “good citizen”: release resources in the background, stop unnecessary services&#x2F;animations, and respond to low-memory warnings. This builds trust and might help you get on an OEM’s <strong>Whitelist</strong>.</p><h2 id="16-Business-Component-Review"><a href="#16-Business-Component-Review" class="headerlink" title="16. Business Component Review"></a>16. Business Component Review</h2><p>Audit every module initialized at startup. Use these 4 categories:</p><ul><li><strong>Essential &amp; Time-Consuming</strong>: Move to a background thread.</li><li><strong>Essential &amp; Fast</strong>: Keep on the main thread.</li><li><strong>Non-Essential but Time-Consuming</strong>: Defer or use lazy loading.</li><li><strong>Non-Essential &amp; Fast</strong>: Remove or load on demand.</li></ul><h2 id="17-Activity-Jump-Hierarchy"><a href="#17-Activity-Jump-Hierarchy" class="headerlink" title="17. Activity Jump Hierarchy"></a>17. Activity Jump Hierarchy</h2><p>Always prefer: <code>StartingWindow -&gt; MainActivity</code>.<br>Avoid: <code>StartingWindow -&gt; SplashActivity -&gt; MainActivity</code> if possible, as every transition adds latency.</p><h1 id="OEM-Level-Optimizations"><a href="#OEM-Level-Optimizations" class="headerlink" title="OEM-Level Optimizations"></a>OEM-Level Optimizations</h1><p>System manufacturers also optimize for startup:</p><ul><li><strong>Resource Tipping</strong>: During an app launch, the system tilts CPU, IO, and GPU resources toward that process (VIP treatment).</li><li><strong>Pre-Fork (Android Q+)</strong>: Forking empty processes in advance to save time when an app starts.</li><li><strong>Message Reordering</strong>: Prioritizing startup-related messages in the queue.</li><li><strong>Big Core Allocation</strong>: Forcing the app’s main and render threads onto high-performance CPU cores.</li><li><strong>Startup Prediction</strong>: Learning user habits to pre-warm apps in the background.</li></ul><h1 id="References"><a href="#References" class="headerlink" title="References"></a>References</h1><p>(List of references in original article)</p><h1 id="About-Me-amp-amp-Blog"><a href="#About-Me-amp-amp-Blog" class="headerlink" title="About Me &amp;&amp; Blog"></a>About Me &amp;&amp; Blog</h1><p>(Links and introduction)</p>]]></content>
+      
+      
+      <categories>
+          
+          <category> Android </category>
+          
+      </categories>
+      
+      
+        <tags>
+            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -1782,13 +1811,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -1815,13 +1844,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -1848,11 +1877,11 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Java </tag>
             
@@ -1881,13 +1910,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Jank </tag>
             
             <tag> RenderThread </tag>
             
@@ -1914,13 +1943,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
+            <tag> Startup </tag>
+            
             <tag> Jank </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Linux </tag>
             
@@ -1947,15 +1976,15 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Jank </tag>
             
-            <tag> Systrace </tag>
+            <tag> Memory </tag>
             
         </tags>
       
@@ -1980,13 +2009,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> Jank </tag>
             
-            <tag> Systrace </tag>
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -2013,13 +2042,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -2046,13 +2075,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Systrace </tag>
             
             <tag> Jank </tag>
             
-            <tag> Systrace </tag>
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -2079,44 +2108,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
+            <tag> Systrace </tag>
+            
             <tag> Startup </tag>
-            
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
-            
-            <tag> Performance </tag>
-            
-            <tag> Tools </tag>
-            
-        </tags>
-      
-    </entry>
-    
-    
-    
-    <entry>
-      <title>Detailed Explanation of Hardware Layer in Android</title>
-      <link href="/en/2019/07/27/Android-Hardware-Layer-NEW/"/>
-      <url>/en/2019/07/27/Android-Hardware-Layer-NEW/</url>
-      
-        <content type="html"><![CDATA[<h1 id="Hardware-Acceleration-vs-Software-Acceleration"><a href="#Hardware-Acceleration-vs-Software-Acceleration" class="headerlink" title="Hardware Acceleration vs Software Acceleration"></a>Hardware Acceleration vs Software Acceleration</h1><p>Many people confuse hardware acceleration and Hardware Layer in Android, thinking that enabling hardware acceleration means enabling Hardware Layer. So before discussing Hardware Layer, let’s first talk about hardware acceleration.</p><p>For more detailed articles about hardware acceleration, I recommend these three:</p><ol><li><a href="https://www.mtyun.com/library/hardware-accelerate">Introduction to Android Hardware Acceleration Principles and Implementation</a></li><li><a href="https://juejin.im/post/5a1f7b3e6fb9a0451b0451bb">Understanding Android Hardware Acceleration for Beginners</a></li><li><a href="https://developer.android.google.cn/guide/topics/graphics/hardware-accel">Official Documentation: Hardware acceleration</a></li></ol><p>Hardware acceleration, actually should be called GPU acceleration. The difference between hardware and software acceleration mainly lies in whether graphics drawing is handled by GPU or CPU. If by GPU, it’s considered hardware accelerated drawing; otherwise, it’s software drawing.</p><p>Current Android versions have hardware acceleration enabled by default. If your App doesn’t have special declarations, hardware acceleration is enabled by default.</p><p>The above three articles provide deeper explanations at code and principle levels. Here I’ll demonstrate the difference between App drawing under hardware acceleration and software acceleration from a Systrace perspective.</p><h2 id="Hardware-Accelerated-App-Performance"><a href="#Hardware-Accelerated-App-Performance" class="headerlink" title="Hardware Accelerated App Performance"></a>Hardware Accelerated App Performance</h2><p>Since hardware acceleration is default, let’s take the most common desktop scrolling as an example to see how a hardware accelerated App performs in Systrace.</p><p>Under hardware acceleration, the App has both main thread and render thread; one frame’s drawing is executed cooperatively by both threads.<br><img src="/en/images/15642078929850.jpg"></p><p>Let’s zoom in on Systrace to see how each frame’s main thread and render thread work, and when GPU intervenes to achieve “acceleration.”<br><img src="/en/images/15642079103161.jpg"></p><p>GPU’s actual intervention occurs in some operations within the RenderThread.</p><h2 id="Software-Accelerated-App-Performance"><a href="#Software-Accelerated-App-Performance" class="headerlink" title="Software Accelerated App Performance"></a>Software Accelerated App Performance</h2><p>Correspondingly, let’s find an App for software acceleration demonstration: China UnionPay.</p><p>First, a panoramic view shows that under software rendering, there’s only main thread, no render thread; all rendering work completes on the main thread. Also visible is that under software rendering, each frame’s execution time is very long, exceeding one Vsync cycle, so scrolling feels jerky and uncomfortable. <a href="https://github.com/Gracker/Android_HardwareLayer_Example/blob/master/Systrace/%E8%BD%AF%E4%BB%B6%E6%B8%B2%E6%9F%93%E7%A4%BA%E4%BE%8B-%E4%BA%91%E9%97%AA%E4%BB%98.html">Systrace Download</a><br><img src="/en/images/15642079446767.jpg"></p><p>Let’s zoom in on Systrace to see how each frame’s main thread works.<br><img src="/en/images/15642079799345.jpg"></p><h2 id="Summary"><a href="#Summary" class="headerlink" title="Summary"></a>Summary</h2><p>Through the above comparison and reading the recommended three articles, you should clearly understand the difference between hardware rendering and software rendering. Here’s a summary:</p><ol><li>Under hardware rendering, the app has both main thread and render thread; under software rendering, the app only has main thread, no render thread.</li><li>Under hardware rendering, the app’s final drawing is achieved with GPU assistance; under software rendering, the app’s final drawing is achieved using CPU (calling skia library).</li><li>Under hardware rendering, App performance is superior to software rendering.</li><li>Since some APIs don’t support hardware rendering, only software rendering can be used. When developing Apps, such APIs should be avoided as much as possible (support status can be directly checked in Android official documentation: <a href="https://developer.android.google.cn/guide/topics/graphics/hardware-accel">https://developer.android.google.cn/guide/topics/graphics/hardware-accel</a>).</li></ol><h1 id="Software-Layer-VS-Hardware-Layer"><a href="#Software-Layer-VS-Hardware-Layer" class="headerlink" title="Software Layer VS Hardware Layer"></a>Software Layer VS Hardware Layer</h1><p>Having discussed hardware rendering, let’s talk about Software Layer and Hardware Layer. These two concepts mainly refer to Views and have no direct relationship with whether the App is hardware or software rendered at that moment (but there is dependency, explained later).</p><p>A View’s layerType has three states (English below is official documentation; read English first, then I’ll explain):</p><ol><li>LAYER_TYPE_NONE: Indicates that the view does not have a layer.</li><li>LAYER_TYPE_SOFTWARE: Indicates that the view has a software layer. A software layer is backed by a and causes the view to be rendered using Android’s software rendering pipeline, even if hardware acceleration is enabled.</li><li>LAYER_TYPE_HARDWARE: Indicates that the view has a hardware layer. A hardware layer is backed by a hardware specific texture (generally Frame Buffer Objects or FBO on OpenGL hardware) and causes the view to be rendered using Android’s hardware rendering pipeline, but only if hardware acceleration is turned on for the view hierarchy. When hardware acceleration is turned off, hardware layers behave exactly as LAYER_TYPE_SOFTWARE.</li></ol><h2 id="LAYER-TYPE-NONE"><a href="#LAYER-TYPE-NONE" class="headerlink" title="LAYER_TYPE_NONE"></a>LAYER_TYPE_NONE</h2><p>By default, all Views have this layerType. In this case, this View doesn’t undergo any special processing; it proceeds as usual.</p><h2 id="LAYER-TYPE-SOFTWARE"><a href="#LAYER-TYPE-SOFTWARE" class="headerlink" title="LAYER_TYPE_SOFTWARE"></a>LAYER_TYPE_SOFTWARE</h2><p>Software layerType indicates this View has a software-implemented Layer. How is it software-implemented? Essentially, it converts this View into a Bitmap object under certain conditions.</p><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">android/view/View.java</span><br><span class="line"> <span class="type">Bitmap</span> <span class="variable">bitmap</span> <span class="operator">=</span> createBitmap(mResources.getDisplayMetrics(),</span><br><span class="line">        width, height, quality);</span><br></pre></td></tr></table></figure><h4 id="Software-layer-functions"><a href="#Software-layer-functions" class="headerlink" title="Software layer functions:"></a>Software layer functions:</h4><ol><li>When the application is not using hardware acceleration, a software layer is useful to apply a specific color filter and&#x2F;or blending mode and&#x2F;or translucency to a view and all its children. (When the application is not using hardware acceleration, Software layer can be used to apply specific color filters, blending modes, or translucency to View and all its child Views.)</li><li>When the application is using hardware acceleration, a software layer is useful to render drawing primitives not supported by the hardware accelerated pipeline. It can also be used to cache a complex view tree into a texture and reduce the complexity of drawing operations. For instance, when animating a complex view tree with a translation, a software layer can be used to render the view tree only once. (When the application is using hardware acceleration, software layer can be used to render drawing primitives not supported by hardware accelerated pipeline. It can also cache complex view trees into textures, reducing drawing operation complexity. For example, when animating complex view trees with translation, software layer can render the view tree only once.)</li><li>Software layers should be avoided when the affected view tree updates often. Every update will require to re-render the software layer, which can potentially be slow (particularly when hardware acceleration is turned on since the layer will have to be uploaded into a hardware texture after every update). (When affected view trees update frequently, software layers should be avoided. Each update requires re-rendering the software layer, which can be slow (especially when hardware acceleration is enabled, as the layer must be uploaded to hardware texture after each update).)</li></ol><h2 id="LAYER-TYPE-HARDWARE"><a href="#LAYER-TYPE-HARDWARE" class="headerlink" title="LAYER_TYPE_HARDWARE"></a>LAYER_TYPE_HARDWARE</h2><p>Hardware layerType indicates this View has a hardware-implemented Layer. From the first section, we know “hardware” here refers to GPU, so hardware-implemented Layer, as the name suggests, is implemented via GPU, typically Frame Buffer Objects or FBO (off-screen rendering Buffer) on OpenGL hardware.</p><p>Note: Hardware layerType depends on hardware acceleration. If hardware acceleration is enabled, then FBO or frame buffer exists; if hardware acceleration is disabled, even if you set a View’s LayerType as Hardware Layer, it will be processed as Software Layer.</p><h3 id="Hardware-layer-functions"><a href="#Hardware-layer-functions" class="headerlink" title="Hardware layer functions:"></a>Hardware layer functions:</h3><ol><li>A hardware layer is useful to apply a specific color filter and&#x2F;or blending mode and&#x2F;or translucency to a view and all its children. (Hardware layer can be used to apply specific color filters and&#x2F;or blending modes and&#x2F;or translucency to view and all its child views.)</li><li>A hardware layer can be used to cache a complex view tree into a texture and reduce the complexity of drawing operations. For instance, when animating a complex view tree with a translation, a hardware layer can be used to render the view tree only once. (Hardware layer can be used to cache complex view trees into textures, reducing drawing operation complexity. For example, when animating complex view trees with translation, hardware layer can render the view tree only once; this is the main point.)</li><li>A hardware layer can also be used to increase the rendering quality when rotation transformations are applied on a view. It can also be used to prevent potential clipping issues when applying 3D transforms on a view. (When rotation transformations are applied on a view, hardware layer can also improve rendering quality. It can also prevent potential clipping issues when applying 3D transforms on a view.)</li></ol><p>Setting Hardware Layer helps performance for alpha, translation, scale, rotation property animations (similarly, setting Software Layer has the same effect; detailed explanation in following small example section). Specific usage as follows:</p><p>Before animation starts, set LayerType to LAYER_TYPE_HARDWARE (code from official example):</p><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">view.setLayerType(View.LAYER_TYPE_HARDWARE, <span class="literal">null</span>);</span><br><span class="line">ObjectAnimator.ofFloat(view, <span class="string">&quot;rotationY&quot;</span>, <span class="number">180</span>).start();</span><br></pre></td></tr></table></figure>]]></content>
-      
-      
-      <categories>
-          
-          <category> Android </category>
-          
-      </categories>
-      
-      
-        <tags>
-            
-            <tag> Android </tag>
-            
-            <tag> Systrace </tag>
-            
-            <tag> RenderThread </tag>
             
             <tag> Performance </tag>
             
@@ -2162,6 +2158,39 @@
     
     
     <entry>
+      <title>Detailed Explanation of Hardware Layer in Android</title>
+      <link href="/en/2019/07/27/Android-Hardware-Layer-NEW/"/>
+      <url>/en/2019/07/27/Android-Hardware-Layer-NEW/</url>
+      
+        <content type="html"><![CDATA[<h1 id="Hardware-Acceleration-vs-Software-Acceleration"><a href="#Hardware-Acceleration-vs-Software-Acceleration" class="headerlink" title="Hardware Acceleration vs Software Acceleration"></a>Hardware Acceleration vs Software Acceleration</h1><p>Many people confuse hardware acceleration and Hardware Layer in Android, thinking that enabling hardware acceleration means enabling Hardware Layer. So before discussing Hardware Layer, let’s first talk about hardware acceleration.</p><p>For more detailed articles about hardware acceleration, I recommend these three:</p><ol><li><a href="https://www.mtyun.com/library/hardware-accelerate">Introduction to Android Hardware Acceleration Principles and Implementation</a></li><li><a href="https://juejin.im/post/5a1f7b3e6fb9a0451b0451bb">Understanding Android Hardware Acceleration for Beginners</a></li><li><a href="https://developer.android.google.cn/guide/topics/graphics/hardware-accel">Official Documentation: Hardware acceleration</a></li></ol><p>Hardware acceleration, actually should be called GPU acceleration. The difference between hardware and software acceleration mainly lies in whether graphics drawing is handled by GPU or CPU. If by GPU, it’s considered hardware accelerated drawing; otherwise, it’s software drawing.</p><p>Current Android versions have hardware acceleration enabled by default. If your App doesn’t have special declarations, hardware acceleration is enabled by default.</p><p>The above three articles provide deeper explanations at code and principle levels. Here I’ll demonstrate the difference between App drawing under hardware acceleration and software acceleration from a Systrace perspective.</p><h2 id="Hardware-Accelerated-App-Performance"><a href="#Hardware-Accelerated-App-Performance" class="headerlink" title="Hardware Accelerated App Performance"></a>Hardware Accelerated App Performance</h2><p>Since hardware acceleration is default, let’s take the most common desktop scrolling as an example to see how a hardware accelerated App performs in Systrace.</p><p>Under hardware acceleration, the App has both main thread and render thread; one frame’s drawing is executed cooperatively by both threads.<br><img src="/en/images/15642078929850.jpg"></p><p>Let’s zoom in on Systrace to see how each frame’s main thread and render thread work, and when GPU intervenes to achieve “acceleration.”<br><img src="/en/images/15642079103161.jpg"></p><p>GPU’s actual intervention occurs in some operations within the RenderThread.</p><h2 id="Software-Accelerated-App-Performance"><a href="#Software-Accelerated-App-Performance" class="headerlink" title="Software Accelerated App Performance"></a>Software Accelerated App Performance</h2><p>Correspondingly, let’s find an App for software acceleration demonstration: China UnionPay.</p><p>First, a panoramic view shows that under software rendering, there’s only main thread, no render thread; all rendering work completes on the main thread. Also visible is that under software rendering, each frame’s execution time is very long, exceeding one Vsync cycle, so scrolling feels jerky and uncomfortable. <a href="https://github.com/Gracker/Android_HardwareLayer_Example/blob/master/Systrace/%E8%BD%AF%E4%BB%B6%E6%B8%B2%E6%9F%93%E7%A4%BA%E4%BE%8B-%E4%BA%91%E9%97%AA%E4%BB%98.html">Systrace Download</a><br><img src="/en/images/15642079446767.jpg"></p><p>Let’s zoom in on Systrace to see how each frame’s main thread works.<br><img src="/en/images/15642079799345.jpg"></p><h2 id="Summary"><a href="#Summary" class="headerlink" title="Summary"></a>Summary</h2><p>Through the above comparison and reading the recommended three articles, you should clearly understand the difference between hardware rendering and software rendering. Here’s a summary:</p><ol><li>Under hardware rendering, the app has both main thread and render thread; under software rendering, the app only has main thread, no render thread.</li><li>Under hardware rendering, the app’s final drawing is achieved with GPU assistance; under software rendering, the app’s final drawing is achieved using CPU (calling skia library).</li><li>Under hardware rendering, App performance is superior to software rendering.</li><li>Since some APIs don’t support hardware rendering, only software rendering can be used. When developing Apps, such APIs should be avoided as much as possible (support status can be directly checked in Android official documentation: <a href="https://developer.android.google.cn/guide/topics/graphics/hardware-accel">https://developer.android.google.cn/guide/topics/graphics/hardware-accel</a>).</li></ol><h1 id="Software-Layer-VS-Hardware-Layer"><a href="#Software-Layer-VS-Hardware-Layer" class="headerlink" title="Software Layer VS Hardware Layer"></a>Software Layer VS Hardware Layer</h1><p>Having discussed hardware rendering, let’s talk about Software Layer and Hardware Layer. These two concepts mainly refer to Views and have no direct relationship with whether the App is hardware or software rendered at that moment (but there is dependency, explained later).</p><p>A View’s layerType has three states (English below is official documentation; read English first, then I’ll explain):</p><ol><li>LAYER_TYPE_NONE: Indicates that the view does not have a layer.</li><li>LAYER_TYPE_SOFTWARE: Indicates that the view has a software layer. A software layer is backed by a and causes the view to be rendered using Android’s software rendering pipeline, even if hardware acceleration is enabled.</li><li>LAYER_TYPE_HARDWARE: Indicates that the view has a hardware layer. A hardware layer is backed by a hardware specific texture (generally Frame Buffer Objects or FBO on OpenGL hardware) and causes the view to be rendered using Android’s hardware rendering pipeline, but only if hardware acceleration is turned on for the view hierarchy. When hardware acceleration is turned off, hardware layers behave exactly as LAYER_TYPE_SOFTWARE.</li></ol><h2 id="LAYER-TYPE-NONE"><a href="#LAYER-TYPE-NONE" class="headerlink" title="LAYER_TYPE_NONE"></a>LAYER_TYPE_NONE</h2><p>By default, all Views have this layerType. In this case, this View doesn’t undergo any special processing; it proceeds as usual.</p><h2 id="LAYER-TYPE-SOFTWARE"><a href="#LAYER-TYPE-SOFTWARE" class="headerlink" title="LAYER_TYPE_SOFTWARE"></a>LAYER_TYPE_SOFTWARE</h2><p>Software layerType indicates this View has a software-implemented Layer. How is it software-implemented? Essentially, it converts this View into a Bitmap object under certain conditions.</p><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">android/view/View.java</span><br><span class="line"> <span class="type">Bitmap</span> <span class="variable">bitmap</span> <span class="operator">=</span> createBitmap(mResources.getDisplayMetrics(),</span><br><span class="line">        width, height, quality);</span><br></pre></td></tr></table></figure><h4 id="Software-layer-functions"><a href="#Software-layer-functions" class="headerlink" title="Software layer functions:"></a>Software layer functions:</h4><ol><li>When the application is not using hardware acceleration, a software layer is useful to apply a specific color filter and&#x2F;or blending mode and&#x2F;or translucency to a view and all its children. (When the application is not using hardware acceleration, Software layer can be used to apply specific color filters, blending modes, or translucency to View and all its child Views.)</li><li>When the application is using hardware acceleration, a software layer is useful to render drawing primitives not supported by the hardware accelerated pipeline. It can also be used to cache a complex view tree into a texture and reduce the complexity of drawing operations. For instance, when animating a complex view tree with a translation, a software layer can be used to render the view tree only once. (When the application is using hardware acceleration, software layer can be used to render drawing primitives not supported by hardware accelerated pipeline. It can also cache complex view trees into textures, reducing drawing operation complexity. For example, when animating complex view trees with translation, software layer can render the view tree only once.)</li><li>Software layers should be avoided when the affected view tree updates often. Every update will require to re-render the software layer, which can potentially be slow (particularly when hardware acceleration is turned on since the layer will have to be uploaded into a hardware texture after every update). (When affected view trees update frequently, software layers should be avoided. Each update requires re-rendering the software layer, which can be slow (especially when hardware acceleration is enabled, as the layer must be uploaded to hardware texture after each update).)</li></ol><h2 id="LAYER-TYPE-HARDWARE"><a href="#LAYER-TYPE-HARDWARE" class="headerlink" title="LAYER_TYPE_HARDWARE"></a>LAYER_TYPE_HARDWARE</h2><p>Hardware layerType indicates this View has a hardware-implemented Layer. From the first section, we know “hardware” here refers to GPU, so hardware-implemented Layer, as the name suggests, is implemented via GPU, typically Frame Buffer Objects or FBO (off-screen rendering Buffer) on OpenGL hardware.</p><p>Note: Hardware layerType depends on hardware acceleration. If hardware acceleration is enabled, then FBO or frame buffer exists; if hardware acceleration is disabled, even if you set a View’s LayerType as Hardware Layer, it will be processed as Software Layer.</p><h3 id="Hardware-layer-functions"><a href="#Hardware-layer-functions" class="headerlink" title="Hardware layer functions:"></a>Hardware layer functions:</h3><ol><li>A hardware layer is useful to apply a specific color filter and&#x2F;or blending mode and&#x2F;or translucency to a view and all its children. (Hardware layer can be used to apply specific color filters and&#x2F;or blending modes and&#x2F;or translucency to view and all its child views.)</li><li>A hardware layer can be used to cache a complex view tree into a texture and reduce the complexity of drawing operations. For instance, when animating a complex view tree with a translation, a hardware layer can be used to render the view tree only once. (Hardware layer can be used to cache complex view trees into textures, reducing drawing operation complexity. For example, when animating complex view trees with translation, hardware layer can render the view tree only once; this is the main point.)</li><li>A hardware layer can also be used to increase the rendering quality when rotation transformations are applied on a view. It can also be used to prevent potential clipping issues when applying 3D transforms on a view. (When rotation transformations are applied on a view, hardware layer can also improve rendering quality. It can also prevent potential clipping issues when applying 3D transforms on a view.)</li></ol><p>Setting Hardware Layer helps performance for alpha, translation, scale, rotation property animations (similarly, setting Software Layer has the same effect; detailed explanation in following small example section). Specific usage as follows:</p><p>Before animation starts, set LayerType to LAYER_TYPE_HARDWARE (code from official example):</p><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">view.setLayerType(View.LAYER_TYPE_HARDWARE, <span class="literal">null</span>);</span><br><span class="line">ObjectAnimator.ofFloat(view, <span class="string">&quot;rotationY&quot;</span>, <span class="number">180</span>).start();</span><br></pre></td></tr></table></figure>]]></content>
+      
+      
+      <categories>
+          
+          <category> Android </category>
+          
+      </categories>
+      
+      
+        <tags>
+            
+            <tag> Android </tag>
+            
+            <tag> Systrace </tag>
+            
+            <tag> RenderThread </tag>
+            
+            <tag> Performance </tag>
+            
+            <tag> Tools </tag>
+            
+        </tags>
+      
+    </entry>
+    
+    
+    
+    <entry>
       <title>Android Systrace Basics - Prerequisites for Analyzing Systrace</title>
       <link href="/en/2019/07/23/Android-Systrace-Pre/"/>
       <url>/en/2019/07/23/Android-Systrace-Pre/</url>
@@ -2178,13 +2207,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -2211,13 +2240,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -2244,13 +2273,13 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -2277,13 +2306,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -2310,13 +2339,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Performance </tag>
             
@@ -2343,15 +2372,15 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Jank </tag>
             
-            <tag> Systrace </tag>
+            <tag> Memory </tag>
             
         </tags>
       
@@ -2430,9 +2459,9 @@
             
             <tag> Android </tag>
             
-            <tag> Jank </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> Jank </tag>
             
             <tag> RenderThread </tag>
             
@@ -2461,9 +2490,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Linux </tag>
             
@@ -2492,11 +2521,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -2780,13 +2809,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
+            <tag> Startup </tag>
+            
             <tag> Jank </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Process </tag>
             
@@ -2813,13 +2842,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
+            <tag> Startup </tag>
+            
             <tag> Jank </tag>
+            
+            <tag> Memory </tag>
             
             <tag> RenderThread </tag>
             
@@ -2846,11 +2875,11 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> RenderThread </tag>
             
@@ -2879,13 +2908,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
+            <tag> Startup </tag>
+            
             <tag> Jank </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -2912,13 +2941,13 @@
       
         <tags>
             
-            <tag> Yearly Recommendations </tag>
+            <tag> Android </tag>
             
             <tag> Startup </tag>
             
-            <tag> Memory </tag>
+            <tag> Yearly Recommendations </tag>
             
-            <tag> Android </tag>
+            <tag> Memory </tag>
             
         </tags>
       
@@ -2943,11 +2972,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Annual Recommendations </tag>
             
@@ -3053,11 +3082,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -3084,9 +3113,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> DelayLoad </tag>
             
@@ -3115,9 +3144,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> RenderThread </tag>
             
@@ -3148,11 +3177,11 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
             <tag> Systrace </tag>
+            
+            <tag> Startup </tag>
             
             <tag> RenderThread </tag>
             
@@ -3210,11 +3239,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3243,13 +3272,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
+            <tag> Startup </tag>
+            
             <tag> Jank </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3276,11 +3305,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3309,9 +3338,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3342,9 +3371,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Java </tag>
             
@@ -3402,11 +3431,11 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Jank </tag>
+            
+            <tag> Memory </tag>
             
             <tag> RenderThread </tag>
             
@@ -3435,11 +3464,11 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Jank </tag>
+            
+            <tag> Memory </tag>
             
             <tag> RenderThread </tag>
             
@@ -3468,9 +3497,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> RenderThread </tag>
             
@@ -3501,11 +3530,11 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
             
             <tag> Jank </tag>
+            
+            <tag> Memory </tag>
             
             <tag> RenderThread </tag>
             
@@ -3534,9 +3563,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> RenderThread </tag>
             
@@ -3567,15 +3596,15 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
-            <tag> Java </tag>
-            
             <tag> Linux </tag>
+            
+            <tag> Java </tag>
             
         </tags>
       
@@ -3600,9 +3629,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3633,9 +3662,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3666,9 +3695,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3724,9 +3753,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
         </tags>
       
@@ -3882,9 +3911,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
             <tag> Performance </tag>
             
@@ -3940,9 +3969,9 @@
       
         <tags>
             
-            <tag> Memory </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Memory </tag>
             
         </tags>
       
@@ -3967,11 +3996,11 @@
       
         <tags>
             
+            <tag> Android </tag>
+            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
-            
-            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -4025,13 +4054,13 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
             
-            <tag> Java </tag>
+            <tag> Startup </tag>
             
             <tag> Linux </tag>
+            
+            <tag> Java </tag>
             
         </tags>
       
@@ -4056,9 +4085,9 @@
       
         <tags>
             
-            <tag> Startup </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Startup </tag>
             
             <tag> Java </tag>
             

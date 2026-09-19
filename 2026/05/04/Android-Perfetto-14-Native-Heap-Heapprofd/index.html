@@ -18,8 +18,10 @@
 <meta property="og:site_name" content="Android Performance">
 <meta property="og:description" content="内存问题最麻烦的地方在于：数字涨了，不代表马上能知道谁在涨。dumpsys meminfo 能告诉你 RSS&#x2F;PSS，Java heap dump 能告诉你对象保留关系，但 JNI&#x2F;C++、Skia&#x2F;Bitmap 的 CPU 侧分配、播放器里的 native wrapper 这些问题，经常还需要知道“哪个调用栈发起了 malloc&#x2F;new”。 这一篇讲 he">
 <meta property="og:locale">
+<meta property="og:image" content="https://androidperformance.com/images/Perfetto-11-18-Diagrams/04-heapprofd-flow.png">
+<meta property="og:image" content="https://androidperformance.com/images/Perfetto-11-18-Diagrams/05-heap-profile-reading.png">
 <meta property="article:published_time" content="2026-05-04T02:14:00.000Z">
-<meta property="article:modified_time" content="2026-07-18T14:50:46.139Z">
+<meta property="article:modified_time" content="2026-09-19T16:49:52.594Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Memory">
 <meta property="article:tag" content="Android">
@@ -27,12 +29,13 @@
 <meta property="article:tag" content="Performance">
 <meta property="article:tag" content="heapprofd">
 <meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://androidperformance.com/images/Perfetto-11-18-Diagrams/04-heapprofd-flow.png">
                             <meta http-equiv="Cache-control" content="no-cache">
                             <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
                             <link rel="icon" href="/assets/favicon.ico">
                                 <title>
                                   Android Perfetto 系列 14：heapprofd 与内存 Profiling · Android Performance
-                                </title><meta name="robots" content="noindex">
+                                </title>
                                 
 <link rel="canonical" href="https://androidperformance.com/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">
                                   <style type="text/css">
@@ -261,7 +264,7 @@ loading="lazy"             decoding="async"
 
                 <!-- 文章字数统计 -->
                     <div class="post-intro-read">
-                        <span>Word count: <span class="post-count word-count">5.5k</span>Reading time: <span class="post-count reading-time">23 min</span></span>
+                        <span>Word count: <span class="post-count word-count">6.4k</span>Reading time: <span class="post-count reading-time">27 min</span></span>
                     </div>
                 <div class="post-intro-meta">
                     <!-- 撰写日期 -->
@@ -333,6 +336,30 @@ loading="lazy"             decoding="async"
 <p>下文的顺序是：什么时候上 heapprofd、怎么抓、UI 和 SQL 怎么读、采样间隔和符号化怎么理解，最后是发布报告前的检查清单。</p>
 <span id="more"></span>
 
+<p><a id="series"></a></p>
+<h2 id="Perfetto-系列文章"><a href="#Perfetto-系列文章" class="headerlink" title="Perfetto 系列文章"></a>Perfetto 系列文章</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/03/27/Android-Perfetto-101/">Android Perfetto 系列目录</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto 系列 1：Perfetto 工具简介</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto 系列 2：Perfetto Trace 抓取</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto 系列 3：熟悉 Perfetto View</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto 系列 4：使用命令行在本地打开超大 Trace</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto 系列 5：Android App 基于 Choreographer 的渲染流程</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7：MainThread 和 RenderThread 解读</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 9：CPU 信息解读</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto 系列 10：Binder 调度与锁竞争</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2026/05/04/Android-Perfetto-11-PerfettoSQL-TraceProcessor-Automation/">Android Perfetto 系列 11：PerfettoSQL、Trace Processor 与回归检测</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">Android Perfetto 系列 12：Trace 数据流与丢失排查</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto 系列 13：Perfetto SDK、Track Event 与 App 现场 Trace</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto 系列 14：heapprofd 与内存 Profiling</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto 系列 15：Boot Trace、长时间现场 Trace 与偶发问题抓取</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto 系列 16：GPU、Power Counters 与硬件瓶颈分析</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2026/05/04/Android-Perfetto-17-Engineering-Domain-And-Platform-Tracing/">Android Perfetto 系列 17：专项场景自动化、问题清单与平台体系</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto 系列 18：响应速度实战，从输入事件到首帧反馈</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV1oi82efE4D/?vd_source=0c6d2191e785de0a36dc21a9da7e664e">视频(B站) - Android Perfetto 基础和案例分享</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV17A6bBLECu/">视频(B站) - Android Perfetto 分享 - 出图类型分享：AOSP、WebView、Flutter + OEM 系统优化分享</a></li>
+</ol>
 <h2 id="内存问题要分几张账"><a href="#内存问题要分几张账" class="headerlink" title="内存问题要分几张账"></a>内存问题要分几张账</h2><p>开始抓 heapprofd 前，先把内存数据分成几类。很多误判都来自把它们混在一起。</p>
 <table>
 <thead>
@@ -409,8 +436,8 @@ loading="lazy"             decoding="async"
 <p>allocator 线程缓存、碎片、ZRAM、page 粒度都会让 RSS 和 heapprofd 对不上。看到 RSS 高而 heapprofd 不高时，要先考虑这些边界，不要立刻判成 heapprofd 抓错了。</p>
 <p>反过来也一样：heapprofd 里某条调用栈累计分配很高，不代表进程 RSS 会同幅度上涨。它可能是分配 churn：频繁申请、很快释放，<code>Total malloc size</code> 高，但 <code>Unreleased malloc size</code> 不高。内存问题要先分清“占住不放”和“反复制造临时对象”。</p>
 <p>怀疑 mmap&#x2F;native heap 之外的大块分配时，改查 smaps 的 <code>Private_Dirty/Rss/Pss</code>、maps 区间、Android 14+ syscall <code>sys_mmap/sys_munmap/sys_madvise</code>，或者 perf&#x2F;simpleperf 的 mmap syscall callstack。heapprofd 只用于确认 malloc wrapper 是否也在贡献。</p>
-<!-- DIAGRAM_SLOT: heapprofd 将目标进程 allocation sample 写入 trace，并在 Perfetto UI 形成 Heap Profile diamond 的示意图 -->
-
+<p><img src="/images/Perfetto-11-18-Diagrams/04-heapprofd-flow.png" alt="从 native 分配采样到调用栈"></p>
+<p><em>原理示意：heapprofd 采样 native 分配并记录调用栈；Heap Profile 不是 RSS 账本。</em></p>
 <h2 id="什么时候用-heapprofd"><a href="#什么时候用-heapprofd" class="headerlink" title="什么时候用 heapprofd"></a>什么时候用 heapprofd</h2><p>Java heap dump 看不到增长来源时，先看增长落在哪张账。只有 native heap 或 native wrapper 明显可疑时，再进入 heapprofd。</p>
 <p>heapprofd 适合这些问题：</p>
 <ul>
@@ -441,7 +468,7 @@ loading="lazy"             decoding="async"
 <p>Android 15（API 35）起，App 可以通过 <code>ProfilingManager</code> 请求 heap profile；Android 16 的 Profiling module 面向 public devices field profiling，但结果会脱敏、只包含请求进程相关信息，并且受系统限流，不保证每次请求都会满足。线上方案要把它和 adb&#x2F;<code>profileable</code> 的实验室路径分开设计。</p>
 <h2 id="和系统-Trace-合在一起抓"><a href="#和系统-Trace-合在一起抓" class="headerlink" title="和系统 Trace 合在一起抓"></a>和系统 Trace 合在一起抓</h2><p>脚本适合快速定位，手写 TraceConfig 适合把 heapprofd 和系统数据源合并。先看最小 heapprofd 配置：<code>android.heapprofd</code>、<code>process_cmdline</code>、采样间隔、continuous dump、shared memory 和阻塞策略。</p>
 <p>系统上下文是增强项：<code>process_stats</code> 看 RSS&#x2F;PSS 趋势，<code>sys_stats</code> 看系统内存压力，<code>ftrace</code> 关联线程和时间窗，<code>track_event</code> 关联业务动作。allocation-heavy 场景里，heapprofd + ftrace 会互相增加扰动；heap+system-context preset 只适合短窗口实验室复现，并且要记录 ftrace&#x2F;heapprofd stats、目标场景耗时是否被 profiler 改变。</p>
-<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br></pre></td><td class="code"><pre><span class="line">duration_ms: <span class="number">15000</span></span><br><span class="line"></span><br><span class="line">buffers &#123; size_kb: <span class="number">131072</span> fill_policy: DISCARD &#125; # <span class="number">0</span>: heapprofd</span><br><span class="line">buffers &#123; size_kb: <span class="number">32768</span>  fill_policy: RING_BUFFER &#125; # <span class="number">1</span>: system context</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    process_stats_config &#123;</span><br><span class="line">      scan_all_processes_on_start: <span class="literal">true</span></span><br><span class="line">      proc_stats_poll_ms: <span class="number">1000</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.sys_stats&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    sys_stats_config &#123;</span><br><span class="line">      meminfo_period_ms: <span class="number">1000</span></span><br><span class="line">      meminfo_counters: MEMINFO_MEM_AVAILABLE</span><br><span class="line">      meminfo_counters: MEMINFO_CACHED</span><br><span class="line">      meminfo_counters: MEMINFO_SWAP_FREE</span><br><span class="line">      meminfo_counters: MEMINFO_ZRAM</span><br><span class="line">      vmstat_period_ms: <span class="number">1000</span></span><br><span class="line">      vmstat_counters: VMSTAT_PGFAULT</span><br><span class="line">      vmstat_counters: VMSTAT_PGMAJFAULT</span><br><span class="line">      vmstat_counters: VMSTAT_OOM_KILL</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;am&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;view&quot;</span></span><br><span class="line">      atrace_apps: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;track_event&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    track_event_config &#123;</span><br><span class="line">      enabled_categories: <span class="string">&quot;memory&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;app&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">  producer_name_filter: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;android.heapprofd&quot;</span></span><br><span class="line">    target_buffer: <span class="number">0</span></span><br><span class="line">    heapprofd_config &#123;</span><br><span class="line">      sampling_interval_bytes: <span class="number">4096</span></span><br><span class="line">      process_cmdline: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">      continuous_dump_config &#123;</span><br><span class="line">        dump_phase_ms: <span class="number">5000</span></span><br><span class="line">        dump_interval_ms: <span class="number">5000</span></span><br><span class="line">      &#125;</span><br><span class="line">      shmem_size_bytes: <span class="number">8388608</span></span><br><span class="line">      block_client: <span class="literal">false</span></span><br><span class="line">      # Android <span class="number">11</span>+ / matching Perfetto builds only.</span><br><span class="line">      max_heapprofd_memory_kb: <span class="number">262144</span></span><br><span class="line">      max_heapprofd_cpu_secs: <span class="number">30</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br></pre></td><td class="code"><pre><span class="line">duration_ms: <span class="number">15000</span></span><br><span class="line"></span><br><span class="line">buffers &#123; size_kb: <span class="number">131072</span> fill_policy: DISCARD &#125; # <span class="number">0</span>: heapprofd</span><br><span class="line">buffers &#123; size_kb: <span class="number">32768</span>  fill_policy: RING_BUFFER &#125; # <span class="number">1</span>: system context</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    process_stats_config &#123;</span><br><span class="line">      scan_all_processes_on_start: <span class="literal">true</span></span><br><span class="line">      proc_stats_poll_ms: <span class="number">1000</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.sys_stats&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    sys_stats_config &#123;</span><br><span class="line">      meminfo_period_ms: <span class="number">1000</span></span><br><span class="line">      meminfo_counters: MEMINFO_MEM_AVAILABLE</span><br><span class="line">      meminfo_counters: MEMINFO_CACHED</span><br><span class="line">      meminfo_counters: MEMINFO_SWAP_FREE</span><br><span class="line">      meminfo_counters: MEMINFO_ZRAM</span><br><span class="line">      vmstat_period_ms: <span class="number">1000</span></span><br><span class="line">      vmstat_counters: VMSTAT_PGFAULT</span><br><span class="line">      vmstat_counters: VMSTAT_PGMAJFAULT</span><br><span class="line">      vmstat_counters: VMSTAT_OOM_KILL</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;am&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;view&quot;</span></span><br><span class="line">      atrace_apps: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;track_event&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    track_event_config &#123;</span><br><span class="line">      disabled_categories: <span class="string">&quot;*&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;memory&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;app&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">  producer_name_filter: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;android.heapprofd&quot;</span></span><br><span class="line">    target_buffer: <span class="number">0</span></span><br><span class="line">    heapprofd_config &#123;</span><br><span class="line">      sampling_interval_bytes: <span class="number">4096</span></span><br><span class="line">      process_cmdline: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">      continuous_dump_config &#123;</span><br><span class="line">        dump_phase_ms: <span class="number">5000</span></span><br><span class="line">        dump_interval_ms: <span class="number">5000</span></span><br><span class="line">      &#125;</span><br><span class="line">      shmem_size_bytes: <span class="number">8388608</span></span><br><span class="line">      block_client: <span class="literal">false</span></span><br><span class="line">      # Android <span class="number">11</span>+ / matching Perfetto builds only.</span><br><span class="line">      max_heapprofd_memory_kb: <span class="number">262144</span></span><br><span class="line">      max_heapprofd_cpu_secs: <span class="number">30</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
 <p>这仍然是 native heap 模板，不是图形内存模板。排查 GraphicBuffer、dma-buf、GPU texture、Surface buffer 时，要额外对照 dmabuf、GPU&#x2F;graphics 计数、<code>dumpsys meminfo</code> Graphics&#x2F;GL、SurfaceFlinger layer &#x2F; buffer 信息；heapprofd 只能回答 malloc&#x2F;new 侧有没有对应贡献。</p>
 <p>heapprofd buffer 使用 <code>DISCARD</code> 时，buffer 必须足够大。heap profile 常在 dump 点集中写入，DISCARD 满后会丢新数据，对末尾 diamond 和未释放大头很危险。抓完必须检查 <code>traced_buf_chunks_discarded</code>、<code>heapprofd_*</code> stats；长 Trace 或写入量不确定时，优先给 heapprofd 独立大 buffer，必要时改 RING 并在报告里说明旧 dump 可能被覆盖。</p>
@@ -451,7 +478,7 @@ loading="lazy"             decoding="async"
 <p>手写 <code>HeapprofdConfig</code> 和 <code>tools/heap_profile</code> 的默认行为不完全一样。<code>block_client</code> 可以在 heapprofd shared memory 满时阻塞目标进程，换取数据完整性；脚本的 <code>--block-client</code> 是默认行为，但手写配置需要自己决定。</p>
 <p>实验室 leak 复现可以设 <code>block_client: true</code> 并配 <code>block_client_timeout_us</code>，用目标进程 malloc 路径的阻塞换完整性；交互性能分析不要默认开，因为它可能反向影响 jank&#x2F;latency。交互场景通常用 <code>block_client: false</code>，再通过更高采样间隔、更大 <code>shmem_size_bytes</code> 和 stats 检查接受不完整风险：必须检查 <code>heapprofd_buffer_overran</code>、<code>heapprofd_non_finalized_profile</code>、<code>heapprofd_last_profile_timestamp</code> 是否覆盖目标窗口。</p>
 <p>把 heapprofd 放进系统 Trace 时，建议同时保留少量业务 marker。App 内用 <code>android.os.Trace</code> &#x2F; AndroidX Trace 会落到 atrace；Perfetto SDK Track Event 需要单独启用 <code>track_event</code> data source。</p>
-<p>比如播放器场景至少要有 <code>operation_start</code>、<code>steady_state</code>、<code>operation_end</code>、<code>release_done/gc_idle_done</code> 四类 marker。没有 release marker 时，结论只能写“操作后保留增加”，不能写“泄漏”。<code>android.log</code> 数据源只支持 userdebug；user build 上不要把 logcat 当成这份配置默认能抓到的证据。</p>
+<p>比如播放器场景至少要有 <code>operation_start</code>、<code>steady_state</code>、<code>operation_end</code>、<code>release_done/gc_idle_done</code> 四类 marker。没有 release marker 时，结论只能写“操作后保留增加”，不能写“泄漏”。官方文档将 <code>android.log</code> 支持范围写为 userdebug；已 root 且 logd&#x2F;SELinux 权限允许的 user 构建也可能采到，但不能仅凭 <code>adb root</code> 推广到所有设备。普通生产 user build 上不要把 logcat 当成这份配置默认能抓到的证据。</p>
 <h2 id="UI-怎么看-Heap-Profile"><a href="#UI-怎么看-Heap-Profile" class="headerlink" title="UI 怎么看 Heap Profile"></a>UI 怎么看 Heap Profile</h2><p>导入 trace 后，在目标进程下找 <code>Heap Profile</code> 轨道。轨道上的 diamond 代表一次 dump。点击 diamond 后，底部会展示 flamegraph。</p>
 <p>continuous dump 的每个 diamond 都是从记录开始到该时间点的累计结果。先看未释放量判断占住不放，再看总分配量判断 churn。读图时按这个顺序走：</p>
 <ol>
@@ -461,8 +488,8 @@ loading="lazy"             decoding="async"
 <li>先找 allocator &#x2F; ART glue 之上的第一个 App、SDK 或业务帧。</li>
 <li>回到时间轴，关联触发操作、业务 Track Event、线程运行。</li>
 </ol>
-<!-- DIAGRAM_SLOT: Heap Profile diamond、flamegraph、Unreleased Malloc 的标注截图占位 -->
-
+<p><img src="/images/Perfetto-11-18-Diagrams/05-heap-profile-reading.png" alt="用连续 dump 观察保留变化"></p>
+<p><em>示意图（假设数据）：连续 dump 的未释放量为 2→5→4 MiB；火焰图用于查看调用栈贡献，不能凭单点判泄漏。</em></p>
 <p>不要用单个 diamond 判泄漏。泄漏判断至少要看“操作前、操作后、回收后”几个点。如果操作后上涨，回收后仍然不降，再看未释放调用栈。</p>
 <p>实验室里可以用 <code>adb shell killall -USR1 heapprofd</code> 额外触发一次 snapshot。比如“进入页面前、页面稳定后、退出页面并完成 release&#x2F;close&#x2F;析构后”各触发一次，比只靠固定 5 秒间隔更容易把业务动作和 diamond 对上。</p>
 <p>只有当 native backing 由 Java wrapper、<code>NativeAllocationRegistry</code> 或 Cleaner&#x2F;finalizer 持有时，才需要把“等待 idle、finalizer、GC 完成”算进这个状态点。allocator cache 和碎片还可能导致 heapprofd 数字下降了、RSS 却不立刻下降。缓存不是“不释放”的委婉说法，必须有容量上限、命中&#x2F;复用证据、退出或压力下回收策略；否则只能写“疑似长期保留”。</p>
@@ -498,14 +525,16 @@ loading="lazy"             decoding="async"
 <p>单目标 profile 快速读图时，优先用官方标准库里的 summary tree。它会沿着 <code>stack_profile_callsite.parent_id</code> 聚合整条调用栈，结果更接近 flamegraph 里的 cumulative view：</p>
 <figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.memory.heap_profile.summary_tree;</span><br><span class="line"></span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  name,</span><br><span class="line">  mapping_name <span class="keyword">AS</span> map_name,</span><br><span class="line">  cumulative_size <span class="operator">/</span> <span class="number">1024.0</span> <span class="operator">/</span> <span class="number">1024.0</span> <span class="keyword">AS</span> unreleased_mb</span><br><span class="line"><span class="keyword">FROM</span> android_heap_profile_summary_tree</span><br><span class="line"><span class="keyword">WHERE</span> cumulative_size <span class="operator">&gt;</span> <span class="number">0</span></span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cumulative_size <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">50</span>;</span><br></pre></td></tr></table></figure>
 
-<p>summary tree 适合单目标 profile 的快速读图。它没有进程列，不要直接用于多进程回归统计。多进程 App、<code>:remote</code> 进程或同名进程重启时，要回到原始表按 <code>upid</code>、PID、进程名和 diamond 时间点过滤，避免把别的进程归到目标进程。</p>
-<p>如果要按进程、diamond 时间点和 leaf frame 做粗查，再回到原始表。这条 SQL 只看末尾一个 dump 时间点，重点看 <code>SUM(a.size)</code>：allocation 是正数，free 是负数，求和后更接近该 diamond 上的 <code>Unreleased malloc size</code>。它不用于最终归因，最终报告必须回到 summary tree 或 flamegraph 取完整调用栈。</p>
-<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> target_process <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> upid, pid, name, cmdline</span><br><span class="line">  <span class="keyword">FROM</span> process</span><br><span class="line">  <span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">  <span class="keyword">ORDER</span> <span class="keyword">BY</span> start_ts <span class="keyword">DESC</span></span><br><span class="line">  LIMIT <span class="number">1</span></span><br><span class="line">),</span><br><span class="line">target_dump <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> <span class="built_in">MAX</span>(ts) <span class="keyword">AS</span> dump_ts</span><br><span class="line">  <span class="keyword">FROM</span> heap_profile_allocation</span><br><span class="line">  <span class="keyword">WHERE</span> upid <span class="operator">=</span> (<span class="keyword">SELECT</span> upid <span class="keyword">FROM</span> target_process)</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  a.ts <span class="keyword">AS</span> dump_ts,</span><br><span class="line">  p.upid,</span><br><span class="line">  p.pid,</span><br><span class="line">  p.name <span class="keyword">AS</span> process_name,</span><br><span class="line">  p.cmdline <span class="keyword">AS</span> process_cmdline,</span><br><span class="line">  a.callsite_id,</span><br><span class="line">  f.name <span class="keyword">AS</span> frame_name,</span><br><span class="line">  m.name <span class="keyword">AS</span> mapping_name,</span><br><span class="line">  <span class="built_in">SUM</span>(a.size) <span class="operator">/</span> <span class="number">1024.0</span> <span class="operator">/</span> <span class="number">1024.0</span> <span class="keyword">AS</span> leaf_unreleased_mb,</span><br><span class="line">  <span class="built_in">SUM</span>(a.count) <span class="keyword">AS</span> unreleased_count</span><br><span class="line"><span class="keyword">FROM</span> heap_profile_allocation a</span><br><span class="line"><span class="keyword">JOIN</span> target_process p <span class="keyword">USING</span> (upid)</span><br><span class="line"><span class="keyword">JOIN</span> target_dump d <span class="keyword">ON</span> a.ts <span class="operator">=</span> d.dump_ts</span><br><span class="line"><span class="keyword">JOIN</span> stack_profile_callsite c <span class="keyword">ON</span> a.callsite_id <span class="operator">=</span> c.id</span><br><span class="line"><span class="keyword">JOIN</span> stack_profile_frame f <span class="keyword">ON</span> c.frame_id <span class="operator">=</span> f.id</span><br><span class="line"><span class="keyword">JOIN</span> stack_profile_mapping m <span class="keyword">ON</span> f.mapping <span class="operator">=</span> m.id</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> a.ts, p.upid, p.pid, p.name, p.cmdline, a.callsite_id, f.name, m.name</span><br><span class="line"><span class="keyword">HAVING</span> leaf_unreleased_mb <span class="operator">&gt;</span> <span class="number">0</span></span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> dump_ts <span class="keyword">DESC</span>, leaf_unreleased_mb <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">50</span>;</span><br></pre></td></tr></table></figure>
+<p>summary tree 汇总整份 Trace 中所有进程、heap 和时间的记录；本例只适合仅采单进程 native heap 时查看末尾累计状态，不是任意 diamond 的快照。它没有进程列，不要直接用于多进程回归统计。多进程 App、<code>:remote</code> 进程或同名进程重启时，要回到原始表按 <code>upid</code>、PID、进程名和 diamond 时间点过滤，避免把别的进程归到目标进程。</p>
+<p>如果要按进程、diamond 时间点和 leaf frame 做粗查，再回到原始表。这条 SQL 计算截至最后一个 dump 结束时间点的保留量，重点看 <code>SUM(a.size)</code>：allocation 是正数，free 是负数，求和后更接近该 diamond 上的 <code>Unreleased malloc size</code>。它不用于最终归因，最终报告必须回到完整调用栈。这里的 <code>heap_profile_allocation</code> 存储每次 dump 相对上次的增量，不是每个 dump 的完整快照；必须累加 <code>ts &lt;= dump_ts</code>。以下只统计 <code>libc.malloc</code>，避免把不会记录 free 的 <code>com.android.art</code> 混成未释放 native 内存。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> target_process <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> upid, pid, name, cmdline</span><br><span class="line">  <span class="keyword">FROM</span> process</span><br><span class="line">  <span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">  <span class="keyword">ORDER</span> <span class="keyword">BY</span> start_ts <span class="keyword">DESC</span></span><br><span class="line">  LIMIT <span class="number">1</span></span><br><span class="line">),</span><br><span class="line">target_dump <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> <span class="built_in">MAX</span>(ts_end) <span class="keyword">AS</span> dump_ts</span><br><span class="line">  <span class="keyword">FROM</span> heap_profile</span><br><span class="line">  <span class="keyword">WHERE</span> upid <span class="operator">=</span> (<span class="keyword">SELECT</span> upid <span class="keyword">FROM</span> target_process)</span><br><span class="line">    <span class="keyword">AND</span> heap_name <span class="operator">=</span> <span class="string">&#x27;libc.malloc&#x27;</span></span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  d.dump_ts,</span><br><span class="line">  p.upid,</span><br><span class="line">  p.pid,</span><br><span class="line">  p.name <span class="keyword">AS</span> process_name,</span><br><span class="line">  p.cmdline <span class="keyword">AS</span> process_cmdline,</span><br><span class="line">  a.callsite_id,</span><br><span class="line">  f.name <span class="keyword">AS</span> frame_name,</span><br><span class="line">  m.name <span class="keyword">AS</span> mapping_name,</span><br><span class="line">  <span class="built_in">SUM</span>(a.size) <span class="operator">/</span> <span class="number">1024.0</span> <span class="operator">/</span> <span class="number">1024.0</span> <span class="keyword">AS</span> leaf_unreleased_mb,</span><br><span class="line">  <span class="built_in">SUM</span>(a.count) <span class="keyword">AS</span> unreleased_count</span><br><span class="line"><span class="keyword">FROM</span> heap_profile_allocation a</span><br><span class="line"><span class="keyword">JOIN</span> target_process p <span class="keyword">USING</span> (upid)</span><br><span class="line"><span class="keyword">JOIN</span> target_dump d <span class="keyword">ON</span> a.ts <span class="operator">&lt;=</span> d.dump_ts</span><br><span class="line"><span class="keyword">JOIN</span> stack_profile_callsite c <span class="keyword">ON</span> a.callsite_id <span class="operator">=</span> c.id</span><br><span class="line"><span class="keyword">JOIN</span> stack_profile_frame f <span class="keyword">ON</span> c.frame_id <span class="operator">=</span> f.id</span><br><span class="line"><span class="keyword">JOIN</span> stack_profile_mapping m <span class="keyword">ON</span> f.mapping <span class="operator">=</span> m.id</span><br><span class="line"><span class="keyword">WHERE</span> a.heap_name <span class="operator">=</span> <span class="string">&#x27;libc.malloc&#x27;</span></span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> d.dump_ts, p.upid, p.pid, p.name, p.cmdline, a.callsite_id, f.name, m.name</span><br><span class="line"><span class="keyword">HAVING</span> leaf_unreleased_mb <span class="operator">&gt;</span> <span class="number">0</span></span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> dump_ts <span class="keyword">DESC</span>, leaf_unreleased_mb <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">50</span>;</span><br></pre></td></tr></table></figure>
 
 <p>SQL 只能帮你快速找大头。原始表查询把调用栈拆成了 frame 行，容易只看到 <code>malloc</code>、<code>realloc</code> 这类 leaf frame；summary tree 和 UI flamegraph 更适合读完整归因。写稳定脚本前，先用 <code>PRAGMA table_info(heap_profile_allocation);</code> 确认字段，避免不同 Perfetto 版本导致查询失效。</p>
+<p>未改变分配量的 dump 可能没有新的 allocation 行，因此用 <code>heap_profile.ts_end</code> 选 dump，再累计 allocation 表。使用较旧 Trace Processor 时先确认 <code>heap_profile</code> schema；没有该表就从 UI 确认 dump 时间，不能退回用 allocation 的 <code>MAX(ts)</code> 假装最终 dump 已成功。还要核对 heapprofd stats。被覆盖的历史增量也不能靠累加恢复。</p>
 <p>泄漏判断要做三点对比：操作前、操作后、释放后。这段是报告查询骨架，<code>baseline_dump_ts</code>、<code>after_action_dump_ts</code>、<code>after_release_dump_ts</code> 可以来自业务 marker 最近的 heap dump：</p>
-<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> target_process <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> upid, pid, name</span><br><span class="line">  <span class="keyword">FROM</span> process</span><br><span class="line">  <span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">  <span class="keyword">ORDER</span> <span class="keyword">BY</span> start_ts <span class="keyword">DESC</span></span><br><span class="line">  LIMIT <span class="number">1</span></span><br><span class="line">),</span><br><span class="line">selected_dumps(label, dump_ts) <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">VALUES</span></span><br><span class="line">    (<span class="string">&#x27;baseline&#x27;</span>, <span class="number">100000000000</span>),</span><br><span class="line">    (<span class="string">&#x27;after_action&#x27;</span>, <span class="number">120000000000</span>),</span><br><span class="line">    (<span class="string">&#x27;after_release&#x27;</span>, <span class="number">150000000000</span>)</span><br><span class="line">),</span><br><span class="line">alloc_by_dump <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span></span><br><span class="line">    d.label,</span><br><span class="line">    a.callsite_id,</span><br><span class="line">    <span class="built_in">SUM</span>(a.size) <span class="operator">/</span> <span class="number">1024.0</span> <span class="operator">/</span> <span class="number">1024.0</span> <span class="keyword">AS</span> unreleased_mb,</span><br><span class="line">    <span class="built_in">SUM</span>(a.count) <span class="keyword">AS</span> unreleased_count</span><br><span class="line">  <span class="keyword">FROM</span> heap_profile_allocation a</span><br><span class="line">  <span class="keyword">JOIN</span> selected_dumps d <span class="keyword">ON</span> a.ts <span class="operator">=</span> d.dump_ts</span><br><span class="line">  <span class="keyword">WHERE</span> a.upid <span class="operator">=</span> (<span class="keyword">SELECT</span> upid <span class="keyword">FROM</span> target_process)</span><br><span class="line">  <span class="keyword">GROUP</span> <span class="keyword">BY</span> d.label, a.callsite_id</span><br><span class="line">),</span><br><span class="line">pivot <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span></span><br><span class="line">    callsite_id,</span><br><span class="line">    <span class="built_in">SUM</span>(<span class="keyword">CASE</span> <span class="keyword">WHEN</span> label <span class="operator">=</span> <span class="string">&#x27;baseline&#x27;</span> <span class="keyword">THEN</span> unreleased_mb <span class="keyword">ELSE</span> <span class="number">0</span> <span class="keyword">END</span>) <span class="keyword">AS</span> baseline_unreleased_mb,</span><br><span class="line">    <span class="built_in">SUM</span>(<span class="keyword">CASE</span> <span class="keyword">WHEN</span> label <span class="operator">=</span> <span class="string">&#x27;after_action&#x27;</span> <span class="keyword">THEN</span> unreleased_mb <span class="keyword">ELSE</span> <span class="number">0</span> <span class="keyword">END</span>) <span class="keyword">AS</span> after_action_unreleased_mb,</span><br><span class="line">    <span class="built_in">SUM</span>(<span class="keyword">CASE</span> <span class="keyword">WHEN</span> label <span class="operator">=</span> <span class="string">&#x27;after_release&#x27;</span> <span class="keyword">THEN</span> unreleased_mb <span class="keyword">ELSE</span> <span class="number">0</span> <span class="keyword">END</span>) <span class="keyword">AS</span> after_release_unreleased_mb</span><br><span class="line">  <span class="keyword">FROM</span> alloc_by_dump</span><br><span class="line">  <span class="keyword">GROUP</span> <span class="keyword">BY</span> callsite_id</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  callsite_id,</span><br><span class="line">  baseline_unreleased_mb,</span><br><span class="line">  after_action_unreleased_mb,</span><br><span class="line">  after_release_unreleased_mb,</span><br><span class="line">  after_action_unreleased_mb <span class="operator">-</span> baseline_unreleased_mb <span class="keyword">AS</span> action_delta_mb,</span><br><span class="line">  after_release_unreleased_mb <span class="operator">-</span> baseline_unreleased_mb <span class="keyword">AS</span> retained_delta_mb,</span><br><span class="line">  after_action_unreleased_mb <span class="operator">-</span> after_release_unreleased_mb <span class="keyword">AS</span> released_delta_mb,</span><br><span class="line">  <span class="keyword">CASE</span></span><br><span class="line">    <span class="keyword">WHEN</span> after_release_unreleased_mb <span class="operator">-</span> baseline_unreleased_mb <span class="operator">&gt;</span> <span class="number">1</span> <span class="keyword">THEN</span> <span class="string">&#x27;leak_candidate&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> after_action_unreleased_mb <span class="operator">&gt;</span> baseline_unreleased_mb</span><br><span class="line">      <span class="keyword">AND</span> after_release_unreleased_mb <span class="operator">&lt;=</span> baseline_unreleased_mb <span class="keyword">THEN</span> <span class="string">&#x27;peak&#x27;</span></span><br><span class="line">    <span class="keyword">ELSE</span> <span class="string">&#x27;unknown&#x27;</span></span><br><span class="line">  <span class="keyword">END</span> <span class="keyword">AS</span> conclusion_type</span><br><span class="line"><span class="keyword">FROM</span> pivot</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> retained_delta_mb <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">50</span>;</span><br></pre></td></tr></table></figure>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> target_process <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> upid, pid, name</span><br><span class="line">  <span class="keyword">FROM</span> process</span><br><span class="line">  <span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">  <span class="keyword">ORDER</span> <span class="keyword">BY</span> start_ts <span class="keyword">DESC</span></span><br><span class="line">  LIMIT <span class="number">1</span></span><br><span class="line">),</span><br><span class="line">selected_dumps(label, dump_ts) <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">VALUES</span></span><br><span class="line">    (<span class="string">&#x27;baseline&#x27;</span>, <span class="number">100000000000</span>),</span><br><span class="line">    (<span class="string">&#x27;after_action&#x27;</span>, <span class="number">120000000000</span>),</span><br><span class="line">    (<span class="string">&#x27;after_release&#x27;</span>, <span class="number">150000000000</span>)</span><br><span class="line">),</span><br><span class="line">valid_dumps <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> d.<span class="operator">*</span> <span class="keyword">FROM</span> selected_dumps d</span><br><span class="line">  <span class="keyword">WHERE</span> <span class="keyword">EXISTS</span> (</span><br><span class="line">    <span class="keyword">SELECT</span> <span class="number">1</span> <span class="keyword">FROM</span> heap_profile h</span><br><span class="line">    <span class="keyword">WHERE</span> h.upid <span class="operator">=</span> (<span class="keyword">SELECT</span> upid <span class="keyword">FROM</span> target_process)</span><br><span class="line">      <span class="keyword">AND</span> h.heap_name <span class="operator">=</span> <span class="string">&#x27;libc.malloc&#x27;</span> <span class="keyword">AND</span> h.ts_end <span class="operator">=</span> d.dump_ts</span><br><span class="line">  )</span><br><span class="line">),</span><br><span class="line">alloc_by_dump <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span></span><br><span class="line">    d.label,</span><br><span class="line">    a.callsite_id,</span><br><span class="line">    <span class="built_in">SUM</span>(a.size) <span class="operator">/</span> <span class="number">1024.0</span> <span class="operator">/</span> <span class="number">1024.0</span> <span class="keyword">AS</span> unreleased_mb,</span><br><span class="line">    <span class="built_in">SUM</span>(a.count) <span class="keyword">AS</span> unreleased_count</span><br><span class="line">  <span class="keyword">FROM</span> heap_profile_allocation a</span><br><span class="line">  <span class="keyword">JOIN</span> valid_dumps d <span class="keyword">ON</span> a.ts <span class="operator">&lt;=</span> d.dump_ts</span><br><span class="line">  <span class="keyword">WHERE</span> a.upid <span class="operator">=</span> (<span class="keyword">SELECT</span> upid <span class="keyword">FROM</span> target_process)</span><br><span class="line">    <span class="keyword">AND</span> a.heap_name <span class="operator">=</span> <span class="string">&#x27;libc.malloc&#x27;</span></span><br><span class="line">  <span class="keyword">GROUP</span> <span class="keyword">BY</span> d.label, a.callsite_id</span><br><span class="line">),</span><br><span class="line">pivot <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span></span><br><span class="line">    callsite_id,</span><br><span class="line">    <span class="built_in">SUM</span>(<span class="keyword">CASE</span> <span class="keyword">WHEN</span> label <span class="operator">=</span> <span class="string">&#x27;baseline&#x27;</span> <span class="keyword">THEN</span> unreleased_mb <span class="keyword">ELSE</span> <span class="number">0</span> <span class="keyword">END</span>) <span class="keyword">AS</span> baseline_unreleased_mb,</span><br><span class="line">    <span class="built_in">SUM</span>(<span class="keyword">CASE</span> <span class="keyword">WHEN</span> label <span class="operator">=</span> <span class="string">&#x27;after_action&#x27;</span> <span class="keyword">THEN</span> unreleased_mb <span class="keyword">ELSE</span> <span class="number">0</span> <span class="keyword">END</span>) <span class="keyword">AS</span> after_action_unreleased_mb,</span><br><span class="line">    <span class="built_in">SUM</span>(<span class="keyword">CASE</span> <span class="keyword">WHEN</span> label <span class="operator">=</span> <span class="string">&#x27;after_release&#x27;</span> <span class="keyword">THEN</span> unreleased_mb <span class="keyword">ELSE</span> <span class="number">0</span> <span class="keyword">END</span>) <span class="keyword">AS</span> after_release_unreleased_mb</span><br><span class="line">  <span class="keyword">FROM</span> alloc_by_dump</span><br><span class="line">  <span class="keyword">GROUP</span> <span class="keyword">BY</span> callsite_id</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  callsite_id,</span><br><span class="line">  baseline_unreleased_mb,</span><br><span class="line">  after_action_unreleased_mb,</span><br><span class="line">  after_release_unreleased_mb,</span><br><span class="line">  after_action_unreleased_mb <span class="operator">-</span> baseline_unreleased_mb <span class="keyword">AS</span> action_delta_mb,</span><br><span class="line">  after_release_unreleased_mb <span class="operator">-</span> baseline_unreleased_mb <span class="keyword">AS</span> retained_delta_mb,</span><br><span class="line">  after_action_unreleased_mb <span class="operator">-</span> after_release_unreleased_mb <span class="keyword">AS</span> released_delta_mb,</span><br><span class="line">  <span class="keyword">CASE</span></span><br><span class="line">    <span class="keyword">WHEN</span> after_release_unreleased_mb <span class="operator">-</span> baseline_unreleased_mb <span class="operator">&gt;</span> <span class="number">1</span> <span class="keyword">THEN</span> <span class="string">&#x27;leak_candidate&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> after_action_unreleased_mb <span class="operator">&gt;</span> baseline_unreleased_mb</span><br><span class="line">      <span class="keyword">AND</span> after_release_unreleased_mb <span class="operator">&lt;=</span> baseline_unreleased_mb <span class="keyword">THEN</span> <span class="string">&#x27;peak&#x27;</span></span><br><span class="line">    <span class="keyword">ELSE</span> <span class="string">&#x27;unknown&#x27;</span></span><br><span class="line">  <span class="keyword">END</span> <span class="keyword">AS</span> conclusion_type</span><br><span class="line"><span class="keyword">FROM</span> pivot</span><br><span class="line"><span class="keyword">WHERE</span> (<span class="keyword">SELECT</span> <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">FROM</span> valid_dumps) <span class="operator">=</span> <span class="number">3</span></span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> retained_delta_mb <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">50</span>;</span><br></pre></td></tr></table></figure>
 
+<p>这三个时间点必须先确认都有成功完成的目标 heap dump；占位时间不能直接用，本例只有三个 dump 均存在才返回结果，缺 dump 时调用方应输出不可用，不能让 <code>CASE ... ELSE 0</code> 把缺采集当成已释放。1 MiB 只是示例筛选阈值。</p>
 <p>释放后仍保留才偏泄漏；操作中升高但释放后回落是峰值；长期保留但有容量上限、复用证据和压力回收策略，才可能写成缓存。</p>
 <p>报告字段可以固定成这一组：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">trace_name,process_name,upid,pid,scenario,dump_phase,dump_ts_ms,sampling_interval_bytes,dump_interval_ms,top_stack_frame,mapping_name,unreleased_mb,retained_delta_mb,total_malloc_mb,allocation_count,symbol_status,profileable_state,data_loss_status,evidence_grade,conclusion_type,next_action</span><br><span class="line">heap-run01,com.example.app,42,1234,player_open,after_release,150000,4096,5000,PlayerBuffer::Alloc,libplayer.so,8.4,6.9,42.1,128,strong,profileable,clean,strong,leak_candidate,inspect_owner_module</span><br></pre></td></tr></table></figure>
@@ -558,7 +587,9 @@ loading="lazy"             decoding="async"
 <li><code>stats</code> 里是否出现 heapprofd buffer overrun、client error、profile incomplete、<code>heapprofd_unwind_time_us</code>、<code>heapprofd_client_spinlock_blocked</code>、<code>heapprofd_sampling_interval_adjusted</code> 或 data loss。</li>
 </ul>
 <p>出现 data loss 或 heapprofd buffer overrun 时，不要把数字写成精确账本。更合适的说法是“该调用栈是未释放分配的大头，采样条件如下”。</p>
-<p>通用的 Trace 体检（buffer&#x2F;ftrace 丢失）直接用第 12 篇那条 stats 查询；heapprofd 专用 health check 要单独跑：</p>
+<p>通用的 Trace 体检（buffer&#x2F;ftrace 丢失）直接用第 12 篇那条 stats 查询；heapprofd 专用 health check 要单独跑。<code>heapprofd_buffer_overran</code>、<code>heapprofd_client_error</code>、<code>heapprofd_hit_guardrail</code> 等在 v57.2&#x2F;v58.2 已存在，多数属于按需生成记录的 indexed stats；在没有 heap profile 的 Trace 上只查到两个 single 项，不能推断其他项是新版本专属。</p>
+<p>先确认目标进程&#x2F;heap 的 profile 或 dump 确实存在、窗口覆盖且已完成，再解释下面的异常查询。没有 profile 时应标记 <code>profile_unavailable</code>，不是“全部干净”；有 profile 但异常查询为空，也只能说明未记录到这些异常。<code>heapprofd_unwind_time_us</code>、<code>heapprofd_client_spinlock_blocked</code>、<code>heapprofd_sampling_interval_adjusted</code> 是开销&#x2F;采样上下文，不应与非零 error&#x2F;data_loss 一律判失败。</p>
+<p><code>heapprofd_last_profile_timestamp</code> 是辅助的最后 profile packet 时间，不能替代 <code>heap_profile.ts_end</code>、diamond 和最终完成状态来证明目标窗口完整。下列查询保留这些上下文供复查：</p>
 <figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> <span class="keyword">value</span> <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line">  <span class="keyword">AND</span> (</span><br><span class="line">    name GLOB <span class="string">&#x27;heapprofd_*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name GLOB <span class="string">&#x27;stackprofile_*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name GLOB <span class="string">&#x27;symbolization_*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name <span class="keyword">IN</span> (</span><br><span class="line">      <span class="string">&#x27;symbolization_tmp_build_id_not_found&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_buffer_overran&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_buffer_corrupted&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_client_error&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_missing_packet&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_non_finalized_profile&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_rejected_concurrent&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_hit_guardrail&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_sampling_interval_adjusted&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_client_spinlock_blocked&#x27;</span></span><br><span class="line">    )</span><br><span class="line">  )</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> name, idx;</span><br></pre></td></tr></table></figure>
 
 <h2 id="发布报告前检查"><a href="#发布报告前检查" class="headerlink" title="发布报告前检查"></a>发布报告前检查</h2><p>采集条件：</p>
@@ -602,22 +633,35 @@ loading="lazy"             decoding="async"
 <li><a target="_blank" rel="noopener" href="https://developer.android.com/reference/android/os/ProfilingManager">ProfilingManager</a></li>
 <li><a target="_blank" rel="noopener" href="https://source.android.com/docs/core/ota/modular-system/profiling">Android Profiling module</a></li>
 </ol>
+<p>源码核对版本：<code>b23c67be1159e3f0b0657bd97be9e139e0d8ee2c</code>（2026-09-19）。</p>
+<ul>
+<li><a target="_blank" rel="noopener" href="https://github.com/google/perfetto/blob/b23c67be1159e3f0b0657bd97be9e139e0d8ee2c/src/trace_processor/importers/proto/profile_packet_sequence_state.cc">heapprofd 增量导入实现</a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/google/perfetto/blob/b23c67be1159e3f0b0657bd97be9e139e0d8ee2c/src/trace_processor/perfetto_sql/stdlib/android/memory/heap_profile/summary_tree.sql">Heap summary tree 聚合实现</a></li>
+</ul>
 <h2 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h2><p>欢迎关注 <a target="_blank" rel="noopener" href="https://www.androidperformance.com/">Android Performance</a>。</p>
-<!-- flag of hidden posts -->
+
     </article>
     <!-- license -->
         <div class="license-wrapper">
             <p>Author：<a href="https://androidperformance.com">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">https://androidperformance.com/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/</a>
             <p>Publish date：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">May 4th 2026, 10:14:00 am</a>
-            <p>Update date：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">July 18th 2026, 10:50:46 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">September 20th 2026, 12:49:52 am</a>
             <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     <!-- paginator -->
     <ul class="post-paginator">
         <li class="next">
+                <div class="nextSlogan">Next Post</div>
+                <a href="/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/" title="Android Perfetto 系列 15：Boot Trace、长时间现场 Trace 与偶发问题抓取">
+                    <div class="nextTitle">Android Perfetto 系列 15：Boot Trace、长时间现场 Trace 与偶发问题抓取</div>
+                </a>
         </li>
         <li class="previous">
+                <div class="prevSlogan">Previous Post</div>
+                <a href="/2026/05/04/Android-Perfetto-13-Track-Event-SDK/" title="Android Perfetto 系列 13：Perfetto SDK、Track Event 与 App 现场 Trace">
+                    <div class="prevTitle">Android Perfetto 系列 13：Perfetto SDK、Track Event 与 App 现场 Trace</div>
+                </a>
         </li>
     </ul>
     <!-- comment -->
@@ -679,7 +723,7 @@ loading="lazy"             decoding="async"
                 <div class="toc-catalog">
                     <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
                 </div>
-                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%86%85%E5%AD%98%E9%97%AE%E9%A2%98%E8%A6%81%E5%88%86%E5%87%A0%E5%BC%A0%E8%B4%A6"><span class="toc-number">1.</span> <span class="toc-text">内存问题要分几张账</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BB%80%E4%B9%88%E6%97%B6%E5%80%99%E7%94%A8-heapprofd"><span class="toc-number">2.</span> <span class="toc-text">什么时候用 heapprofd</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%BF%AB%E9%80%9F%E6%8A%93%E4%B8%80%E4%BB%BD-native-heap-profile"><span class="toc-number">3.</span> <span class="toc-text">快速抓一份 native heap profile</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%92%8C%E7%B3%BB%E7%BB%9F-Trace-%E5%90%88%E5%9C%A8%E4%B8%80%E8%B5%B7%E6%8A%93"><span class="toc-number">4.</span> <span class="toc-text">和系统 Trace 合在一起抓</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#UI-%E6%80%8E%E4%B9%88%E7%9C%8B-Heap-Profile"><span class="toc-number">5.</span> <span class="toc-text">UI 怎么看 Heap Profile</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#SQL-%E6%80%8E%E4%B9%88%E6%9F%A5%E6%9C%AA%E9%87%8A%E6%94%BE%E5%88%86%E9%85%8D"><span class="toc-number">6.</span> <span class="toc-text">SQL 怎么查未释放分配</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E9%87%87%E6%A0%B7%E9%97%B4%E9%9A%94%E6%80%8E%E4%B9%88%E7%90%86%E8%A7%A3"><span class="toc-number">7.</span> <span class="toc-text">采样间隔怎么理解</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Java-heap-dump-%E5%92%8C-Java-allocation-sampling"><span class="toc-number">8.</span> <span class="toc-text">Java heap dump 和 Java allocation sampling</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%AC%A6%E5%8F%B7%E5%8C%96%E5%92%8C%E5%8F%AF%E4%BF%A1%E5%BA%A6"><span class="toc-number">9.</span> <span class="toc-text">符号化和可信度</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%91%E5%B8%83%E6%8A%A5%E5%91%8A%E5%89%8D%E6%A3%80%E6%9F%A5"><span class="toc-number">10.</span> <span class="toc-text">发布报告前检查</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%8A%8A%E5%86%85%E5%AD%98%E8%B6%8B%E5%8A%BF%E8%90%BD%E5%88%B0%E8%B0%83%E7%94%A8%E6%A0%88"><span class="toc-number">11.</span> <span class="toc-text">把内存趋势落到调用栈</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E6%96%87%E6%A1%A3"><span class="toc-number">12.</span> <span class="toc-text">参考文档</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number">13.</span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a></li></ol>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0"><span class="toc-number">1.</span> <span class="toc-text">Perfetto 系列文章</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%86%85%E5%AD%98%E9%97%AE%E9%A2%98%E8%A6%81%E5%88%86%E5%87%A0%E5%BC%A0%E8%B4%A6"><span class="toc-number">2.</span> <span class="toc-text">内存问题要分几张账</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BB%80%E4%B9%88%E6%97%B6%E5%80%99%E7%94%A8-heapprofd"><span class="toc-number">3.</span> <span class="toc-text">什么时候用 heapprofd</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%BF%AB%E9%80%9F%E6%8A%93%E4%B8%80%E4%BB%BD-native-heap-profile"><span class="toc-number">4.</span> <span class="toc-text">快速抓一份 native heap profile</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%92%8C%E7%B3%BB%E7%BB%9F-Trace-%E5%90%88%E5%9C%A8%E4%B8%80%E8%B5%B7%E6%8A%93"><span class="toc-number">5.</span> <span class="toc-text">和系统 Trace 合在一起抓</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#UI-%E6%80%8E%E4%B9%88%E7%9C%8B-Heap-Profile"><span class="toc-number">6.</span> <span class="toc-text">UI 怎么看 Heap Profile</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#SQL-%E6%80%8E%E4%B9%88%E6%9F%A5%E6%9C%AA%E9%87%8A%E6%94%BE%E5%88%86%E9%85%8D"><span class="toc-number">7.</span> <span class="toc-text">SQL 怎么查未释放分配</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E9%87%87%E6%A0%B7%E9%97%B4%E9%9A%94%E6%80%8E%E4%B9%88%E7%90%86%E8%A7%A3"><span class="toc-number">8.</span> <span class="toc-text">采样间隔怎么理解</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Java-heap-dump-%E5%92%8C-Java-allocation-sampling"><span class="toc-number">9.</span> <span class="toc-text">Java heap dump 和 Java allocation sampling</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%AC%A6%E5%8F%B7%E5%8C%96%E5%92%8C%E5%8F%AF%E4%BF%A1%E5%BA%A6"><span class="toc-number">10.</span> <span class="toc-text">符号化和可信度</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%91%E5%B8%83%E6%8A%A5%E5%91%8A%E5%89%8D%E6%A3%80%E6%9F%A5"><span class="toc-number">11.</span> <span class="toc-text">发布报告前检查</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%8A%8A%E5%86%85%E5%AD%98%E8%B6%8B%E5%8A%BF%E8%90%BD%E5%88%B0%E8%B0%83%E7%94%A8%E6%A0%88"><span class="toc-number">12.</span> <span class="toc-text">把内存趋势落到调用栈</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E6%96%87%E6%A1%A3"><span class="toc-number">13.</span> <span class="toc-text">参考文档</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number">14.</span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a></li></ol>
             </div>
         <!-- sidebar -->
         <div class="sidebar sidebar-hide">
@@ -821,33 +865,82 @@ loading="lazy"             decoding="async"
         
         
         
+        
+        
+        
+        
+        
+        
+        
+        
+        
     <div class="total-and-search">
         <div class="total-archive">
-        Total : 130
+        Total : 139
         </div>
     </div>
     <div class="post-archive">
             <div class="archive-year"> 2026 </div>
             <ul class="year-list">
         <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/2026/09/19/SmartPerfetto-v1.12.0-Release-Notes/">SmartPerfetto v1.12.0 更新说明</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/2026/09/19/AIW-Open-Source-Android-Internals-Wiki/">耗时大半年，开源一本 Android 电子书《Android 技术内幕：系统机制、性能优化与工具实战》</a>
+        </li>
+        <li class="archive-post-item">
             <span class="archive-post-date">08/21</span>
-            <a class="archive-post-title" href="/2026/08/21/SmartPerfetto-Five-Week-Update/">SmartPerfetto 2026.07.18-08.21 五周更新复盘：从 v1.2.0 到 v1.7.0</a>
+            <a class="archive-post-title" href="/2026/08/21/SmartPerfetto-Five-Week-Update/">SmartPerfetto v1.7.0 更新说明</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">07/17</span>
-            <a class="archive-post-title" href="/2026/07/17/SmartPerfetto-Six-Week-Update/">SmartPerfetto 2026.06.04-07.17 六周更新复盘：从 v1.0.28 到 v1.1.1</a>
+            <a class="archive-post-title" href="/2026/07/17/SmartPerfetto-Six-Week-Update/">SmartPerfetto v1.1.1 更新说明</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">06/04</span>
-            <a class="archive-post-title" href="/2026/06/04/SmartPerfetto-Three-Week-Update/">SmartPerfetto 2026.05.17-06.04 三周更新：Smart 模式、证据规则和四条 Runtime</a>
+            <a class="archive-post-title" href="/2026/06/04/SmartPerfetto-Three-Week-Update/">SmartPerfetto v1.0.28 更新说明</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/17</span>
-            <a class="archive-post-title" href="/2026/05/17/SmartPerfetto-Two-Week-Update/">SmartPerfetto 2026.04.29-05.17 两周更新：从 Perfetto AI Assistant 到可复用的 Trace 分析平台</a>
+            <a class="archive-post-title" href="/2026/05/17/SmartPerfetto-Two-Week-Update/">SmartPerfetto v1.0.7 更新说明</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/05</span>
-            <a class="archive-post-title" href="/2026/05/05/What-I-Am-Building/">「置顶」我做了什么</a>
+            <a class="archive-post-title" href="/2026/05/05/What-I-Am-Building/">我做了什么</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto 系列 18：响应速度实战，从输入事件到首帧反馈</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/2026/05/04/Android-Perfetto-17-Engineering-Domain-And-Platform-Tracing/">Android Perfetto 系列 17：专项场景自动化、问题清单与平台体系</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto 系列 16：GPU、Power Counters 与硬件瓶颈分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto 系列 15：Boot Trace、长时间现场 Trace 与偶发问题抓取</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto 系列 14：heapprofd 与内存 Profiling</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto 系列 13：Perfetto SDK、Track Event 与 App 现场 Trace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">Android Perfetto 系列 12：Trace 数据流与丢失排查</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/2026/05/04/Android-Perfetto-11-PerfettoSQL-TraceProcessor-Automation/">Android Perfetto 系列 11：PerfettoSQL、Trace Processor 与回归检测</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/29</span>
@@ -942,10 +1035,6 @@ loading="lazy"             decoding="async"
                 </ul>
             <div class="archive-year"> 2023 </div>
             <ul class="year-list">
-        <li class="archive-post-item">
-            <span class="archive-post-date">12/30</span>
-            <a class="archive-post-title" href="/2023/12/30/the-performance/">关于 The Android Performance 知识星球介绍</a>
-        </li>
         <li class="archive-post-item">
             <span class="archive-post-date">10/15</span>
             <a class="archive-post-title" href="/2023/10/15/the-performance-design-of-os-en/">The Performance Design Of OS</a>
@@ -1068,7 +1157,7 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">12/01</span>
-            <a class="archive-post-title" href="/2019/12/01/BlogMap/">「置顶」博客文章目录</a>
+            <a class="archive-post-title" href="/2019/12/01/BlogMap/">「置顶」博客文章目录 + 个人项目</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">12/01</span>
@@ -1407,6 +1496,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Android
             </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
             <span class="sidebar-tag-name" data-tags="Perfetto">
                 <span class="iconfont-archer">&#xe606;</span>
                 Perfetto
@@ -1414,10 +1507,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Systrace">
                 <span class="iconfont-archer">&#xe606;</span>
                 Systrace
-            </span>
-            <span class="sidebar-tag-name" data-tags="Jank">
-                <span class="iconfont-archer">&#xe606;</span>
-                Jank
             </span>
             <span class="sidebar-tag-name" data-tags="年终总结">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1427,9 +1516,33 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 知识星球
             </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="AOSP">
+                <span class="iconfont-archer">&#xe606;</span>
+                AOSP
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="AIW">
+                <span class="iconfont-archer">&#xe606;</span>
+                AIW
+            </span>
+            <span class="sidebar-tag-name" data-tags="Open Source">
+                <span class="iconfont-archer">&#xe606;</span>
+                Open Source
+            </span>
             <span class="sidebar-tag-name" data-tags="随笔">
                 <span class="iconfont-archer">&#xe606;</span>
                 随笔
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
             </span>
             <span class="sidebar-tag-name" data-tags="Agent OS">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1447,29 +1560,17 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Mobile OS
             </span>
-            <span class="sidebar-tag-name" data-tags="ANR">
+            <span class="sidebar-tag-name" data-tags="Tools">
                 <span class="iconfont-archer">&#xe606;</span>
-                ANR
+                Tools
             </span>
             <span class="sidebar-tag-name" data-tags="RenderThread">
                 <span class="iconfont-archer">&#xe606;</span>
                 RenderThread
             </span>
-            <span class="sidebar-tag-name" data-tags="Performance">
-                <span class="iconfont-archer">&#xe606;</span>
-                Performance
-            </span>
-            <span class="sidebar-tag-name" data-tags="Tools">
-                <span class="iconfont-archer">&#xe606;</span>
-                Tools
-            </span>
             <span class="sidebar-tag-name" data-tags="Linux">
                 <span class="iconfont-archer">&#xe606;</span>
                 Linux
-            </span>
-            <span class="sidebar-tag-name" data-tags="Framework">
-                <span class="iconfont-archer">&#xe606;</span>
-                Framework
             </span>
             <span class="sidebar-tag-name" data-tags="Java">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1506,6 +1607,62 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Binder">
                 <span class="iconfont-archer">&#xe606;</span>
                 Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="SQL">
+                <span class="iconfont-archer">&#xe606;</span>
+                SQL
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceProcessor">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceProcessor
+            </span>
+            <span class="sidebar-tag-name" data-tags="Trace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Trace
+            </span>
+            <span class="sidebar-tag-name" data-tags="DataFlow">
+                <span class="iconfont-archer">&#xe606;</span>
+                DataFlow
+            </span>
+            <span class="sidebar-tag-name" data-tags="SDK">
+                <span class="iconfont-archer">&#xe606;</span>
+                SDK
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceEvent">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceEvent
+            </span>
+            <span class="sidebar-tag-name" data-tags="heapprofd">
+                <span class="iconfont-archer">&#xe606;</span>
+                heapprofd
+            </span>
+            <span class="sidebar-tag-name" data-tags="GPU">
+                <span class="iconfont-archer">&#xe606;</span>
+                GPU
+            </span>
+            <span class="sidebar-tag-name" data-tags="Power">
+                <span class="iconfont-archer">&#xe606;</span>
+                Power
+            </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
+            <span class="sidebar-tag-name" data-tags="Input">
+                <span class="iconfont-archer">&#xe606;</span>
+                Input
+            </span>
+            <span class="sidebar-tag-name" data-tags="Latency">
+                <span class="iconfont-archer">&#xe606;</span>
+                Latency
+            </span>
+            <span class="sidebar-tag-name" data-tags="Camera">
+                <span class="iconfont-archer">&#xe606;</span>
+                Camera
+            </span>
+            <span class="sidebar-tag-name" data-tags="Audio">
+                <span class="iconfont-archer">&#xe606;</span>
+                Audio
             </span>
             <span class="sidebar-tag-name" data-tags="MAT">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1555,10 +1712,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 MCP
             </span>
-            <span class="sidebar-tag-name" data-tags="Open Source">
-                <span class="iconfont-archer">&#xe606;</span>
-                Open Source
-            </span>
             <span class="sidebar-tag-name" data-tags="Android Performance">
                 <span class="iconfont-archer">&#xe606;</span>
                 Android Performance
@@ -1595,13 +1748,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 程序员的修炼
             </span>
-            <span class="sidebar-tag-name" data-tags="设计原则">
-                <span class="iconfont-archer">&#xe606;</span>
-                设计原则
-            </span>
             <span class="sidebar-tag-name" data-tags="测试">
                 <span class="iconfont-archer">&#xe606;</span>
                 测试
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计原则">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计原则
             </span>
             <span class="sidebar-tag-name" data-tags="了解你的用户">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1665,13 +1818,13 @@ loading="lazy"             decoding="async"
             <span class="iconfont-archer">&#xe60a;</span>
             Android
         </span>
-        <span class="sidebar-category-name" data-categories="AI">
-            <span class="iconfont-archer">&#xe60a;</span>
-            AI
-        </span>
         <span class="sidebar-category-name" data-categories="Java">
             <span class="iconfont-archer">&#xe60a;</span>
             Java
+        </span>
+        <span class="sidebar-category-name" data-categories="AI">
+            <span class="iconfont-archer">&#xe60a;</span>
+            AI
         </span>
         <span class="sidebar-category-name" data-categories="Android性能优化">
             <span class="iconfont-archer">&#xe60a;</span>

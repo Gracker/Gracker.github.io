@@ -1,0 +1,2121 @@
+<!DOCTYPE html>
+<html lang="en">
+    <!-- title -->
+            <!-- keywords -->
+
+                  <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <meta name="author" content="Gracker">
+                    <meta name="renderer" content="webkit">
+                    <meta name="copyright" content="Gracker">
+                      <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,Optimization,Startup,Perfetto,Systrace,RenderThread,Java,Responsiveness,Smoothness">
+                          <meta name="description" content="Technical blog about Android system performance optimization">
+                          <meta name="description" content="FrameTimeline marks a frame as late, yet the main thread, RenderThread, and SurfaceFlinger all seem to stay within their budgets. It is tempting to write “possibly a GPU bottleneck.” That is a risky c">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis">
+<meta property="og:url" content="https://androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/index.html">
+<meta property="og:site_name" content="Android Performance">
+<meta property="og:description" content="FrameTimeline marks a frame as late, yet the main thread, RenderThread, and SurfaceFlinger all seem to stay within their budgets. It is tempting to write “possibly a GPU bottleneck.” That is a risky c">
+<meta property="og:locale" content="en_US">
+<meta property="article:published_time" content="2026-05-04T02:16:00.000Z">
+<meta property="article:modified_time" content="2026-09-19T16:52:22.730Z">
+<meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Android">
+<meta property="article:tag" content="Perfetto">
+<meta property="article:tag" content="Performance">
+<meta property="article:tag" content="GPU">
+<meta property="article:tag" content="Power">
+<meta name="twitter:card" content="summary">
+                            <meta http-equiv="Cache-control" content="no-cache">
+                            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+                            <link rel="icon" href="/en/assets/favicon.ico">
+                                <title>
+                                  Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis · Android Performance
+                                </title>
+                                
+<link rel="canonical" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">
+                                  <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/en/font/Oswald-Regular.woff2") format('woff2'),
+             url("/en/font/Oswald-Regular.ttf") format('truetype');
+        font-display: swap;
+    }
+
+    body {
+        margin: 0;
+    }
+
+    /* Removed initial hide to show content immediately */
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(
+            -45deg,
+            #444 0,
+            #444 80px,
+            #333 80px,
+            #333 160px
+        );
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+</style>
+
+                                    <link id="stylesheet-base" rel="stylesheet" href="/en/css/style.css">
+                                    <link id="stylesheet-mobile" rel="stylesheet" href="/en/css/mobile.css" media="screen and (max-width: 960px)">
+                                    <link id="stylesheet-theme-dark" rel="stylesheet" href="/en/css/dark.css">
+                                    <link id="stylesheet-custom" rel="stylesheet" href="/en/css/custom.css">
+                                    <link rel="preload" href="/en/lib/jquery.min.js" as="script">
+                                    <link rel="preload" href="/en/scripts/main.js" as="script">
+                                    <!-- algolia -->
+                                                    <!-- Hreflang Tags -->
+                                                    
+                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/" />
+                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/" />
+                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/" />
+                  <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/en/atom.xml" title="Android Performance" type="application/atom+xml">
+</head>
+
+        <body class="post-body">
+        <!-- header -->
+        <header class="header header-mobile">
+    <!-- top read progress line -->
+    <div class="header-element">
+        <div class="read-progress"></div>
+    </div>
+    <!-- sidebar menu button -->
+    <div class="header-element">
+        <div
+            class="header-sidebar-menu">
+                    <div style="padding-left: 1px;">&#xe775;</div>
+        </div>
+    </div>
+    <!-- header actions -->
+    <div class="header-actions">
+        <!-- search button -->
+            <span class="header-search-btn header-element popup-trigger" role="button" aria-label="Search" data-tooltip="Search">
+                <span class="iconfont-archer search-icon" aria-hidden="true">&#xe627;</span>
+            </span>
+        <!-- theme mode switch button -->
+        <span class="header-theme-btn header-element" role="button" aria-label="Theme" data-tooltip="Theme">
+            <span aria-hidden="true">&#9680;</span>
+        </span>
+        <!-- language transition button -->
+        <span class="header-lang-btn header-element" data-tooltip="Language">
+            <a href="javascript:void(0)" onclick="toggleLanguage()" class="lang-text" aria-label="Language">EN</a>
+            <script>
+                // Update language button text based on current path
+                (function() {
+                    var path = window.location.pathname;
+                    var isEn = /^\/en(\/|$)/.test(path);
+                    var langBtn = document.querySelector('.header-lang-btn .lang-text');
+                    if (langBtn) {
+                        langBtn.textContent = isEn ? 'CN' : 'EN';
+                    }
+                })();
+                
+                function toggleLanguage() {
+                    var path = window.location.pathname;
+                    var isEn = /^\/en(\/|$)/.test(path);
+
+                    if (isEn) {
+                        var newPath = path.replace(/^\/en(\/|$)/, '/');
+                        if (newPath === '') newPath = '/';
+                        window.location.href = newPath;
+                    } else {
+                        var suffix = path;
+                        if (suffix === '/') suffix = '';
+                        window.location.href = '/en' + suffix;
+                    }
+                }
+            </script>
+        </span>
+        <!-- home button -->
+        <span class="home-link header-element">
+            <a href="/en/" aria-label="Home" data-tooltip="Home">
+                <svg class="home-icon" aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="m3 10.5 9-7 9 7"></path>
+                    <path d="M5 9.5V21h14V9.5"></path>
+                    <path d="M10 21v-6h4v6"></path>
+                </svg>
+            </a>
+        </span>
+    </div>
+    <!-- toggle banner -->
+                <div class="banner">
+                        <div class="blog-title header-element">
+                            <a href="/en/">
+                                Android Performance
+                            </a>
+                        </div>
+                        <div class="post-title header-element">
+                            <a href="#" class="post-name">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</a>
+                        </div>
+                </div>
+</header>
+
+        <!-- fixed footer -->
+        <footer class="footer-fixed">
+    <!-- donate button -->
+    <div class="donate-popup donate-popup--hidden">
+    <div class="donate-popup__title">Buy Me A Coffee</div>
+    <div class="donate-popup__content">
+        <div class="donate-popup__content-description">If you find this article helpful, consider buying me a coffee.</div>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Wechat"
+            alt="Wechat"
+            src="/en/assets/donate-wechat.webp"
+        ></img>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Alipay"
+            alt="Alipay"
+            src="/en/assets/donate-alipay.png"
+        ></img>
+    </div>
+</div>
+
+    <div
+        title="Donate to the author"
+        class="footer-fixed-btn footer-fixed-btn--hidden donate-btn"
+    >
+        <span aria-hidden="true">&#165;</span>
+    </div>
+
+    <!-- back to top button -->
+    <div class="footer-fixed-btn footer-fixed-btn--hidden back-top">
+        <div>&#xe639;</div>
+    </div>
+</footer>
+
+        <!-- wrapper -->
+        <div class="wrapper">
+            <div class="site-intro" style="    height:50vh;
+">
+    <!-- 主页  -->
+    <!-- 404页  -->
+    <div class="site-intro-placeholder"></div>
+    <picture>
+            <source type="image/webp" srcset="/en/intro/post-bg.webp">
+        <img class="site-intro-img"
+             src="/en/intro/post-bg.jpg"
+             alt=""
+loading="lazy"             decoding="async"
+             fetchpriority="auto"
+             sizes="100vw">
+    </picture>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+                Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Anal...
+            <!-- 404 -->
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            <!-- 404 -->
+        </p>
+        <!-- 文章页 meta -->
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                    <div class="post-intro-tags" >
+        <span class="post-category" data-categories="Android">
+            <span class="iconfont-archer post-category-icon" aria-hidden="true">&#xe666;</span>
+            <span class="post-category-text">
+                Android
+            </span>
+        </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="GPU">GPU</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Power">Power</a>
+</div>
+
+                <!-- 文章字数统计 -->
+                    <div class="post-intro-read">
+                        <span>Word count: <span class="post-count word-count">5.9k</span>Reading time: <span class="post-count reading-time">37 min</span></span>
+                    </div>
+                <div class="post-intro-meta">
+                    <!-- 撰写日期 -->
+                    <span class="iconfont-archer post-intro-calander">&#xe676;</span>
+                    <span class="post-intro-time">2026/05/04</span>
+                    <!-- 文章分享 -->
+                    <span class="share-wrapper">
+                        <span class="iconfont-archer share-icon">&#xe71d;</span>
+                        <span class="share-text">Share</span>
+                        <ul class="share-list">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+    </div>
+</div>
+
+            
+            <script>
+  (function () {
+    var done = false
+
+    function fontLoaded() {
+      if (done) return
+      done = true
+
+      var introTitle = document.getElementsByClassName('intro-title')[0]
+      var introSubtitle = document.getElementsByClassName('intro-subtitle')[0]
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+
+      if (introTitle) introTitle.classList.add('intro-fade-in')
+      if (introSubtitle) introSubtitle.classList.add('intro-fade-in')
+      if (postIntros) postIntros.classList.add('post-fade-in')
+    }
+
+    function waitForLocalFont() {
+      if (document.fonts && document.fonts.load) {
+        Promise.race([
+          document.fonts.load('1em Oswald-Regular'),
+          new Promise(function (resolve) { setTimeout(resolve, 1000) })
+        ]).then(fontLoaded, fontLoaded)
+      } else {
+        fontLoaded()
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', waitForLocalFont, false)
+    } else {
+      waitForLocalFont()
+    }
+  })()
+</script>
+
+            <img class="loading" src="/en/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" alt="loading">
+            <div class="container container-unloaded">
+                <main class="main post-page">
+    <article class="article-entry">
+        <p>FrameTimeline marks a frame as late, yet the main thread, RenderThread, and SurfaceFlinger all seem to stay within their budgets. It is tempting to write “possibly a GPU bottleneck.” That is a risky claim: GPU frequency, GPU counters, battery current, and power rails are not tools for attributing an individual App frame to a root cause.</p>
+<p>Parts 07 and 08 covered the rendering path from the App to SurfaceFlinger; Parts 06 and 09 covered refresh rates and CPU scheduling&#x2F;frequency. This article adds an often-skipped step without repeating those topics: when a problem appears to have reached the hardware resource layer, how should GPU, devfreq, battery counters, and power rails enter the analysis of the same trace interval?</p>
+<p>These counters are difficult because not every device provides them, and different GPU vendors use different counter names. A conclusion cannot simply say “a high GPU value means a GPU bottleneck.” FrameTimeline, RenderThread, SurfaceFlinger, the GPU timeline, frequency, and power data must be examined over the same interval.</p>
+<span id="more"></span>
+
+<p><a id="series"></a></p>
+<h2 id="Perfetto-Series-Catalog"><a href="#Perfetto-Series-Catalog" class="headerlink" title="Perfetto Series Catalog"></a>Perfetto Series Catalog</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/03/27/Android-Perfetto-101/">Android Perfetto Series Catalog</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto Series 1: Introduction to Perfetto</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto Series 4: Opening Large Traces via Command Line</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Choreographer-based Rendering Flow</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto Series 6: Why 120Hz? Advantages and Challenges</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto Series 7: MainThread and RenderThread Deep Dive</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto Series 8: Understanding Vsync and Performance Analysis</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto Series 9: Interpreting CPU Information</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto Series 10: Binder Scheduling and Lock Contention</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-11-PerfettoSQL-TraceProcessor-Automation/">Android Perfetto Series 11: PerfettoSQL, Trace Processor and Regression Detection</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">Android Perfetto Series 12: Trace Dataflow and Data Loss</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event and App Field Traces</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto Series 14: heapprofd and Memory Profiling</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces and Long-running Field Tracing</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters and Hardware Bottlenecks</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-17-Engineering-Domain-And-Platform-Tracing/">Android Perfetto Series 17: Scenario Automation and Platform Tracing</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto Series 18: Input Response Latency</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV1oi82efE4D/?vd_source=0c6d2191e785de0a36dc21a9da7e664e">Video (Bilibili) - Android Perfetto Basics and Case Studies</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV17A6bBLECu/">Video (Bilibili) - Android Perfetto: Trace Graph Types - AOSP, WebView, Flutter + OEM System Optimization</a></li>
+</ol>
+<h2 id="When-Hardware-Counters-Are-Needed"><a href="#When-Hardware-Counters-Are-Needed" class="headerlink" title="When Hardware Counters Are Needed"></a>When Hardware Counters Are Needed</h2><p>FrameTimeline can identify a janky frame. CPU scheduling can show whether a thread obtained CPU time. RenderThread&#x2F;HWUI can help determine whether the App completed drawing and produced or submitted a buffer within budget. GPU execution, completion, and hardware pressure require a combined reading of FrameTimeline, GPU render stages, fences, GPU counters, or AGI&#x2F;vendor tools.</p>
+<p>Hardware counters address the later part of that investigation:</p>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>What counters can add</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>RenderThread submits on time, but the frame is still late</td>
+<td>GPU render stages, GPU completion, GPU frequency</td>
+</tr>
+<tr>
+<td>GPU frequency rises, but frames remain slow</td>
+<td>GPU counters, GPU memory, devfreq &#x2F; interconnect &#x2F; memory-related device frequency tracks</td>
+</tr>
+<tr>
+<td>Frame rate drops after running for a while</td>
+<td>Power rails, battery current, thermal logs, changes to frequency caps</td>
+</tr>
+<tr>
+<td>Abnormal power consumption without obvious UI jank</td>
+<td>Power rails, battery counters, screen state, continuous animation&#x2F;wakeups</td>
+</tr>
+<tr>
+<td>Heavy load in a game or player</td>
+<td>AGI GPU counters, Perfetto system context, application Track Events</td>
+</tr>
+</tbody></table>
+<p>Hardware counters rarely identify a root cause on their own. They are more useful for ruling out unpromising directions: is the problem on the CPU, GPU, composition, memory-bandwidth, or power&#x2F;thermal-policy side?</p>
+<p>First, distinguish these terms:</p>
+<ul>
+<li><code>frequency</code> is a frequency track. It shows the operating level selected by a frequency-scaling policy, not utilization.</li>
+<li>A <code>counter</code> is a sampled value exposed by hardware or a driver. It may represent a percentage, bytes, an event count, or a vendor-defined unit.</li>
+<li>A <code>render stage</code> is an interval of GPU work. It helps determine whether GPU work exceeds a frame budget, but depends on producer and driver support.</li>
+<li><code>battery current</code> is measured at the battery and covers the whole device. It is not an individual App’s power consumption.</li>
+<li>A <code>power rail</code> measures subsystem energy. It can show changes in rails such as GPU, Display, Memory, and WLAN, but still does not provide per-process measurements.</li>
+</ul>
+<p>Read hardware counters together with frames, threads, SurfaceFlinger, and application actions from the same interval. No single track, however clear, can establish attribution by itself.</p>
+<h2 id="Keep-the-Data-Types-Separate"><a href="#Keep-the-Data-Types-Separate" class="headerlink" title="Keep the Data Types Separate"></a>Keep the Data Types Separate</h2><table>
+<thead>
+<tr>
+<th>Data</th>
+<th>TraceConfig collection entry point</th>
+<th>PerfettoSQL module&#x2F;table</th>
+<th>Questions it can answer</th>
+<th>Limitations</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>GPU render stages</td>
+<td><code>gpu.renderstages</code> or a producer with a vendor suffix</td>
+<td>GPU tracks such as <code>gpu_slice</code></td>
+<td>Whether GPU work extends beyond the target window</td>
+<td>Depends on GPU producer and driver support</td>
+</tr>
+<tr>
+<td>GPU frequency</td>
+<td><code>linux.ftrace</code> + <code>power/gpu_frequency</code>, or <code>linux.sys_stats</code> polling</td>
+<td>stdlib <code>android.gpu.frequency</code> &#x2F; view <code>android_gpu_frequency</code></td>
+<td>GPU frequency scaling, caps, and frequency state under thermal control</td>
+<td>Frequency is not utilization; label units according to the device and track</td>
+</tr>
+<tr>
+<td>GPU memory</td>
+<td><code>linux.ftrace</code> + <code>gpu_mem/gpu_mem_total</code></td>
+<td>stdlib <code>android.gpu.memory</code> &#x2F; view <code>android_gpu_memory_per_process</code></td>
+<td>Per-process GPU memory trends and possible texture&#x2F;buffer&#x2F;Surface scale issues</td>
+<td>Memory usage is neither bandwidth nor per-frame GPU activity</td>
+</tr>
+<tr>
+<td>GPU counters</td>
+<td><code>gpu.counters</code>, <code>gpu.counters.adreno</code>, etc.</td>
+<td><code>counter</code>, <code>gpu_counter_track</code></td>
+<td>Hardware events involving fragments, vertices, textures, memory, etc.</td>
+<td>Counter IDs&#x2F;names depend on the device</td>
+</tr>
+<tr>
+<td>GPU work period</td>
+<td><code>linux.ftrace</code> + <code>power/gpu_work_period</code></td>
+<td>Module <code>android.gpu.work_period</code>; table <code>android_gpu_work_period_track</code></td>
+<td>UID&#x2F;GPU work periods on some devices</td>
+<td>Not equivalent to per-frame completion; attribution to a frame&#x2F;layer still needs tokens, render stages, or fences</td>
+</tr>
+<tr>
+<td>Battery counters</td>
+<td><code>android.power</code></td>
+<td><code>counter</code></td>
+<td>Changes in battery current, voltage, and charge</td>
+<td>Whole-device measurements affected by USB&#x2F;charging state, not App power consumption</td>
+</tr>
+<tr>
+<td>Power rails</td>
+<td><code>android.power</code> + <code>collect_power_rails</code></td>
+<td>stdlib <code>android.power_rails</code></td>
+<td>Energy changes in rails such as GPU, Display, and Memory</td>
+<td>Depends on hardware and the IPowerStats HAL; not per-process</td>
+</tr>
+</tbody></table>
+<p><code>android_gpu_work_period_track</code> is a track-dimension table providing attribution fields such as <code>id/uid/ugpu/gpu_id</code>; it does not contain work intervals. Join <code>slice</code> using <code>slice.track_id = android_gpu_work_period_track.id</code> and inspect <code>ts/dur</code> for those intervals. Do not assume there is an <code>android_gpu_work_period</code> table, or treat an interval directly as the GPU completion time of an individual frame.</p>
+<p>The official Perfetto GPU documentation also mentions data sources such as <code>vulkan.memory_tracker</code> and <code>gpu.log</code>. These serve specialized graphics investigations and should not be included in a default long trace. Locate the problematic interval with minimal system context first, then decide whether to add specialized data sources.</p>
+<h2 id="Device-Support-Comes-First"><a href="#Device-Support-Comes-First" class="headerlink" title="Device Support Comes First"></a>Device Support Comes First</h2><p>GPU counters are not a universal Android capability. Keep these constraints from the official documentation in mind:</p>
+<ul>
+<li>A GPU producer may register a data source name with a hardware suffix, such as <code>gpu.counters.adreno</code> or <code>gpu.renderstages.mali</code>. TraceConfig must use the exact name.</li>
+<li>GPU counters are selected using device-specific counter IDs or counter names. Available IDs&#x2F;names come from the descriptor exposed by the GPU producer.</li>
+<li>Choose either <code>counter_ids</code> or <code>counter_names</code>; do not mix them. Only some producers support <code>counter_names</code> and glob selection. Check <code>supports_counter_names</code> &#x2F; <code>supports_counter_name_globs</code> in the descriptor.</li>
+<li>Android GPU frequency can be captured through the ftrace event <code>power/gpu_frequency</code>.</li>
+<li>Per-process GPU memory can be captured through the ftrace event <code>gpu_mem/gpu_mem_total</code>.</li>
+</ul>
+<p>Power counters have similar limitations. Battery counters were introduced in Android 10 and depend on device power-management hardware; they are more common on Pixel devices. Power rails depend on specialized hardware such as ODPM (on-device power rail monitor) and the IPowerStats HAL. The Android Studio Power Profiler documentation presents ODPM as a more practical capability on Android 10+ and Pixel 6 or later devices; many production devices lack it.</p>
+<p>Perfetto’s ODPM data source was introduced in Android 10+, but actual availability depends on specialized hardware and the HAL. The Pixel 6+ wording in Android Studio Power Profiler documentation is better understood as guidance about tool experience and practical device coverage, not as the minimum version boundary for Perfetto power rails.</p>
+<h2 id="Confirm-Device-Capabilities-First"><a href="#Confirm-Device-Capabilities-First" class="headerlink" title="Confirm Device Capabilities First"></a>Confirm Device Capabilities First</h2><p>Do not write a GPU&#x2F;Power configuration and hope it works. Before capturing, use the Record page in Perfetto UI or query data source descriptors on the device to confirm producer names, counter IDs, units, and support for selection by name:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">adb shell perfetto --query --long</span><br></pre></td></tr></table></figure>
+
+<p>The query output can be long. Extract the key fields: data source name, GPU counter ID, unit, description, <code>supports_counter_names</code>, <code>supports_counter_name_globs</code>, and power rail metadata. Common Android GPU producers have hardware suffixes, such as <code>gpu.counters.adreno</code> or <code>gpu.renderstages.mali</code>. TraceConfig must use the exact name exposed by the descriptor.</p>
+<p>Keep a capability inventory in the report so that “unsupported device,” “configuration name mismatch,” “buffer data loss,” and “signal did not rise” remain separate:</p>
+<figure class="highlight json"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line"><span class="punctuation">&#123;</span></span><br><span class="line">  <span class="attr">&quot;has_gpu_renderstages&quot;</span><span class="punctuation">:</span> <span class="literal"><span class="keyword">true</span></span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;gpu_renderstages_source_name&quot;</span><span class="punctuation">:</span> <span class="string">&quot;gpu.renderstages.mali&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;has_gpu_counters&quot;</span><span class="punctuation">:</span> <span class="literal"><span class="keyword">true</span></span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;gpu_counter_source_name&quot;</span><span class="punctuation">:</span> <span class="string">&quot;gpu.counters.mali&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;gpu_counter_selection_mode&quot;</span><span class="punctuation">:</span> <span class="string">&quot;counter_ids&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;selected_counter_ids_or_names&quot;</span><span class="punctuation">:</span> <span class="punctuation">[</span><span class="string">&quot;1&quot;</span><span class="punctuation">,</span> <span class="string">&quot;3&quot;</span><span class="punctuation">,</span> <span class="string">&quot;106&quot;</span><span class="punctuation">]</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;has_gpu_freq&quot;</span><span class="punctuation">:</span> <span class="literal"><span class="keyword">true</span></span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;has_gpu_mem&quot;</span><span class="punctuation">:</span> <span class="literal"><span class="keyword">true</span></span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;has_power_rails&quot;</span><span class="punctuation">:</span> <span class="literal"><span class="keyword">false</span></span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;has_battery_current&quot;</span><span class="punctuation">:</span> <span class="literal"><span class="keyword">true</span></span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;has_thermal&quot;</span><span class="punctuation">:</span> <span class="literal"><span class="keyword">true</span></span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;missing_reason&quot;</span><span class="punctuation">:</span> <span class="string">&quot;power_rails_metadata_empty&quot;</span></span><br><span class="line"><span class="punctuation">&#125;</span></span><br></pre></td></tr></table></figure>
+
+<p>Use separate tiers of field presets as well:</p>
+<table>
+<thead>
+<tr>
+<th>Preset</th>
+<th>Data sources</th>
+<th>Scenario</th>
+<th>Upload and fallback rules</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>baseline_jank</code></td>
+<td>FrameTimeline, App markers, sched, CPU&#x2F;GPU freq, idle</td>
+<td>First pass in production or an ordinary field investigation</td>
+<td>May be included in a field package; without GPU stages, explicitly record missing evidence and limit findings to hardware trends</td>
+</tr>
+<tr>
+<td><code>gpu_suspect_short</code></td>
+<td>Baseline + render stages, GPU memory, devfreq, short-interval power&#x2F;battery polling</td>
+<td>A 10–30-second reproduction window</td>
+<td>Short windows only; downgrade conclusions if stats report data loss</td>
+</tr>
+<tr>
+<td><code>gpu_counter_lab</code></td>
+<td>GPU counters, AGI&#x2F;vendor counters, necessary system context</td>
+<td>Specialized laboratory investigation</td>
+<td>No default upload; record counter ID&#x2F;name&#x2F;unit and the device descriptor</td>
+</tr>
+</tbody></table>
+<h2 id="A-Minimal-Signal-Set-for-Short-Traces"><a href="#A-Minimal-Signal-Set-for-Short-Traces" class="headerlink" title="A Minimal Signal Set for Short Traces"></a>A Minimal Signal Set for Short Traces</h2><p>This configuration assumes collection with shell&#x2F;system privileges through <code>adb shell</code>, Perfetto UI, <code>record_android_trace</code>, or a trusted system consumer. An ordinary App cannot independently enable ftrace, <code>android.power</code>, or GPU counters&#x2F;renderstages. It can expose only its own pages, actions, and phases through Track Event &#x2F; ATrace.</p>
+<p>Build the first configuration on the UI jank baseline from Part 15: FrameTimeline, ATrace &#x2F; Track Event for the target package, and sched&#x2F;freq&#x2F;idle form the primary attribution path; GPU&#x2F;Power adds supporting signals. This short-trace configuration is for reproduction windows only. For long-running field tracing, reuse the file writing, file limits, and trigger approach from Part 15.</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br><span class="line">86</span><br><span class="line">87</span><br><span class="line">88</span><br><span class="line">89</span><br><span class="line">90</span><br><span class="line">91</span><br><span class="line">92</span><br><span class="line">93</span><br><span class="line">94</span><br><span class="line">95</span><br><span class="line">96</span><br></pre></td><td class="code"><pre><span class="line">duration_ms: <span class="number">10000</span></span><br><span class="line"></span><br><span class="line">buffers &#123;</span><br><span class="line">  size_kb: <span class="number">65536</span></span><br><span class="line">  fill_policy: RING_BUFFER</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      compact_sched &#123;</span><br><span class="line">        enabled: <span class="literal">true</span></span><br><span class="line">      &#125;</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/cpu_frequency&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/cpu_idle&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/gpu_frequency&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/gpu_work_period&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;gpu_mem/gpu_mem_total&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;devfreq/devfreq_frequency&quot;</span></span><br><span class="line"></span><br><span class="line">      atrace_categories: <span class="string">&quot;gfx&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;view&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;wm&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;hal&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;binder_driver&quot;</span></span><br><span class="line">      atrace_apps: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;android.surfaceflinger.frametimeline&quot;</span></span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    # Example placeholder: replace with the exact gpu.renderstages* name exposed by the descriptor.</span><br><span class="line">    name: <span class="string">&quot;&lt;gpu.renderstages descriptor name&gt;&quot;</span></span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;track_event&quot;</span></span><br><span class="line">    track_event_config &#123;</span><br><span class="line">      disabled_categories: <span class="string">&quot;*&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;ui&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;app&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">  producer_name_filter: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">  producer_name_regex_filter: <span class="string">&quot;com\\.example\\.app(:.*)?&quot;</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    process_stats_config &#123;</span><br><span class="line">      scan_all_processes_on_start: <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.sys_stats&quot;</span></span><br><span class="line">    sys_stats_config &#123;</span><br><span class="line">      stat_period_ms: <span class="number">1000</span></span><br><span class="line">      stat_counters: STAT_CPU_TIMES</span><br><span class="line">      cpufreq_period_ms: <span class="number">500</span></span><br><span class="line">      cpuidle_period_ms: <span class="number">500</span></span><br><span class="line">      gpufreq_period_ms: <span class="number">500</span></span><br><span class="line">      devfreq_period_ms: <span class="number">500</span></span><br><span class="line">      thermal_period_ms: <span class="number">1000</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;android.power&quot;</span></span><br><span class="line">    android_power_config &#123;</span><br><span class="line">      battery_poll_ms: <span class="number">250</span></span><br><span class="line">      battery_counters: BATTERY_COUNTER_CAPACITY_PERCENT</span><br><span class="line">      battery_counters: BATTERY_COUNTER_CHARGE</span><br><span class="line">      battery_counters: BATTERY_COUNTER_CURRENT</span><br><span class="line">      battery_counters: BATTERY_COUNTER_VOLTAGE</span><br><span class="line">      collect_power_rails: <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>The aim is to collect a complete set of evidence for the same window first. FrameTimeline requires Android 12 or later. <code>gpu.renderstages</code> depends on GPU producer and driver support and is unavailable on many devices. If render stages cannot be captured, report “GPU stage evidence is missing.” Do not promote frequency or power rail measurements directly into a conclusion about GPU execution.</p>
+<p>Be explicit when GPU stages are missing: <code>gpu_stage_status=unavailable; conclusion_scope=hardware_trend_only; cannot_claim=gpu_execution_delay</code>.</p>
+<p>Remember to pair <code>stat_period_ms</code> with explicit <code>stat_counters</code>. In traced_probes versions after mid-2019, leaving <code>stat_counters</code> empty collects all <code>/proc/stat</code> counters, including per-CPU times and per-IRQ counts; earlier versions may collect nothing. Explicitly specifying <code>STAT_CPU_TIMES</code> both keeps behavior consistent across versions and avoids pulling hundreds of IRQ counters into the trace.</p>
+<p><code>power/gpu_frequency</code> and <code>devfreq/devfreq_frequency</code> are event paths; <code>gpufreq_period_ms</code> and <code>devfreq_period_ms</code> are sysfs polling paths. Events provide precise change points, but you may need to look before the window for the preceding state. Polling captures sustained trends but is constrained by its sampling period and may miss brief spikes. <code>power/cpu_idle</code> records transitions; <code>cpuidle_period_ms</code> polls idle-state durations. USB connections, wakelocks, and whether a scenario is in the foreground or background all affect idle measurements.</p>
+<p>Thermal-zone names, units, and availability vary by device. If <code>thermal_period_ms</code> was not collected or there are no thermal tracks, report only “this trace contains no thermal evidence,” not “thermal control had no effect.”</p>
+<p>These polling periods suit only short diagnostic windows. Long traces require longer sampling periods, separate buffers, and measurements of write rate and CPU overhead. These power counters are not a Power HAL trace. Unless you also capture the Power HAL’s own atrace, logs, or vendor events, report only “frequency, rail, and thermal changes occurred in the same window,” not “the Power HAL caused it.”</p>
+<p>Android 10+ supports text configurations; Android 9&#x2F;P requires binary configurations. <code>pbtxt</code> works well for manual investigation and article examples, while generated binary proto configurations are preferable for automation or long-term deployment. On non-root user builds of Android 10&#x2F;11, do not assume the device can read a configuration from any path. Prefer stdin:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">adb shell <span class="string">&#x27;cat &gt; /data/local/tmp/gpu_power.pbtxt&#x27;</span> &lt; gpu_power.pbtxt</span><br><span class="line">adb shell <span class="string">&#x27;cat /data/local/tmp/gpu_power.pbtxt | perfetto --txt -c - -o /data/misc/perfetto-traces/gpu_power.perfetto-trace&#x27;</span></span><br><span class="line">adb pull /data/misc/perfetto-traces/gpu_power.perfetto-trace</span><br></pre></td></tr></table></figure>
+
+<p>For short traces, these signals can share one buffer. For long traces, separate them and examine their data volumes. Combining 1 ms GPU counter sampling, logcat, Track Event, and ftrace sched can quickly shrink the ring-buffer window. Reuse the constraints on data loss and buffer windows from Part 12 and on long-running file output from Part 15.</p>
+<h2 id="GPU-Counter-Selection-Examples"><a href="#GPU-Counter-Selection-Examples" class="headerlink" title="GPU Counter Selection Examples"></a>GPU Counter Selection Examples</h2><p>Select GPU counters for the particular device. Selecting counter IDs from its descriptor is the more robust approach; use <code>counter_names</code> and globs only when the producer descriptor explicitly supports them.</p>
+<p>The following illustrates the configuration shape only. If the descriptor exposes a suffixed name such as <code>gpu.counters.adreno</code> or <code>gpu.counters.mali</code>, use that exact name. <code>name</code>, <code>counter_ids</code>, and <code>counter_names</code> must all match what the target device supports.</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;gpu.counters&quot;</span></span><br><span class="line">    gpu_counter_config &#123;</span><br><span class="line">      counter_period_ns: <span class="number">1000000</span></span><br><span class="line">      counter_ids: <span class="number">1</span></span><br><span class="line">      counter_ids: <span class="number">3</span></span><br><span class="line">      counter_ids: <span class="number">106</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>If the producer supports name-based selection, the configuration can look like this:</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;gpu.counters.adreno&quot;</span></span><br><span class="line">    gpu_counter_config &#123;</span><br><span class="line">      counter_period_ns: <span class="number">1000000</span></span><br><span class="line">      counter_names: <span class="string">&quot;GPU % Busy&quot;</span></span><br><span class="line">      counter_names: <span class="string">&quot;*Fragment*&quot;</span></span><br><span class="line">      counter_names: <span class="string">&quot;*Texture*&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>Choose specialized counter sampling periods carefully. A 1 ms period provides detail but increases overhead and data volume. GPU counters should not be enabled by default for long-running field traces.</p>
+<h2 id="Dividing-the-Work-Between-AGI-and-Perfetto"><a href="#Dividing-the-Work-Between-AGI-and-Perfetto" class="headerlink" title="Dividing the Work Between AGI and Perfetto"></a>Dividing the Work Between AGI and Perfetto</h2><p>AGI is better suited to questions inside the graphics pipeline:</p>
+<ul>
+<li>Which render passes, draw calls, shaders, and pipeline states make up a frame?</li>
+<li>How should specialized GPU counters for fragments, vertices, textures, and bandwidth be interpreted?</li>
+<li>How can rendering be optimized at the Vulkan&#x2F;OpenGL level?</li>
+</ul>
+<p>Perfetto is better suited to system timing relationships:</p>
+<ul>
+<li>Is there unusual behavior in the main thread, RenderThread, SurfaceFlinger, or Binder around the problematic frame?</li>
+<li>Do GPU render stages run beyond the App&#x2F;SF target window?</li>
+<li>Do GPU&#x2F;CPU frequency, power rails, and thermal logs change at the same time?</li>
+<li>Does the issue occur only with the screen on, during refresh-rate changes, as temperature rises, or under background contention?</li>
+</ul>
+<p>Games, maps, video, and demanding Flutter&#x2F;WebView scenarios therefore often need both sets of evidence: Perfetto supplies system context, and AGI supplies GPU internals.</p>
+<h2 id="Check-Trace-Health-First"><a href="#Check-Trace-Health-First" class="headerlink" title="Check Trace Health First"></a>Check Trace Health First</h2><p>After obtaining a trace, do not immediately interpret missing tracks as “device unsupported.” Part 12 covers the general data-loss check, including stats for buffer packet loss and ftrace enablement failures and how to handle them. Run that query first. GPU and power data also have their own parsing stats: GPU counter specification errors, render-stage parsing errors, and power-rail parsing errors can all make signals silently disappear. Use this additional query for domain-specific entries:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> <span class="keyword">value</span> <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line">  <span class="keyword">AND</span> (</span><br><span class="line">    severity <span class="keyword">IN</span> (<span class="string">&#x27;error&#x27;</span>, <span class="string">&#x27;data_loss&#x27;</span>)</span><br><span class="line">    <span class="keyword">OR</span> name <span class="keyword">IN</span> (</span><br><span class="line">      <span class="string">&#x27;gpu_counters_invalid_spec&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;gpu_counters_missing_spec&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;gpu_render_stage_parser_errors&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;power_rail_empty_packet&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;power_rail_unknown_index&#x27;</span></span><br><span class="line">    )</span><br><span class="line">  )</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> name, idx;</span><br></pre></td></tr></table></figure>
+
+<p>The meaning of <code>idx</code> depends on the statistic: <code>traced_buf_*</code> usually uses buffer indices, ftrace CPU entries use CPU numbers, and non-indexed entries may be null. Do not map every <code>idx</code> to a buffer. Distinguish three cases in the report: the device did not expose a signal, the configuration did not match a producer, or buffer policy&#x2F;data loss discarded the signal. Only after checking configuration and trace health can you narrow the conclusion to “this device or this trace did not provide a usable signal.”</p>
+<h2 id="Identify-the-Counters-Present-in-the-Trace"><a href="#Identify-the-Counters-Present-in-the-Trace" class="headerlink" title="Identify the Counters Present in the Trace"></a>Identify the Counters Present in the Trace</h2><p>First, list all counter tracks:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  c.track_id,</span><br><span class="line">  t.name,</span><br><span class="line">  <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> samples,</span><br><span class="line">  <span class="built_in">MIN</span>(c.ts) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> first_s,</span><br><span class="line">  <span class="built_in">MAX</span>(c.ts) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> last_s</span><br><span class="line"><span class="keyword">FROM</span> counter c</span><br><span class="line"><span class="keyword">JOIN</span> counter_track t <span class="keyword">ON</span> c.track_id <span class="operator">=</span> t.id</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> c.track_id, t.name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> samples <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure>
+
+<p>Then query <code>gpu_counter_track</code> specifically for GPU counters. Names are only hints; inspect units and descriptions too:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  c.track_id,</span><br><span class="line">  g.ugpu,</span><br><span class="line">  g.gpu_id,</span><br><span class="line">  g.name,</span><br><span class="line">  g.unit,</span><br><span class="line">  g.description,</span><br><span class="line">  <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> samples,</span><br><span class="line">  <span class="built_in">MIN</span>(c.ts) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> first_s,</span><br><span class="line">  <span class="built_in">MAX</span>(c.ts) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> last_s</span><br><span class="line"><span class="keyword">FROM</span> counter c</span><br><span class="line"><span class="keyword">JOIN</span> gpu_counter_track g <span class="keyword">ON</span> c.track_id <span class="operator">=</span> g.id</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> c.track_id, g.ugpu, g.gpu_id, g.name, g.unit, g.description</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> samples <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure>
+
+<p>For reports spanning multiple GPUs or devices, include GPU metadata:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  gct.id <span class="keyword">AS</span> track_id,</span><br><span class="line">  gct.name <span class="keyword">AS</span> counter_name,</span><br><span class="line">  gct.unit,</span><br><span class="line">  gct.description,</span><br><span class="line">  gct.gpu_id <span class="keyword">AS</span> raw_gpu_id,</span><br><span class="line">  gpu.name <span class="keyword">AS</span> gpu_name,</span><br><span class="line">  gpu.vendor,</span><br><span class="line">  gpu.model,</span><br><span class="line">  gpu.architecture,</span><br><span class="line">  gpu.machine_id</span><br><span class="line"><span class="keyword">FROM</span> gpu_counter_track gct</span><br><span class="line"><span class="keyword">LEFT</span> <span class="keyword">JOIN</span> gpu <span class="keyword">ON</span> gct.ugpu <span class="operator">=</span> gpu.id</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> gpu.machine_id, gct.gpu_id, gct.name;</span><br></pre></td></tr></table></figure>
+
+<p>If the target GPU &#x2F; power counter is absent from the results, skip the specialized SQL that follows.</p>
+<p>You can also list power-rail metadata first, so the report does not mistake a raw rail name for an application-level meaning:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.power_rails;</span><br><span class="line"></span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  power_rail_name,</span><br><span class="line">  raw_power_rail_name,</span><br><span class="line">  friendly_name,</span><br><span class="line">  subsystem_name</span><br><span class="line"><span class="keyword">FROM</span> android_power_rails_metadata</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> subsystem_name, power_rail_name;</span><br></pre></td></tr></table></figure>
+
+<p>If this table is empty, do not write “the GPU rail did not rise.” Write instead: this device or this trace did not provide usable power-rail metadata.</p>
+<h2 id="Where-the-Problem-Window-Comes-From"><a href="#Where-the-Problem-Window-Comes-From" class="headerlink" title="Where the Problem Window Comes From"></a>Where the Problem Window Comes From</h2><p>GPU&#x2F;Power queries must use the same problem window. Record its source in the report: <code>frametimeline</code>, <code>track_event</code>, <code>trigger</code>, or manual annotation.</p>
+<p>Select a janky frame for the target App from FrameTimeline and extend the window before and after it:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> jank_frame <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span></span><br><span class="line">    a.ts,</span><br><span class="line">    a.dur,</span><br><span class="line">    p.name <span class="keyword">AS</span> process_name,</span><br><span class="line">    a.jank_type,</span><br><span class="line">    a.display_frame_token,</span><br><span class="line">    a.surface_frame_token</span><br><span class="line">  <span class="keyword">FROM</span> actual_frame_timeline_slice a</span><br><span class="line">  <span class="keyword">JOIN</span> process p <span class="keyword">USING</span> (upid)</span><br><span class="line">  <span class="keyword">WHERE</span> p.name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">    <span class="keyword">AND</span> <span class="built_in">COALESCE</span>(a.jank_type, <span class="string">&#x27;&#x27;</span>) <span class="keyword">NOT</span> <span class="keyword">IN</span> (<span class="string">&#x27;&#x27;</span>, <span class="string">&#x27;None&#x27;</span>)</span><br><span class="line">  <span class="keyword">ORDER</span> <span class="keyword">BY</span> a.ts</span><br><span class="line">  LIMIT <span class="number">1</span></span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  <span class="string">&#x27;frametimeline&#x27;</span> <span class="keyword">AS</span> window_source,</span><br><span class="line">  ts <span class="operator">-</span> <span class="number">5000000000</span> <span class="keyword">AS</span> start_ts,</span><br><span class="line">  ts <span class="operator">+</span> dur <span class="operator">+</span> <span class="number">1000000000</span> <span class="keyword">AS</span> end_ts,</span><br><span class="line">  display_frame_token,</span><br><span class="line">  surface_frame_token,</span><br><span class="line">  process_name,</span><br><span class="line">  jank_type</span><br><span class="line"><span class="keyword">FROM</span> jank_frame;</span><br></pre></td></tr></table></figure>
+
+<p>When selecting a window from an App Track Event or the trigger metadata from Part 15, retain the same <code>event_id</code>:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> marker <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span></span><br><span class="line">    s.ts,</span><br><span class="line">    s.dur,</span><br><span class="line">    s.name</span><br><span class="line">  <span class="keyword">FROM</span> slice s</span><br><span class="line">  <span class="keyword">WHERE</span> s.name <span class="operator">=</span> <span class="string">&#x27;FieldTrigger/app_ui_jank/event_id=evt-20260504-153012-001&#x27;</span></span><br><span class="line">  LIMIT <span class="number">1</span></span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  <span class="string">&#x27;track_event&#x27;</span> <span class="keyword">AS</span> window_source,</span><br><span class="line">  ts <span class="operator">-</span> <span class="number">5000000000</span> <span class="keyword">AS</span> start_ts,</span><br><span class="line">  ts <span class="operator">+</span> <span class="built_in">MAX</span>(dur, <span class="number">1000000000</span>) <span class="keyword">AS</span> end_ts,</span><br><span class="line">  name <span class="keyword">AS</span> marker_name,</span><br><span class="line">  <span class="number">0</span> <span class="keyword">AS</span> matched_marker_delta_ms</span><br><span class="line"><span class="keyword">FROM</span> marker;</span><br></pre></td></tr></table></figure>
+
+<p>Without a window source, you can scan only for global trends. Do not attribute a GPU&#x2F;Power fluctuation to a particular scroll or frame.</p>
+<h2 id="Querying-GPU-Render-Stages"><a href="#Querying-GPU-Render-Stages" class="headerlink" title="Querying GPU Render Stages"></a>Querying GPU Render Stages</h2><p>The analysis step “check whether GPU work extends beyond the target window” uses the <code>gpu.renderstages</code> data source. Support is much narrower than for frequency, and many devices have no corresponding producer. Always start by confirming that this trace actually contains render-stage tracks:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> id, name</span><br><span class="line"><span class="keyword">FROM</span> track</span><br><span class="line"><span class="keyword">WHERE</span> type <span class="operator">=</span> <span class="string">&#x27;gpu_render_stage&#x27;</span>;</span><br></pre></td></tr></table></figure>
+
+<p>Older articles and scripts often use <code>SELECT id, name FROM gpu_track WHERE scope = &#39;gpu_render_stage&#39;</code>. This still works today, but <code>gpu_track</code> is marked deprecated in Perfetto source: it mixes unrelated tracks such as drm, mali, render stage, vulkan, and gpu_log in one table. Its <code>scope</code> column is also just an alias for <code>type</code>. New scripts should query <code>track.type</code> directly.</p>
+<p>If the query returns zero rows, stop here and return to “Device Support Comes First.” Report <code>gpu_stage_status=unavailable</code>; do not substitute frequency or rail data.</p>
+<p>If tracks exist, extract stage slices within the problem window and sort them by time spent inside it. Focus on which stage types on which queues fill the window:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> target_window(start_ts, end_ts) <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">VALUES</span> (<span class="number">30000000000</span>, <span class="number">45000000000</span>)</span><br><span class="line">),</span><br><span class="line">stage_tracks <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> id, name</span><br><span class="line">  <span class="keyword">FROM</span> track</span><br><span class="line">  <span class="keyword">WHERE</span> type <span class="operator">=</span> <span class="string">&#x27;gpu_render_stage&#x27;</span></span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  st.name <span class="keyword">AS</span> queue_name,</span><br><span class="line">  s.name <span class="keyword">AS</span> stage_name,</span><br><span class="line">  ROUND(s.ts <span class="operator">/</span> <span class="number">1e6</span>, <span class="number">3</span>) <span class="keyword">AS</span> start_ms,</span><br><span class="line">  ROUND(<span class="built_in">MAX</span>(<span class="number">0</span>, <span class="built_in">MIN</span>(s.ts <span class="operator">+</span> s.dur, w.end_ts) <span class="operator">-</span> <span class="built_in">MAX</span>(s.ts, w.start_ts)) <span class="operator">/</span> <span class="number">1e6</span>, <span class="number">3</span>) <span class="keyword">AS</span> overlap_ms,</span><br><span class="line">  ROUND(s.dur <span class="operator">/</span> <span class="number">1e6</span>, <span class="number">3</span>) <span class="keyword">AS</span> stage_dur_ms,</span><br><span class="line">  s.arg_set_id</span><br><span class="line"><span class="keyword">FROM</span> slice s</span><br><span class="line"><span class="keyword">JOIN</span> stage_tracks st <span class="keyword">ON</span> s.track_id <span class="operator">=</span> st.id</span><br><span class="line"><span class="keyword">JOIN</span> target_window w</span><br><span class="line"><span class="keyword">WHERE</span> s.dur <span class="operator">&gt;</span> <span class="number">0</span></span><br><span class="line">  <span class="keyword">AND</span> s.ts <span class="operator">&lt;</span> w.end_ts</span><br><span class="line">  <span class="keyword">AND</span> s.ts <span class="operator">+</span> s.dur <span class="operator">&gt;</span> w.start_ts</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> overlap_ms <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">30</span>;</span><br></pre></td></tr></table></figure>
+
+<p>This query answers “what was the GPU executing in the target window, and for how long?” A stage that extends beyond or fills the target frame window, combined with FrameTimeline and RenderThread evidence, can move the finding from “the frame was late” toward “GPU execution was late.” Correlation fields such as submission and render target vary by device. They are stored in slice args; inspect the keys actually present before deciding how to join the data:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> <span class="keyword">DISTINCT</span> a.flat_key</span><br><span class="line"><span class="keyword">FROM</span> slice s</span><br><span class="line"><span class="keyword">JOIN</span> track t <span class="keyword">ON</span> s.track_id <span class="operator">=</span> t.id</span><br><span class="line"><span class="keyword">JOIN</span> args a <span class="keyword">USING</span> (arg_set_id)</span><br><span class="line"><span class="keyword">WHERE</span> t.type <span class="operator">=</span> <span class="string">&#x27;gpu_render_stage&#x27;</span></span><br><span class="line">LIMIT <span class="number">50</span>;</span><br></pre></td></tr></table></figure>
+
+<p>Record two limitations in script comments. First, the GPU producer determines track names, stage names, and args keys. Adreno and Mali output differs, so scripts intended for multiple devices must not hardcode those names. Second, newer trace processor versions organize render-stage tracks by internal track type; <code>gpu_track</code> is only a compatibility view for older scripts. If a query reports no such table&#x2F;column, use the three-way diagnosis from Part 11 and start with <code>PRAGMA table_info</code>, rather than changing application logic first.</p>
+<h2 id="GPU-Frequency-and-GPU-Memory"><a href="#GPU-Frequency-and-GPU-Memory" class="headerlink" title="GPU Frequency and GPU Memory"></a>GPU Frequency and GPU Memory</h2><p>Every specialized query must first bind to a problem window. The examples use 30–45 seconds; in practice, derive the window from a problematic FrameTimeline frame, an application marker, or the trigger metadata from Part 15.</p>
+<p>The standard library provides a GPU frequency module. This query returns GPU frequency intervals overlapping the problem window:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.gpu.frequency;</span><br><span class="line"></span><br><span class="line"><span class="keyword">WITH</span> target_window <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> <span class="number">30e9</span> <span class="keyword">AS</span> start_ts, <span class="number">45e9</span> <span class="keyword">AS</span> end_ts</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  ts <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> ts_s,</span><br><span class="line">  dur <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> dur_s,</span><br><span class="line">  gpu_id,</span><br><span class="line">  gpu_freq <span class="keyword">AS</span> gpu_freq_raw</span><br><span class="line"><span class="keyword">FROM</span> android_gpu_frequency</span><br><span class="line"><span class="keyword">JOIN</span> target_window</span><br><span class="line"><span class="keyword">WHERE</span> ts <span class="operator">&lt;</span> end_ts</span><br><span class="line">  <span class="keyword">AND</span> ts <span class="operator">+</span> dur <span class="operator">&gt;</span> start_ts</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> ts</span><br><span class="line">LIMIT <span class="number">200</span>;</span><br></pre></td></tr></table></figure>
+
+<p>The unit of <code>gpu_freq_raw</code> must follow the current device and track output, and the report must state it. Do not compare raw numbers directly across devices.</p>
+<p>GPU memory can be aggregated by process. This query finds the processes with the highest peaks in the problem window:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.gpu.memory;</span><br><span class="line"></span><br><span class="line"><span class="keyword">WITH</span> target_window <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> <span class="number">30e9</span> <span class="keyword">AS</span> start_ts, <span class="number">45e9</span> <span class="keyword">AS</span> end_ts</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  p.upid,</span><br><span class="line">  p.name <span class="keyword">AS</span> process_name,</span><br><span class="line">  <span class="built_in">MAX</span>(g.gpu_memory) <span class="operator">/</span> <span class="number">1048576.0</span> <span class="keyword">AS</span> max_gpu_mem_mb</span><br><span class="line"><span class="keyword">FROM</span> android_gpu_memory_per_process g</span><br><span class="line"><span class="keyword">JOIN</span> process p <span class="keyword">USING</span> (upid)</span><br><span class="line"><span class="keyword">JOIN</span> target_window</span><br><span class="line"><span class="keyword">WHERE</span> g.ts <span class="operator">&lt;</span> target_window.end_ts</span><br><span class="line">  <span class="keyword">AND</span> g.ts <span class="operator">+</span> g.dur <span class="operator">&gt;</span> target_window.start_ts</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> p.upid, p.name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> max_gpu_mem_mb <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">20</span>;</span><br></pre></td></tr></table></figure>
+
+<p>High GPU frequency means only that policy raised the frequency, not that the GPU is fully utilized. High GPU memory does not establish a memory-bandwidth bottleneck either; it suggests directions such as textures, buffers, or Surface counts. devfreq represents frequency nodes exposed by the device&#x2F;kernel. List raw names first, then interpret them using the SoC, kernel nodes, and vendor documentation.</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> target_window <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> <span class="number">30e9</span> <span class="keyword">AS</span> start_ts, <span class="number">45e9</span> <span class="keyword">AS</span> end_ts</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  t.name <span class="keyword">AS</span> devfreq_track_name,</span><br><span class="line">  <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> samples,</span><br><span class="line">  <span class="built_in">MIN</span>(c.ts) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> first_s,</span><br><span class="line">  <span class="built_in">MAX</span>(c.ts) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> last_s,</span><br><span class="line">  <span class="built_in">MIN</span>(c.value) <span class="keyword">AS</span> min_value_raw,</span><br><span class="line">  <span class="built_in">MAX</span>(c.value) <span class="keyword">AS</span> max_value_raw</span><br><span class="line"><span class="keyword">FROM</span> counter c</span><br><span class="line"><span class="keyword">JOIN</span> counter_track t <span class="keyword">ON</span> c.track_id <span class="operator">=</span> t.id</span><br><span class="line"><span class="keyword">JOIN</span> target_window</span><br><span class="line"><span class="keyword">WHERE</span> <span class="built_in">LOWER</span>(t.name) GLOB <span class="string">&#x27;*devfreq*&#x27;</span></span><br><span class="line">  <span class="keyword">AND</span> c.ts <span class="operator">&gt;=</span> start_ts</span><br><span class="line">  <span class="keyword">AND</span> c.ts <span class="operator">&lt;</span> end_ts</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> t.name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> samples <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure>
+
+<h2 id="Power-Rails-and-Battery-Counters"><a href="#Power-Rails-and-Battery-Counters" class="headerlink" title="Power Rails and Battery Counters"></a>Power Rails and Battery Counters</h2><p>Power rails are cumulative energy counters. The standard library converts adjacent samples into <code>average_power</code> in mW; energy is measured in uWs, or microjoules. Note that <code>energy_delta</code> is the difference from the preceding sample, whereas <code>ts/dur</code> describes the interval toward the following sample. Do not directly combine them by multiplication when clipping to a window. The query below uses <code>energy_since_boot_at_end - energy_since_boot</code> to calculate energy for the current interval, joins metadata by <code>track_id</code>, and then aggregates over the problem window:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.power_rails;</span><br><span class="line"></span><br><span class="line"><span class="keyword">WITH</span> target_window <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> <span class="number">30e9</span> <span class="keyword">AS</span> start_ts, <span class="number">45e9</span> <span class="keyword">AS</span> end_ts</span><br><span class="line">),</span><br><span class="line">rail_in_window <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span></span><br><span class="line">    c.track_id,</span><br><span class="line">    c.power_rail_name,</span><br><span class="line">    m.raw_power_rail_name,</span><br><span class="line">    m.friendly_name,</span><br><span class="line">    m.subsystem_name,</span><br><span class="line">    <span class="built_in">MIN</span>(c.ts <span class="operator">+</span> c.dur, end_ts) <span class="operator">-</span> <span class="built_in">MAX</span>(c.ts, start_ts) <span class="keyword">AS</span> overlap_dur_ns,</span><br><span class="line">    (c.energy_since_boot_at_end <span class="operator">-</span> c.energy_since_boot) <span class="operator">*</span> (</span><br><span class="line">      <span class="built_in">CAST</span>(<span class="built_in">MIN</span>(c.ts <span class="operator">+</span> c.dur, end_ts) <span class="operator">-</span> <span class="built_in">MAX</span>(c.ts, start_ts) <span class="keyword">AS</span> <span class="keyword">DOUBLE</span>) <span class="operator">/</span> c.dur</span><br><span class="line">    ) <span class="keyword">AS</span> overlap_energy_delta_uWs</span><br><span class="line">  <span class="keyword">FROM</span> android_power_rails_counters c</span><br><span class="line">  <span class="keyword">LEFT</span> <span class="keyword">JOIN</span> android_power_rails_metadata m <span class="keyword">USING</span> (track_id)</span><br><span class="line">  <span class="keyword">JOIN</span> target_window</span><br><span class="line">  <span class="keyword">WHERE</span> c.ts <span class="operator">&lt;</span> end_ts</span><br><span class="line">    <span class="keyword">AND</span> c.ts <span class="operator">+</span> c.dur <span class="operator">&gt;</span> start_ts</span><br><span class="line">    <span class="keyword">AND</span> c.dur <span class="operator">&gt;</span> <span class="number">0</span></span><br><span class="line">    <span class="keyword">AND</span> c.energy_since_boot_at_end <span class="keyword">IS</span> <span class="keyword">NOT</span> <span class="keyword">NULL</span></span><br><span class="line">    <span class="keyword">AND</span> c.energy_since_boot_at_end <span class="operator">&gt;=</span> c.energy_since_boot</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  track_id,</span><br><span class="line">  power_rail_name,</span><br><span class="line">  raw_power_rail_name,</span><br><span class="line">  friendly_name,</span><br><span class="line">  subsystem_name,</span><br><span class="line">  <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> valid_samples,</span><br><span class="line">  <span class="built_in">SUM</span>(overlap_dur_ns) <span class="keyword">AS</span> covered_dur_ns,</span><br><span class="line">  <span class="built_in">SUM</span>(overlap_energy_delta_uWs) <span class="keyword">AS</span> energy_delta_uWs,</span><br><span class="line">  <span class="built_in">SUM</span>(overlap_energy_delta_uWs) <span class="operator">/</span> (<span class="built_in">SUM</span>(overlap_dur_ns) <span class="operator">/</span> <span class="number">1e9</span>) <span class="operator">/</span> <span class="number">1000.0</span> <span class="keyword">AS</span> avg_power_mw</span><br><span class="line"><span class="keyword">FROM</span> rail_in_window</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> track_id, power_rail_name, raw_power_rail_name, friendly_name, subsystem_name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> avg_power_mw <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">20</span>;</span><br></pre></td></tr></table></figure>
+
+<p><code>energy_delta_uWs</code> estimates energy over the overlap assuming constant power between adjacent samples. <code>avg_power_mw</code> averages only over covered intervals with valid adjacent samples; missing intervals are not treated as zero power. Intervals where the cumulative count decreases are excluded. Include <code>valid_samples</code>, <code>covered_dur_ns</code>, and the window length in the report. Do not draw conclusions from rail rankings when coverage is insufficient.</p>
+<p>Battery counters can be queried directly from raw counters, but units must be labeled:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> target_window <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> <span class="number">30e9</span> <span class="keyword">AS</span> start_ts, <span class="number">45e9</span> <span class="keyword">AS</span> end_ts</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  c.ts <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> ts_s,</span><br><span class="line">  t.name,</span><br><span class="line">  c.value,</span><br><span class="line">  <span class="keyword">CASE</span></span><br><span class="line">    <span class="keyword">WHEN</span> t.name GLOB <span class="string">&#x27;*current_ua&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;uA&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> t.name GLOB <span class="string">&#x27;*charge_uah&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;uAh&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> t.name GLOB <span class="string">&#x27;*capacity_pct&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;%&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> t.name GLOB <span class="string">&#x27;*voltage_uv&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;uV&#x27;</span></span><br><span class="line">    <span class="keyword">ELSE</span> <span class="string">&#x27;unknown&#x27;</span></span><br><span class="line">  <span class="keyword">END</span> <span class="keyword">AS</span> unit</span><br><span class="line"><span class="keyword">FROM</span> counter c</span><br><span class="line"><span class="keyword">JOIN</span> counter_track t <span class="keyword">ON</span> c.track_id <span class="operator">=</span> t.id</span><br><span class="line"><span class="keyword">JOIN</span> target_window</span><br><span class="line"><span class="keyword">WHERE</span> t.name GLOB <span class="string">&#x27;batt.*&#x27;</span></span><br><span class="line">  <span class="keyword">AND</span> c.ts <span class="operator">&gt;=</span> start_ts</span><br><span class="line">  <span class="keyword">AND</span> c.ts <span class="operator">&lt;</span> end_ts</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> c.ts;</span><br></pre></td></tr></table></figure>
+
+<p>There is another laboratory trap: USB connections affect battery current. The official documentation also warns that a connected USB cable may produce positive current and rising charge, indicating that the device is charging. For power comparisons, control USB power, separate the data and power connections, or use battery current only as a trend reference.</p>
+<p>Counter track names take the form <code>batt.&lt;counter&gt;</code>. When the device reports a battery name, they become <code>batt.&lt;battery_name&gt;.&lt;counter&gt;</code>. Determine units with suffix GLOB patterns rather than hardcoding full names.</p>
+<p><code>batt.current_ua</code> measures current at the whole-device battery: negative values usually indicate battery discharge, while positive values indicate that external power is charging the battery. This sign describes battery current only; it does not represent the power consumption of a particular rail or App.</p>
+<p>Use window averages, medians, or stable intervals in reports, not isolated peaks. Every interpretation of current must also state USB&#x2F;charging status.</p>
+<p>Power analysis is closer to an A&#x2F;B experiment than to locating individual janky frames. Control brightness, refresh rate, network, temperature, background tasks, USB power, and scenario duration, then compare two versions on the same device. Android Studio Power Profiler documentation likewise uses ODPM data to compare different implementations of the same feature, not to blame an App after a single sample.</p>
+<h2 id="Work-Through-the-Same-Window"><a href="#Work-Through-the-Same-Window" class="headerlink" title="Work Through the Same Window"></a>Work Through the Same Window</h2><p>For GPU&#x2F;Power investigations, this sequence is more reliable:</p>
+<ol>
+<li>Use FrameTimeline to locate the problematic frame or window.</li>
+<li>Check whether the main thread, RenderThread, or SurfaceFlinger has already missed its timing target.</li>
+<li>Check whether GPU render stages &#x2F; GPU completion extend beyond the target window.</li>
+<li>Check GPU frequency changes for boosts, reductions, or thermally constrained caps.</li>
+<li>Inspect GPU counters or AGI for directions such as fragment, texture, shader, or bandwidth pressure.</li>
+<li>Inspect power rails &#x2F; battery current for power or temperature-rise constraints.</li>
+<li>Return to the system trace and check whether Binder, CPU contention, background animations, or refresh-rate changes explain the same interval.</li>
+</ol>
+<p>Do not jump from a power-rail peak to “this App consumes excessive power.” Battery counters cover the whole device; power rails cover hardware subsystems. App attribution also requires foreground state, UID, threads, Surfaces, and application events.</p>
+<h2 id="Make-Reports-Machine-Readable"><a href="#Make-Reports-Machine-Readable" class="headerlink" title="Make Reports Machine-Readable"></a>Make Reports Machine-Readable</h2><p>GPU&#x2F;Power conclusions need a minimal schema so reviewers can see what evidence is missing and what the available evidence supports:</p>
+<figure class="highlight json"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br></pre></td><td class="code"><pre><span class="line"><span class="punctuation">&#123;</span></span><br><span class="line">  <span class="attr">&quot;trace_name&quot;</span><span class="punctuation">:</span> <span class="string">&quot;gpu_power_20260504_153012&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;device&quot;</span><span class="punctuation">:</span> <span class="string">&quot;device_name&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;android_build&quot;</span><span class="punctuation">:</span> <span class="string">&quot;fingerprint&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;gpu_vendor&quot;</span><span class="punctuation">:</span> <span class="string">&quot;Qualcomm&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;gpu_model&quot;</span><span class="punctuation">:</span> <span class="string">&quot;Adreno 740&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;scenario&quot;</span><span class="punctuation">:</span> <span class="string">&quot;feed_scroll&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;window_source&quot;</span><span class="punctuation">:</span> <span class="string">&quot;frametimeline&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;window_start_ms&quot;</span><span class="punctuation">:</span> <span class="number">30000</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;window_end_ms&quot;</span><span class="punctuation">:</span> <span class="number">45000</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;app_frame_count&quot;</span><span class="punctuation">:</span> <span class="number">900</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;jank_count&quot;</span><span class="punctuation">:</span> <span class="number">12</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;app_thread_status&quot;</span><span class="punctuation">:</span> <span class="string">&quot;within_budget&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;rt_status&quot;</span><span class="punctuation">:</span> <span class="string">&quot;within_budget&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;sf_status&quot;</span><span class="punctuation">:</span> <span class="string">&quot;within_budget&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;gpu_stage_status&quot;</span><span class="punctuation">:</span> <span class="string">&quot;available&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;gpu_freq_status&quot;</span><span class="punctuation">:</span> <span class="string">&quot;high_raw_khz&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;gpu_counter_status&quot;</span><span class="punctuation">:</span> <span class="string">&quot;fragment_pressure&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;power_rail_status&quot;</span><span class="punctuation">:</span> <span class="string">&quot;available&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;battery_status&quot;</span><span class="punctuation">:</span> <span class="string">&quot;usb_power_connected&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;thermal_status&quot;</span><span class="punctuation">:</span> <span class="string">&quot;nominal&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;stats_quality_level&quot;</span><span class="punctuation">:</span> <span class="string">&quot;warning&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;fallback_used&quot;</span><span class="punctuation">:</span> <span class="string">&quot;none&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;conclusion_scope&quot;</span><span class="punctuation">:</span> <span class="string">&quot;gpu_direction&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;evidence_grade&quot;</span><span class="punctuation">:</span> <span class="string">&quot;B&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;next_tool&quot;</span><span class="punctuation">:</span> <span class="string">&quot;AGI&quot;</span></span><br><span class="line"><span class="punctuation">&#125;</span></span><br></pre></td></tr></table></figure>
+
+<p>For App teams, power investigations more often produce A&#x2F;B reports than accusations based on a single trace:</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">run_id,group,device,brightness,refresh_rate,network,thermal_state,usb_power_state,scenario_duration_ms,avg_gpu_rail_mw,avg_display_rail_mw,avg_battery_current_ua,jank_rate,frame_count,confidence_notes</span><br><span class="line">run-001,before,pixel,200nit,120hz,wifi,nominal,disconnected,300000,420,510,-820000,0.034,36000,stable temperature</span><br><span class="line">run-002,after,pixel,200nit,120hz,wifi,nominal,disconnected,300000,360,508,-760000,0.031,36000,same preset</span><br></pre></td></tr></table></figure>
+
+<p>Report signals separately from actions available to the App:</p>
+<table>
+<thead>
+<tr>
+<th>Signal</th>
+<th>Possible App actions</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Fragment&#x2F;shader pressure</td>
+<td>Reduce overdraw, shader complexity, and the share of blur&#x2F;shadows&#x2F;effects</td>
+</tr>
+<tr>
+<td>Texture&#x2F;bandwidth pressure</td>
+<td>Reduce texture dimensions and format cost, upload frequency, and repeated sampling</td>
+</tr>
+<tr>
+<td>High GPU memory</td>
+<td>Inspect Surface, texture, and buffer lifecycles and cache limits</td>
+</tr>
+<tr>
+<td>SF jank &#x2F; composition pressure</td>
+<td>Inspect layer counts, transparent layers, HWC&#x2F;GPU composition, and BufferQueue</td>
+</tr>
+<tr>
+<td>Power&#x2F;thermal trend</td>
+<td>Reduce frame rate, animation duty cycle, and background rendering; adjust refresh-rate policy</td>
+</tr>
+</tbody></table>
+<p>Use consistent conclusion grades:</p>
+<table>
+<thead>
+<tr>
+<th>Grade</th>
+<th>Supported conclusion</th>
+<th>Claims to avoid</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Strong conclusion</td>
+<td>Frames, thread&#x2F;SF evidence, GPU stages, and counters or AGI agree within the same window</td>
+<td>Attribution based only on frequency or rails</td>
+</tr>
+<tr>
+<td>Correlated direction</td>
+<td>Frequency, devfreq, rails, and thermal signals change with the window, but GPU stages&#x2F;counters are missing</td>
+<td>Presenting this as the root cause of an individual App frame</td>
+</tr>
+<tr>
+<td>Missing evidence</td>
+<td>Descriptors, stats, metadata, or key tracks are missing</td>
+<td>Treating missing tracks as proof that no problem exists</td>
+</tr>
+</tbody></table>
+<h2 id="Three-Common-Scenarios"><a href="#Three-Common-Scenarios" class="headerlink" title="Three Common Scenarios"></a>Three Common Scenarios</h2><h3 id="GPU-Pressure-and-Late-Frames-in-the-Same-Window"><a href="#GPU-Pressure-and-Late-Frames-in-the-Same-Window" class="headerlink" title="GPU Pressure and Late Frames in the Same Window"></a>GPU Pressure and Late Frames in the Same Window</h3><p>This scenario requires at least the following evidence: FrameTimeline identifies problematic frames; App-side UI&#x2F;RenderThread&#x2F;HWUI did not exceed budget first; the SurfaceFlinger timeline distinguishes App jank from SF jank; GPU render stages or completion are late; GPU frequency rises; and GPU counters indicate some form of fragment&#x2F;texture&#x2F;bandwidth pressure.</p>
+<p>Also validate attribution using <code>surface_frame_token</code> &#x2F; <code>display_frame_token</code>, <code>layer_name</code>, process, and the App&#x2F;SF actual timelines. If the evidence cannot be associated with the current frame, layer, or process, report only “GPU-side pressure correlates with the problem window,” not “this App’s GPU work caused it.”</p>
+<p>Render stages cannot independently replace fences. For display completion, also validate the present fence, FrameTimeline, and SurfaceFlinger timeline.</p>
+<h3 id="Still-Slow-After-a-Frequency-Boost"><a href="#Still-Slow-After-a-Frequency-Boost" class="headerlink" title="Still Slow After a Frequency Boost"></a>Still Slow After a Frequency Boost</h3><p>Common directions include internal GPU bottlenecks, frequency pressure on memory&#x2F;interconnect-related devices, a more complex SurfaceFlinger composition path, thermal throttling, and tight dependencies between stages in the App&#x2F;SF&#x2F;GPU pipeline. AGI or vendor GPU tools are especially useful here. Do not conclude from Perfetto frequency tracks alone.</p>
+<h3 id="Abnormal-Power-Consumption"><a href="#Abnormal-Power-Consumption" class="headerlink" title="Abnormal Power Consumption"></a>Abnormal Power Consumption</h3><p>Start with screen state, refresh rate, brightness, continuous animation, and background rendering, then inspect CPU&#x2F;GPU&#x2F;devfreq and power rails. Brief current peaks are not a sound basis for a conclusion. Combine this analysis with long traces or snapshots from Part 15 and check whether the same scenario reproduces consistently across runs.</p>
+<h2 id="Checks-Before-Writing-the-Report"><a href="#Checks-Before-Writing-the-Report" class="headerlink" title="Checks Before Writing the Report"></a>Checks Before Writing the Report</h2><table>
+<thead>
+<tr>
+<th>Check</th>
+<th>How to report it</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>GPU counters, render stages, or power rails are missing</td>
+<td>Write “this trace has no corresponding evidence,” not “there is no GPU&#x2F;power problem”</td>
+</tr>
+<tr>
+<td>Counter names and semantics differ by GPU vendor</td>
+<td>Record device model, GPU, counter ID&#x2F;name&#x2F;unit, and descriptor source</td>
+</tr>
+<tr>
+<td>Battery current covers the whole device</td>
+<td>Report whole-device trends; do not attribute them directly to an App</td>
+</tr>
+<tr>
+<td>USB affects battery current</td>
+<td>Record USB&#x2F;charging state and how power supply was controlled</td>
+</tr>
+<tr>
+<td>GPU frequency is high or low</td>
+<td>Describe frequency state and cap changes; do not directly claim a GPU bottleneck or lack of response</td>
+</tr>
+<tr>
+<td>Power rails measure subsystem energy</td>
+<td>Report the rail&#x2F;subsystem, not an individual process’s consumption</td>
+</tr>
+<tr>
+<td>GPU counters generate large data volumes</td>
+<td>Record sampling period, window length, and whether collection is restricted to the laboratory</td>
+</tr>
+<tr>
+<td>The same counter is not comparable across GPU vendors</td>
+<td>State device and driver boundaries; do not compare raw values across vendors</td>
+</tr>
+</tbody></table>
+<h2 id="Turn-Hardware-Signals-into-Reviewable-Conclusions"><a href="#Turn-Hardware-Signals-into-Reviewable-Conclusions" class="headerlink" title="Turn Hardware Signals into Reviewable Conclusions"></a>Turn Hardware Signals into Reviewable Conclusions</h2><p>GPU&#x2F;Power counters supplement rendering analysis with hardware evidence. They cannot replace FrameTimeline, RenderThread, SurfaceFlinger, or CPU scheduling. They help determine whether the problem has reached the GPU, memory&#x2F;interconnect, power, or thermal-control layer.</p>
+<p>Follow three rules in reports: mark signals the device did not provide as missing rather than as counterevidence; identify a GPU&#x2F;power direction only when multiple sources agree within the same window; and move to AGI or vendor GPU tools when the evidence points inside the GPU.</p>
+<h2 id="References"><a href="#References" class="headerlink" title="References"></a>References</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/gpu">GPU data sources</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/battery-counters">Power data sources</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/analysis/stdlib-docs">PerfettoSQL standard library</a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.android.com/agi/sys-trace/counters">AGI GPU performance counters</a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.android.com/studio/profile/power-profiler">Android Studio Power Profiler</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/frametimeline">FrameTimeline</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/cpu-freq">CPU frequency and idle states</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/analysis/sql-stats">Trace Processor Stats</a></li>
+</ol>
+<p>Source revision checked: <code>b23c67be1159e3f0b0657bd97be9e139e0d8ee2c</code> (2026-09-19).</p>
+<ul>
+<li><a target="_blank" rel="noopener" href="https://github.com/google/perfetto/blob/b23c67be1159e3f0b0657bd97be9e139e0d8ee2c/src/trace_processor/perfetto_sql/stdlib/android/power_rails.sql">Power-rail interval implementation</a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/google/perfetto/blob/b23c67be1159e3f0b0657bd97be9e139e0d8ee2c/src/trace_processor/perfetto_sql/stdlib/counters/intervals.sql">Counter forward intervals and backward delta definitions</a></li>
+</ul>
+<h2 id="About-Me-and-the-Blog"><a href="#About-Me-and-the-Blog" class="headerlink" title="About Me and the Blog"></a>About Me and the Blog</h2><p>Follow <a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/">Android Performance</a>.</p>
+
+    </article>
+    <!-- license -->
+        <div class="license-wrapper">
+            <p>Author：<a href="https://androidperformance.com/en">Gracker</a>
+            <p>Link：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">https://androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/</a>
+            <p>Publish date：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">May 4th 2026, 10:16:00 am</a>
+            <p>Update date：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">September 20th 2026, 12:52:22 am</a>
+            <p>License：This work is licensed under <a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a></p>
+        </div>
+    <!-- paginator -->
+    <ul class="post-paginator">
+        <li class="next">
+                <div class="nextSlogan">Next Post</div>
+                <a href="/en/2026/05/04/Android-Perfetto-17-Engineering-Domain-And-Platform-Tracing/" title="Android Perfetto Series 17: Domain Automation, Issue Checklists, and Platform Infrastructure">
+                    <div class="nextTitle">Android Perfetto Series 17: Domain Automation, Issue Checklists, and Platform Infrastructure</div>
+                </a>
+        </li>
+        <li class="previous">
+                <div class="prevSlogan">Previous Post</div>
+                <a href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/" title="Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems">
+                    <div class="prevTitle">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</div>
+                </a>
+        </li>
+    </ul>
+    <!-- comment -->
+        <div class="post-comment">
+            <!-- 来必力 City 版安装代码 -->
+
+            
+            
+            
+            <!-- utteranc评论 -->
+
+            <!-- partial('_partial/comment/changyan') -->
+            <!--PC版-->
+
+            
+            
+            
+        </div>
+    <!-- timeliness note -->
+    <!-- idea from: https://hexo.fluid-dev.com/posts/hexo-injector/#%E6%96%87%E7%AB%A0%E6%97%B6%E6%95%88%E6%80%A7%E6%8F%90%E7%A4%BA -->
+    <!-- Mathjax -->
+</main>
+
+                <!-- profile -->
+            </div>
+            <footer class="footer footer-unloaded">
+    <!-- social  -->
+        <div class="social">
+                            <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title="email" ></a>
+                <a href="https://github.com/gracker" class="iconfont-archer github" target="_blank" title="github"></a>
+                <span class="iconfont-archer wechat" title="wechat">
+                        <img class="profile-qr" src="/en/assets/Wechat.jpeg" />
+                </span>
+                <span class="iconfont-archer qq" title="qq: 553000664">
+                </span>
+                <a href="https://weibo.com/gracker520" class="iconfont-archer weibo" target="_blank" title="weibo"></a>
+                <a href="https://www.zhihu.com/people/gracker" class="iconfont-archer zhihu" target="_blank" title="zhihu"></a>
+                <a href="https://twitter.com/Gracker_Gao" class="iconfont-archer twitter" target="_blank" title="twitter"></a>
+                <a href="https://juejin.im/user/557b0590e4b052e031453d76" class="iconfont-archer juejin" target="_blank" title="juejin"></a>
+                <a href="https://www.youtube.com/@grackers" class="iconfont-archer youtube" target="_blank" title="youtube"></a>
+                <a href="/en/atom.xml" class="iconfont-archer rss" target="_blank" title="rss"></a>
+
+        </div>
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- website approve for Chinese user -->
+        <div class="website-approve">
+                <span id="icp-approve" class="icp-approve">
+                    <a href="https://beian.miit.gov.cn/" target="_blank">蜀 ICP 备 20016190 号</a>
+                </span>
+        </div>
+</footer>
+
+        </div>
+        <!-- toc -->
+            <div class="toc-wrapper toc-wrapper-loding" style=    top:50vh;
+>
+                <div class="toc-catalog">
+                    <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+                </div>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-Series-Catalog"><span class="toc-number">1.</span> <span class="toc-text">Perfetto Series Catalog</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#When-Hardware-Counters-Are-Needed"><span class="toc-number">2.</span> <span class="toc-text">When Hardware Counters Are Needed</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Keep-the-Data-Types-Separate"><span class="toc-number">3.</span> <span class="toc-text">Keep the Data Types Separate</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Device-Support-Comes-First"><span class="toc-number">4.</span> <span class="toc-text">Device Support Comes First</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Confirm-Device-Capabilities-First"><span class="toc-number">5.</span> <span class="toc-text">Confirm Device Capabilities First</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#A-Minimal-Signal-Set-for-Short-Traces"><span class="toc-number">6.</span> <span class="toc-text">A Minimal Signal Set for Short Traces</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#GPU-Counter-Selection-Examples"><span class="toc-number">7.</span> <span class="toc-text">GPU Counter Selection Examples</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Dividing-the-Work-Between-AGI-and-Perfetto"><span class="toc-number">8.</span> <span class="toc-text">Dividing the Work Between AGI and Perfetto</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Check-Trace-Health-First"><span class="toc-number">9.</span> <span class="toc-text">Check Trace Health First</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Identify-the-Counters-Present-in-the-Trace"><span class="toc-number">10.</span> <span class="toc-text">Identify the Counters Present in the Trace</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Where-the-Problem-Window-Comes-From"><span class="toc-number">11.</span> <span class="toc-text">Where the Problem Window Comes From</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Querying-GPU-Render-Stages"><span class="toc-number">12.</span> <span class="toc-text">Querying GPU Render Stages</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#GPU-Frequency-and-GPU-Memory"><span class="toc-number">13.</span> <span class="toc-text">GPU Frequency and GPU Memory</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Power-Rails-and-Battery-Counters"><span class="toc-number">14.</span> <span class="toc-text">Power Rails and Battery Counters</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Work-Through-the-Same-Window"><span class="toc-number">15.</span> <span class="toc-text">Work Through the Same Window</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Make-Reports-Machine-Readable"><span class="toc-number">16.</span> <span class="toc-text">Make Reports Machine-Readable</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Three-Common-Scenarios"><span class="toc-number">17.</span> <span class="toc-text">Three Common Scenarios</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#GPU-Pressure-and-Late-Frames-in-the-Same-Window"><span class="toc-number">17.1.</span> <span class="toc-text">GPU Pressure and Late Frames in the Same Window</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Still-Slow-After-a-Frequency-Boost"><span class="toc-number">17.2.</span> <span class="toc-text">Still Slow After a Frequency Boost</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Abnormal-Power-Consumption"><span class="toc-number">17.3.</span> <span class="toc-text">Abnormal Power Consumption</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Checks-Before-Writing-the-Report"><span class="toc-number">18.</span> <span class="toc-text">Checks Before Writing the Report</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Turn-Hardware-Signals-into-Reviewable-Conclusions"><span class="toc-number">19.</span> <span class="toc-text">Turn Hardware Signals into Reviewable Conclusions</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#References"><span class="toc-number">20.</span> <span class="toc-text">References</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#About-Me-and-the-Blog"><span class="toc-number">21.</span> <span class="toc-text">About Me and the Blog</span></a></li></ol>
+            </div>
+        <!-- sidebar -->
+        <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+        <div class="sidebar-panel-archives">
+    <!-- 在 ejs 中将 archive 按照时间排序 -->
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 140
+        </div>
+    </div>
+    <div class="post-archive">
+            <div class="archive-year"> 2026 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2026/09/19/SmartPerfetto-v1.12.0-Release-Notes/">SmartPerfetto v1.12.0 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2026/09/19/AIW-Open-Source-Android-Internals-Wiki/">Half a Year in the Making: Open-Sourcing an Android Internals Ebook</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/en/2026/08/21/SmartPerfetto-Five-Week-Update/">SmartPerfetto v1.7.0 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/17</span>
+            <a class="archive-post-title" href="/en/2026/07/17/SmartPerfetto-Six-Week-Update/">SmartPerfetto v1.1.1 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/04</span>
+            <a class="archive-post-title" href="/en/2026/06/04/SmartPerfetto-Three-Week-Update/">SmartPerfetto v1.0.28 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/17</span>
+            <a class="archive-post-title" href="/en/2026/05/17/SmartPerfetto-Two-Week-Update/">SmartPerfetto v1.0.7 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">Android Perfetto Series 12: Trace Dataflow and Data Loss Troubleshooting</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto Series 14: heapprofd and Memory Profiling</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-11-PerfettoSQL-TraceProcessor-Automation/">Android Perfetto Series 11: PerfettoSQL, Trace Processor, and Regression Detection</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto Series 18: Response Latency in Practice, from Input Events to First-Frame Feedback</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-17-Engineering-Domain-And-Platform-Tracing/">Android Perfetto Series 17: Domain Automation, Issue Checklists, and Platform Infrastructure</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/29</span>
+            <a class="archive-post-title" href="/en/2026/04/29/SmartPerfetto-Open-Source-Perfetto-AI-Assistant/">SmartPerfetto Is Open Source: A Perfetto AI Assistant for Android Trace Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/28</span>
+            <a class="archive-post-title" href="/en/2026/04/28/Agent-OS-Task-Entry/">Long-form Forecast: Phones May No Longer Start from Apps: How Agent OS Takes Over the Task Entry Point</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/10</span>
+            <a class="archive-post-title" href="/en/2026/04/10/SmartPerfetto-Architecture-Deep-Dive-QA/">SmartPerfetto Architecture Q&A: 8 In-Depth Technical Questions</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/10</span>
+            <a class="archive-post-title" href="/en/2026/04/10/SmartPerfetto-Architecture-Deep-Dive/">From Trace to Insight: Harness Engineering in SmartPerfetto AI Agent</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/10</span>
+            <a class="archive-post-title" href="/en/2026/03/10/OpenClaw-FAQ/">OpenClaw FAQ: Token Costs, Use Cases, Local Models, Privacy, and Day-to-Day Experience</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/08</span>
+            <a class="archive-post-title" href="/en/2026/03/08/OpenClaw-Local-Practice/">After Running OpenClaw Locally for Three Weeks, I Realized It's Not a Chatbot</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2025 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/16</span>
+            <a class="archive-post-title" href="/en/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto Series 10: Binder Scheduling and Lock Contention</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/en/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto Series 9: CPU Information Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/en/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto Series 8: Understanding Vsync Mechanism and Performance Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/02</span>
+            <a class="archive-post-title" href="/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto Series 7: MainThread and RenderThread Deep Dive</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/26</span>
+            <a class="archive-post-title" href="/en/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto Series 6: Why 120Hz? Advantages and Challenges</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/26</span>
+            <a class="archive-post-title" href="/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Choreographer-based Rendering Flow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto Series 4: Opening Large Traces via Command Line</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-01-ANR-Design/">Android ANR Series 1: Understanding Android ANR Design Philosophy</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2024 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto Series 1: Introduction to Perfetto</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/en/2024/03/27/Android-Perfetto-101/">Android Perfetto Series Catalog</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/01</span>
+            <a class="archive-post-title" href="/en/2024/01/01/2023-review/">Reflections on 2023: Health, Career, and the Future</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2023 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/en/2023/08/21/the-performance-design-of-os/">Performance Considerations in Operating System Design</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/en/2023/05/14/bad-android-app-with-system-permissions/">Can an App Really Do Whatever It Wants With System Permissions?</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2022 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/en/2022/03/27/the-performance-tea-part-01/">The Performance Community Tea Talk - Episode 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-sleep/">Systrace Thread CPU State Analysis Tips - Sleep and Uninterruptible Sleep</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-running/">Systrace Thread CPU State Analysis Tips - Running</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2022/01/21/android-systrace-cpu-state-runnable/">Systrace Thread CPU State Analysis Tips - Runnable</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/en/2022/01/07/The-Performace-1-Performance-Tools/">Android Performance Optimization: Techniques, Methods, and Tools</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/en/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/03</span>
+            <a class="archive-post-title" href="/en/2022/01/03/2021-Review/">2021 Year in Review: Baby, Career, and Growth</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2021 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/27</span>
+            <a class="archive-post-title" href="/en/2021/10/27/if-i-write-a-book-about-performance/">What Should Be in a Book About Android Smoothness?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/26</span>
+            <a class="archive-post-title" href="/en/2021/10/26/build-android-12/">Android System Development Series (1): Downloading, Compiling, and Flashing Android 12</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace Responsiveness in Action 3 - Extended Knowledge on Responsiveness</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace Responsiveness in Action 1 - Understanding Responsiveness Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace Responsiveness in Action 2 - Responsiveness Analysis - Using App Startup as an Example</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace Smoothness in Action 3 - FAQs During Jank Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2020 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span>
+            <a class="archive-post-title" href="/en/2020/08/20/weibo-imageload-opt-on-huawei/">Why is the Weibo Experience Better on Huawei? A Technical Analysis and Reflection</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/en/2020/05/26/samsung_crash/">An Incident Caused by a 'Leap' Month - Analysis of Samsung System Reboots</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/en/2020/05/07/Android-App-Chain-Wakeup/">Analysis of Android App Chain Wakeups</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/14</span>
+            <a class="archive-post-title" href="/en/2020/02/14/Android-Systrace-SurfaceFlinger/">Android Systrace Basics - SurfaceFlinger Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/03</span>
+            <a class="archive-post-title" href="/en/2020/02/03/android-development-learning-path-2020-edition/">Android Developer Learning Path (2020 Edition)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span>
+            <a class="archive-post-title" href="/en/2020/01/28/2020-read/">My 2020 Reading List</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2019 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/21</span>
+            <a class="archive-post-title" href="/en/2019/12/21/Android-Systrace-CPU/">Android Systrace Basics - CPU Info Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/15</span>
+            <a class="archive-post-title" href="/en/2019/12/15/Android-Systrace-Triple-Buffer/">Android Systrace Basics - Triple Buffer Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/06</span>
+            <a class="archive-post-title" href="/en/2019/12/06/Android-Systrace-Binder/">Android Systrace Basics - Binder and Lock Contention Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/en/2019/12/01/BlogMap/">[Sticky] Blog Article Directory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/en/2019/12/01/Android-Systrace-Vsync/">Android Systrace Basics - Vsync Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/06</span>
+            <a class="archive-post-title" href="/en/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Android Systrace Basics - MainThread and RenderThread Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/04</span>
+            <a class="archive-post-title" href="/en/2019/11/04/Android-Systrace-Input/">Android Systrace Basics - Input Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/24</span>
+            <a class="archive-post-title" href="/en/2019/10/24/Android-Background-Animation/">Analysis of 'Zombie Animations' in the Android Background</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/22</span>
+            <a class="archive-post-title" href="/en/2019/10/22/Android-Choreographer/">Detailed Explanation of Android Rendering Mechanism Based on Choreographer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/en/2019/09/18/Android-Jank-Due-To-Low-Memory/">Overview of Jank and Frame Drops in Android - Low Memory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/17</span>
+            <a class="archive-post-title" href="/en/2019/09/17/Android-Kill-Background-App-Debug/">Case Study: Debugging the Android Launcher Kill Problem</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Debug/">Overview of Jank and Frame Drops in Android - Methodology</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/en/2019/09/01/Android-Activity-Lunch-Mode/">A Detailed Guide to Activity Launch Modes in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/en/2019/07/27/Android-Hardware-Layer/">A Deep Dive into Hardware Layers in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/en/2019/07/27/Android-Hardware-Layer-NEW/">Detailed Explanation of Hardware Layer in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/23</span>
+            <a class="archive-post-title" href="/en/2019/07/23/Android-Systrace-Pre/">Android Systrace Basics - Prerequisites for Analyzing Systrace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/29</span>
+            <a class="archive-post-title" href="/en/2019/06/29/Android-Systrace-SystemServer/">Android Systrace Basics - SystemServer Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/en/2019/05/28/Android-Systrace-About/">Android Systrace Basics - Introduction to Systrace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/27</span>
+            <a class="archive-post-title" href="/en/2019/05/27/why-60-fps/">Android Systrace Basics - Why 60 FPS?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/en/2019/05/26/Android_Systrace_0/">Android Systrace -- Series Article Index</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/15</span>
+            <a class="archive-post-title" href="/en/2019/05/15/90hz-on-android/">A New Era of Smoothness: Thoughts on 90Hz on Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/en/2019/04/07/Sharp-Tools/">Sharp Tools - Efficient Tool Recommendations</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/en/2019/04/07/liqi/">Liqi - High-Efficiency Tools Recommendation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2019/01/21/android-performance-case-jank-accessbility/">Case Analysis of System-wide Stutter Caused by Android Accessibility Service</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/12</span>
+            <a class="archive-post-title" href="/en/2019/01/12/recommend-of-2018/">2018 Best Items Recommendations - A Reward for Your Hard Work</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2018 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span>
+            <a class="archive-post-title" href="/en/2018/11/01/android-system-develop-0/">Setting Up the Android System Development Environment</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/25</span>
+            <a class="archive-post-title" href="/en/2018/10/25/How-do-engineers-count-well/">Lu Qi: Besides Good Code, What Makes an Engineer Excellent?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/01</span>
+            <a class="archive-post-title" href="/en/2018/10/01/how-to-stop-sucking-and-be-awesome-instead-8/">The Programmer's Apprenticeship - 08: The Beauty of Reading</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/30</span>
+            <a class="archive-post-title" href="/en/2018/09/30/how-to-stop-sucking-and-be-awesome-instead-7/">The Programmer's Apprenticeship - 07: Games and Programming</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/29</span>
+            <a class="archive-post-title" href="/en/2018/09/29/how-to-stop-sucking-and-be-awesome-instead-6/">The Programmer's Apprenticeship - 06: All About the Internet</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/28</span>
+            <a class="archive-post-title" href="/en/2018/09/28/how-to-stop-sucking-and-be-awesome-instead-5/">The Programmer's Apprenticeship - 05: Know Your Users</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/27</span>
+            <a class="archive-post-title" href="/en/2018/09/27/how-to-stop-sucking-and-be-awesome-instead-4/">The Programmer's Apprenticeship - 04: Reflections on Testing</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/26</span>
+            <a class="archive-post-title" href="/en/2018/09/26/how-to-stop-sucking-and-be-awesome-instead-3/">The Programmer's Apprenticeship - 03: Web Design Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/20</span>
+            <a class="archive-post-title" href="/en/2018/09/20/how-to-stop-sucking-and-be-awesome-instead-2/">The Programmer's Apprenticeship - 02: The Way of Programming</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2018/09/19/how-to-stop-sucking-and-be-awesome-instead-1/">The Programmer's Apprenticeship - 01: The Art of Fighting Back</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2018/09/13/android-memory/">Does the Android System Not Release Memory?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/13</span>
+            <a class="archive-post-title" href="/en/2018/08/13/Some-Thoughts-on-the-Fluency-of-Android/">Some Thoughts on Android System Fluency</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/20</span>
+            <a class="archive-post-title" href="/en/2018/05/20/zhihu-startingwindow/">Zhihu: Save Your StartingWindow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/en/2018/05/07/Android-performance-optimization-skills-and-tools/">[Sticky] Android Performance Optimization: Must-Know Skills and Tools</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/en/2018/01/06/2017-most-recommended/">2017 Best Recommendations - A Reward for Hard-Working Self</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/en/2018/01/06/Most-Recommended-of-2017/">2017 Annual Best Recommendations - Reward Yourself for Hard Work</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2017 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/23</span>
+            <a class="archive-post-title" href="/en/2017/04/23/About-work/">Reflections on Work and Growth (2017)</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2016 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/en/2016/04/05/android-bottom-bar-2/">Android Bottom Navigation Spec Part 2: Style, Behavior, and Dimensions</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/en/2016/04/05/android-bottom-bar-1/">Android Bottom Navigation Spec Part 1: Usage</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2015 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/31</span>
+            <a class="archive-post-title" href="/en/2015/12/31/How-to-calculation-android-app-lunch-time/">How to Calculate App Startup Time in Android?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/29</span>
+            <a class="archive-post-title" href="/en/2015/12/29/Android-App-Launch-Optimization-DelayLoad-Part-2/">Android App Launch Optimization: Implementation and Principles of DelayLoad (Part 2)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2015/11/18/Android-app-lunch-optimize-delay-load/">Android App Startup Optimization - DelayLoad Implementation and Principles (Part 1)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/12</span>
+            <a class="archive-post-title" href="/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/">RenderThread Workflow in Android hwui</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/en/2015/08/05/HashMap/">Java 7 HashMap Source Code Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-onTrimMemory/">Android Code Memory Optimization Suggestions - OnTrimMemory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-AndroidResource/">Android Code Memory Optimization Suggestions - Android Resources</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/29</span>
+            <a class="archive-post-title" href="/en/2015/05/29/Nexus6-with-Android-M/">Enabling Multi-Window Mode on Nexus 6 with Android M</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/06</span>
+            <a class="archive-post-title" href="/en/2015/05/06/Java-Singleton/">A Detailed Guide to Java Singleton Pattern</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-3/">Android Performance Patterns: Understanding VSYNC</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-2/">Android Performance Patterns: Understanding Overdraw</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-4/">Android Performance Patterns: Profile GPU Rendering</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-1/">Android Performance Patterns: Render Performance</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns/">Overview of Android Performance Patterns</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/">Android Memory Optimization (3) - Viewing Original Bitmaps in MAT</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/31</span>
+            <a class="archive-post-title" href="/en/2015/03/31/android-performance-case-study-follow-up/">Android Performance Case Study Follow-up</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-3/">Android Tips Round-Up, Part 3</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-4/">Android Tips Round-Up, Part 4</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/04</span>
+            <a class="archive-post-title" href="/en/2015/02/04/build-rom-for-nexus5/">Compiling Android Lollipop Firmware for Nexus 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/30</span>
+            <a class="archive-post-title" href="/en/2015/01/30/android-performance-tools-systrace-1/">Android Performance Optimization - Introduction to Systrace (Part 1)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/16</span>
+            <a class="archive-post-title" href="/en/2015/01/16/view-android-source-code-with-androidstudio/">Viewing Android Lollipop Source Code with Android Studio</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/13</span>
+            <a class="archive-post-title" href="/en/2015/01/13/android-performance-optimization-overdraw-2/">Android Performance Optimization: Overdraw - Practical Application</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2014 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/en/2014/10/20/android-performance-optimization-overdraw-1/">Android Performance Optimization: Overdraw - Theory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/03</span>
+            <a class="archive-post-title" href="/en/2014/06/03/android-edittext-do-not-auto-get-focus/">Android Tips: How to Prevent EditText from Automatically Getting Focus</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/31</span>
+            <a class="archive-post-title" href="/en/2014/05/31/android-tips-round-up-2/">Android Tips Round-Up, Part 2</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/en/2014/05/28/android-tips-round-up-1/">Android Tips Round-Up, Part 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/02</span>
+            <a class="archive-post-title" href="/en/2014/05/02/android_log_to_file/">Android Tools - Log2File</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/25</span>
+            <a class="archive-post-title" href="/en/2014/03/25/ubuntu-adb-can-not-find-devices/">Ubuntu: Adb Command Cannot Find Device</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/17</span>
+            <a class="archive-post-title" href="/en/2014/03/17/android-build-your-own-android-notification-service-app/">Android Service: Building Your Own Notification Center (1) - Introduction to Accessibility Service</a>
+        </li>
+            </ul>
+    </div>
+</div>
+
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Yearly Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Yearly Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
+            </span>
+            <span class="sidebar-tag-name" data-tags="Year in Review">
+                <span class="iconfont-archer">&#xe606;</span>
+                Year in Review
+            </span>
+            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Knowledge Planet
+            </span>
+            <span class="sidebar-tag-name" data-tags="Essays">
+                <span class="iconfont-archer">&#xe606;</span>
+                Essays
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="AOSP">
+                <span class="iconfont-archer">&#xe606;</span>
+                AOSP
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="AIW">
+                <span class="iconfont-archer">&#xe606;</span>
+                AIW
+            </span>
+            <span class="sidebar-tag-name" data-tags="Open Source">
+                <span class="iconfont-archer">&#xe606;</span>
+                Open Source
+            </span>
+            <span class="sidebar-tag-name" data-tags="Agent OS">
+                <span class="iconfont-archer">&#xe606;</span>
+                Agent OS
+            </span>
+            <span class="sidebar-tag-name" data-tags="AI">
+                <span class="iconfont-archer">&#xe606;</span>
+                AI
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenAI">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenAI
+            </span>
+            <span class="sidebar-tag-name" data-tags="Mobile OS">
+                <span class="iconfont-archer">&#xe606;</span>
+                Mobile OS
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Thread Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Thread Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Battery Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Battery Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR Analysis">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR Analysis
+            </span>
+            <span class="sidebar-tag-name" data-tags="Page Response">
+                <span class="iconfont-archer">&#xe606;</span>
+                Page Response
+            </span>
+            <span class="sidebar-tag-name" data-tags="Trace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Trace
+            </span>
+            <span class="sidebar-tag-name" data-tags="DataFlow">
+                <span class="iconfont-archer">&#xe606;</span>
+                DataFlow
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="Locking">
+                <span class="iconfont-archer">&#xe606;</span>
+                Locking
+            </span>
+            <span class="sidebar-tag-name" data-tags="Scheduling">
+                <span class="iconfont-archer">&#xe606;</span>
+                Scheduling
+            </span>
+            <span class="sidebar-tag-name" data-tags="heapprofd">
+                <span class="iconfont-archer">&#xe606;</span>
+                heapprofd
+            </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
+            <span class="sidebar-tag-name" data-tags="SQL">
+                <span class="iconfont-archer">&#xe606;</span>
+                SQL
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceProcessor">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceProcessor
+            </span>
+            <span class="sidebar-tag-name" data-tags="GPU">
+                <span class="iconfont-archer">&#xe606;</span>
+                GPU
+            </span>
+            <span class="sidebar-tag-name" data-tags="Power">
+                <span class="iconfont-archer">&#xe606;</span>
+                Power
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="Input">
+                <span class="iconfont-archer">&#xe606;</span>
+                Input
+            </span>
+            <span class="sidebar-tag-name" data-tags="Latency">
+                <span class="iconfont-archer">&#xe606;</span>
+                Latency
+            </span>
+            <span class="sidebar-tag-name" data-tags="Camera">
+                <span class="iconfont-archer">&#xe606;</span>
+                Camera
+            </span>
+            <span class="sidebar-tag-name" data-tags="Audio">
+                <span class="iconfont-archer">&#xe606;</span>
+                Audio
+            </span>
+            <span class="sidebar-tag-name" data-tags="SDK">
+                <span class="iconfont-archer">&#xe606;</span>
+                SDK
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceEvent">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceEvent
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="Annual Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Annual Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenClaw">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenClaw
+            </span>
+            <span class="sidebar-tag-name" data-tags="AI Agent">
+                <span class="iconfont-archer">&#xe606;</span>
+                AI Agent
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Local Models">
+                <span class="iconfont-archer">&#xe606;</span>
+                Local Models
+            </span>
+            <span class="sidebar-tag-name" data-tags="Sharp Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Sharp Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity
+            </span>
+            <span class="sidebar-tag-name" data-tags="SmartPerfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                SmartPerfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="MCP">
+                <span class="iconfont-archer">&#xe606;</span>
+                MCP
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Specs">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Specs
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Kotlin">
+                <span class="iconfont-archer">&#xe606;</span>
+                Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="Stutter">
+                <span class="iconfont-archer">&#xe606;</span>
+                Stutter
+            </span>
+            <span class="sidebar-tag-name" data-tags="Overdraw">
+                <span class="iconfont-archer">&#xe606;</span>
+                Overdraw
+            </span>
+            <span class="sidebar-tag-name" data-tags="Programmer">
+                <span class="iconfont-archer">&#xe606;</span>
+                Programmer
+            </span>
+            <span class="sidebar-tag-name" data-tags="Reading Notes">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading Notes
+            </span>
+            <span class="sidebar-tag-name" data-tags="The Programmer's Apprenticeship">
+                <span class="iconfont-archer">&#xe606;</span>
+                The Programmer's Apprenticeship
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Principles">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Principles
+            </span>
+            <span class="sidebar-tag-name" data-tags="Internet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Internet
+            </span>
+            <span class="sidebar-tag-name" data-tags="User Experience">
+                <span class="iconfont-archer">&#xe606;</span>
+                User Experience
+            </span>
+            <span class="sidebar-tag-name" data-tags="Game Programming">
+                <span class="iconfont-archer">&#xe606;</span>
+                Game Programming
+            </span>
+            <span class="sidebar-tag-name" data-tags="Testing">
+                <span class="iconfont-archer">&#xe606;</span>
+                Testing
+            </span>
+            <span class="sidebar-tag-name" data-tags="Reading">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading
+            </span>
+            <span class="sidebar-tag-name" data-tags="Liqi">
+                <span class="iconfont-archer">&#xe606;</span>
+                Liqi
+            </span>
+            <span class="sidebar-tag-name" data-tags="Community">
+                <span class="iconfont-archer">&#xe606;</span>
+                Community
+            </span>
+            <span class="sidebar-tag-name" data-tags="Smooth">
+                <span class="iconfont-archer">&#xe606;</span>
+                Smooth
+            </span>
+            <span class="sidebar-tag-name" data-tags="Experience Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Experience Optimization
+            </span>
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+        缺失模块，请参考主题文档进行安装配置：https://github.com/fi3ework/hexo-theme-archer#%E5%AE%89%E8%A3%85%E4%B8%BB%E9%A2%98
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="Essays">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Essays
+        </span>
+        <span class="sidebar-category-name" data-categories="Casual Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Casual Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Reading Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Reading Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Android">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android
+        </span>
+        <span class="sidebar-category-name" data-categories="AI">
+            <span class="iconfont-archer">&#xe60a;</span>
+            AI
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
+        </span>
+        <span class="sidebar-category-name" data-categories="Android Performance Optimization">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android Performance Optimization
+        </span>
+        <span class="sidebar-category-name" data-categories="SmartPerfetto">
+            <span class="iconfont-archer">&#xe60a;</span>
+            SmartPerfetto
+        </span>
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+
+    </div>
+</div>
+
+        <!-- site-meta -->
+        <script>
+    var siteMetaRoot = "/en/"
+    if (siteMetaRoot === "undefined") {
+        siteMetaRoot = '/'
+    }
+    var siteMeta = {
+        url: "https://androidperformance.com/en",
+        root: siteMetaRoot,
+        author: "Gracker"
+    }
+</script>
+
+        <!-- import experimental options here -->
+        <!-- Custom Font -->
+
+        <!-- jquery (must load before main.js) -->
+        <script src="/en/lib/jquery.min.js" defer></script>
+        <!-- main func (depends on jQuery) -->
+        <script src="/en/scripts/main.js" defer></script>
+        <script>
+    (function () {
+      function scheduleAfterLoad(task, delay, idleTimeout) {
+        function run() {
+          window.setTimeout(function () {
+            if (window.requestIdleCallback) {
+              window.requestIdleCallback(task, { timeout: idleTimeout || 3000 })
+            } else {
+              task()
+            }
+          }, delay || 0)
+        }
+
+        if (document.readyState === 'complete') {
+          run()
+        } else {
+          window.addEventListener('load', run, { once: true })
+        }
+      }
+
+      function loadScript(src, options) {
+        options = options || {}
+        if (options.id && document.getElementById(options.id)) return
+
+        var done = false
+        var script = document.createElement('script')
+        script.src = src
+        script.async = true
+        if (options.id) script.id = options.id
+        if (options.crossOrigin) script.crossOrigin = options.crossOrigin
+        if (options.referrerPolicy) script.referrerPolicy = options.referrerPolicy
+        script.onload = function () {
+          done = true
+          if (options.onload) options.onload()
+        }
+        script.onerror = function () {
+          done = true
+          if (script.parentNode) script.parentNode.removeChild(script)
+        }
+        if (options.timeout) {
+          window.setTimeout(function () {
+            if (done) return
+            script.onload = null
+            script.onerror = null
+            if (script.parentNode) script.parentNode.removeChild(script)
+          }, options.timeout)
+        }
+        document.head.appendChild(script)
+      }
+
+      function loadStyle(href, id) {
+        if (id && document.getElementById(id)) return
+        var link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = href
+        if (id) link.id = id
+        document.head.appendChild(link)
+      }
+
+      scheduleAfterLoad(function () {
+        if (!document.querySelector('[data-fancybox]')) return
+        loadStyle('/en/lib/fancybox/fancybox.css', 'fancybox-css')
+        loadScript('/en/lib/fancybox/fancybox.umd.js', {
+          id: 'fancybox-js',
+          timeout: 4000,
+          onload: function () {
+            if (window.Fancybox) window.Fancybox.bind('[data-fancybox]')
+          },
+        })
+      }, 1000, 3000)
+
+
+
+
+      scheduleAfterLoad(function () {
+        window.dataLayer = window.dataLayer || []
+        window.gtag = window.gtag || function () { window.dataLayer.push(arguments) }
+        window.gtag('js', new Date())
+        loadScript('https://www.googletagmanager.com/gtag/js?id=UA-50993302-2', {
+          id: 'gtag-js',
+          timeout: 4000,
+          onload: function () {
+            window.gtag('config', 'UA-50993302-2')
+          },
+        })
+      }, 4000, 3000)
+    })();
+</script>
+
+        <!-- search -->
+            <div class="site-search site-search-loading local-search-shell">
+    <div class="algolia-popup popup local-search-popup" role="dialog" aria-modal="true" aria-label="Search posts">
+        <div class="algolia-search local-search-header">
+            <div class="algolia-search-input-icon">
+                <i class="iconfont-archer">&#xe627;</i>
+            </div>
+            <div class="algolia-search-input local-search-input">
+                <input id="local-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search for Posts">
+            </div>
+            <button class="popup-btn-close local-search-close" type="button" aria-label="Close search">
+                <i class="iconfont-archer" aria-hidden="true">&#xe609;</i>
+            </button>
+        </div>
+
+        <div class="algolia-results local-search-results">
+            <div
+                id="local-search-config"
+                data-path="/en/search.xml"
+                data-per-page="10"
+                data-empty="We did not find any results for: ${query}"
+                data-stats="${hits} results found"
+                data-loading="Loading search index..."
+                data-error="Failed to load the search index. Please try again later."></div>
+            <div id="local-search-stats" class="algolia-stats"></div>
+            <div id="local-search-hits"></div>
+        </div>
+    </div>
+</div>
+
+            <script src="/en/scripts/local-search.js" async></script>
+        <!-- async load share.js on first click -->
+            <script>
+                (function(){
+                  var loaded = false
+                  function loadShare(){
+                    if (loaded) return
+                    loaded = true
+                    var s = document.createElement('script')
+                    s.src = '/en/scripts/share.js'
+                    s.async = true
+                    document.head.appendChild(s)
+                  }
+                  document.addEventListener('click', function(e){
+                    var t = e.target
+                    if (!t) return
+                    if (t.closest && t.closest('.share-wrapper')) { loadShare() }
+                    else if (t.classList && t.classList.contains('share-wrapper')) { loadShare() }
+                  }, true)
+                })();
+            </script>
+        <!-- mermaid -->
+    </body>
+</html>

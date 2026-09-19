@@ -1,0 +1,2025 @@
+<!DOCTYPE html>
+<html lang="en">
+    <!-- title -->
+            <!-- keywords -->
+
+                  <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <meta name="author" content="Gracker">
+                    <meta name="renderer" content="webkit">
+                    <meta name="copyright" content="Gracker">
+                      <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,Optimization,Startup,Perfetto,Systrace,RenderThread,Java,Responsiveness,Smoothness">
+                          <meta name="description" content="Technical blog about Android system performance optimization">
+                          <meta name="description" content="The hardest part of a memory problem is that a rising number does not immediately tell you what is growing. dumpsys meminfo provides RSS&#x2F;PSS, and a Java heap dump reveals object retention relatio">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Android Perfetto Series 14: heapprofd and Memory Profiling">
+<meta property="og:url" content="https://androidperformance.com/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/index.html">
+<meta property="og:site_name" content="Android Performance">
+<meta property="og:description" content="The hardest part of a memory problem is that a rising number does not immediately tell you what is growing. dumpsys meminfo provides RSS&#x2F;PSS, and a Java heap dump reveals object retention relatio">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://androidperformance.com/en/images/Perfetto-11-18-Diagrams/04-heapprofd-flow.png">
+<meta property="og:image" content="https://androidperformance.com/en/images/Perfetto-11-18-Diagrams/05-heap-profile-reading.png">
+<meta property="article:published_time" content="2026-05-04T02:14:00.000Z">
+<meta property="article:modified_time" content="2026-09-19T16:52:22.731Z">
+<meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Android">
+<meta property="article:tag" content="Perfetto">
+<meta property="article:tag" content="Memory">
+<meta property="article:tag" content="Performance">
+<meta property="article:tag" content="heapprofd">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://androidperformance.com/en/images/Perfetto-11-18-Diagrams/04-heapprofd-flow.png">
+                            <meta http-equiv="Cache-control" content="no-cache">
+                            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+                            <link rel="icon" href="/en/assets/favicon.ico">
+                                <title>
+                                  Android Perfetto Series 14: heapprofd and Memory Profiling · Android Performance
+                                </title>
+                                
+<link rel="canonical" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">
+                                  <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/en/font/Oswald-Regular.woff2") format('woff2'),
+             url("/en/font/Oswald-Regular.ttf") format('truetype');
+        font-display: swap;
+    }
+
+    body {
+        margin: 0;
+    }
+
+    /* Removed initial hide to show content immediately */
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(
+            -45deg,
+            #444 0,
+            #444 80px,
+            #333 80px,
+            #333 160px
+        );
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+</style>
+
+                                    <link id="stylesheet-base" rel="stylesheet" href="/en/css/style.css">
+                                    <link id="stylesheet-mobile" rel="stylesheet" href="/en/css/mobile.css" media="screen and (max-width: 960px)">
+                                    <link id="stylesheet-theme-dark" rel="stylesheet" href="/en/css/dark.css">
+                                    <link id="stylesheet-custom" rel="stylesheet" href="/en/css/custom.css">
+                                    <link rel="preload" href="/en/lib/jquery.min.js" as="script">
+                                    <link rel="preload" href="/en/scripts/main.js" as="script">
+                                    <!-- algolia -->
+                                                    <!-- Hreflang Tags -->
+                                                    
+                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/" />
+                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/" />
+                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/" />
+                  <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/en/atom.xml" title="Android Performance" type="application/atom+xml">
+</head>
+
+        <body class="post-body">
+        <!-- header -->
+        <header class="header header-mobile">
+    <!-- top read progress line -->
+    <div class="header-element">
+        <div class="read-progress"></div>
+    </div>
+    <!-- sidebar menu button -->
+    <div class="header-element">
+        <div
+            class="header-sidebar-menu">
+                    <div style="padding-left: 1px;">&#xe775;</div>
+        </div>
+    </div>
+    <!-- header actions -->
+    <div class="header-actions">
+        <!-- search button -->
+            <span class="header-search-btn header-element popup-trigger" role="button" aria-label="Search" data-tooltip="Search">
+                <span class="iconfont-archer search-icon" aria-hidden="true">&#xe627;</span>
+            </span>
+        <!-- theme mode switch button -->
+        <span class="header-theme-btn header-element" role="button" aria-label="Theme" data-tooltip="Theme">
+            <span aria-hidden="true">&#9680;</span>
+        </span>
+        <!-- language transition button -->
+        <span class="header-lang-btn header-element" data-tooltip="Language">
+            <a href="javascript:void(0)" onclick="toggleLanguage()" class="lang-text" aria-label="Language">EN</a>
+            <script>
+                // Update language button text based on current path
+                (function() {
+                    var path = window.location.pathname;
+                    var isEn = /^\/en(\/|$)/.test(path);
+                    var langBtn = document.querySelector('.header-lang-btn .lang-text');
+                    if (langBtn) {
+                        langBtn.textContent = isEn ? 'CN' : 'EN';
+                    }
+                })();
+                
+                function toggleLanguage() {
+                    var path = window.location.pathname;
+                    var isEn = /^\/en(\/|$)/.test(path);
+
+                    if (isEn) {
+                        var newPath = path.replace(/^\/en(\/|$)/, '/');
+                        if (newPath === '') newPath = '/';
+                        window.location.href = newPath;
+                    } else {
+                        var suffix = path;
+                        if (suffix === '/') suffix = '';
+                        window.location.href = '/en' + suffix;
+                    }
+                }
+            </script>
+        </span>
+        <!-- home button -->
+        <span class="home-link header-element">
+            <a href="/en/" aria-label="Home" data-tooltip="Home">
+                <svg class="home-icon" aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="m3 10.5 9-7 9 7"></path>
+                    <path d="M5 9.5V21h14V9.5"></path>
+                    <path d="M10 21v-6h4v6"></path>
+                </svg>
+            </a>
+        </span>
+    </div>
+    <!-- toggle banner -->
+                <div class="banner">
+                        <div class="blog-title header-element">
+                            <a href="/en/">
+                                Android Performance
+                            </a>
+                        </div>
+                        <div class="post-title header-element">
+                            <a href="#" class="post-name">Android Perfetto Series 14: heapprofd and Memory Profiling</a>
+                        </div>
+                </div>
+</header>
+
+        <!-- fixed footer -->
+        <footer class="footer-fixed">
+    <!-- donate button -->
+    <div class="donate-popup donate-popup--hidden">
+    <div class="donate-popup__title">Buy Me A Coffee</div>
+    <div class="donate-popup__content">
+        <div class="donate-popup__content-description">If you find this article helpful, consider buying me a coffee.</div>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Wechat"
+            alt="Wechat"
+            src="/en/assets/donate-wechat.webp"
+        ></img>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Alipay"
+            alt="Alipay"
+            src="/en/assets/donate-alipay.png"
+        ></img>
+    </div>
+</div>
+
+    <div
+        title="Donate to the author"
+        class="footer-fixed-btn footer-fixed-btn--hidden donate-btn"
+    >
+        <span aria-hidden="true">&#165;</span>
+    </div>
+
+    <!-- back to top button -->
+    <div class="footer-fixed-btn footer-fixed-btn--hidden back-top">
+        <div>&#xe639;</div>
+    </div>
+</footer>
+
+        <!-- wrapper -->
+        <div class="wrapper">
+            <div class="site-intro" style="    height:50vh;
+">
+    <!-- 主页  -->
+    <!-- 404页  -->
+    <div class="site-intro-placeholder"></div>
+    <picture>
+            <source type="image/webp" srcset="/en/intro/post-bg.webp">
+        <img class="site-intro-img"
+             src="/en/intro/post-bg.jpg"
+             alt=""
+loading="lazy"             decoding="async"
+             fetchpriority="auto"
+             sizes="100vw">
+    </picture>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+                Android Perfetto Series 14: heapprofd and Memory Profiling
+            <!-- 404 -->
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            <!-- 404 -->
+        </p>
+        <!-- 文章页 meta -->
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                    <div class="post-intro-tags" >
+        <span class="post-category" data-categories="Android">
+            <span class="iconfont-archer post-category-icon" aria-hidden="true">&#xe666;</span>
+            <span class="post-category-text">
+                Android
+            </span>
+        </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Memory">Memory</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="heapprofd">heapprofd</a>
+</div>
+
+                <!-- 文章字数统计 -->
+                    <div class="post-intro-read">
+                        <span>Word count: <span class="post-count word-count">5.1k</span>Reading time: <span class="post-count reading-time">32 min</span></span>
+                    </div>
+                <div class="post-intro-meta">
+                    <!-- 撰写日期 -->
+                    <span class="iconfont-archer post-intro-calander">&#xe676;</span>
+                    <span class="post-intro-time">2026/05/04</span>
+                    <!-- 文章分享 -->
+                    <span class="share-wrapper">
+                        <span class="iconfont-archer share-icon">&#xe71d;</span>
+                        <span class="share-text">Share</span>
+                        <ul class="share-list">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+    </div>
+</div>
+
+            
+            <script>
+  (function () {
+    var done = false
+
+    function fontLoaded() {
+      if (done) return
+      done = true
+
+      var introTitle = document.getElementsByClassName('intro-title')[0]
+      var introSubtitle = document.getElementsByClassName('intro-subtitle')[0]
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+
+      if (introTitle) introTitle.classList.add('intro-fade-in')
+      if (introSubtitle) introSubtitle.classList.add('intro-fade-in')
+      if (postIntros) postIntros.classList.add('post-fade-in')
+    }
+
+    function waitForLocalFont() {
+      if (document.fonts && document.fonts.load) {
+        Promise.race([
+          document.fonts.load('1em Oswald-Regular'),
+          new Promise(function (resolve) { setTimeout(resolve, 1000) })
+        ]).then(fontLoaded, fontLoaded)
+      } else {
+        fontLoaded()
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', waitForLocalFont, false)
+    } else {
+      waitForLocalFont()
+    }
+  })()
+</script>
+
+            <img class="loading" src="/en/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" alt="loading">
+            <div class="container container-unloaded">
+                <main class="main post-page">
+    <article class="article-entry">
+        <p>The hardest part of a memory problem is that a rising number does not immediately tell you what is growing. <code>dumpsys meminfo</code> provides RSS&#x2F;PSS, and a Java heap dump reveals object retention relationships. But for JNI&#x2F;C++, CPU-side Skia&#x2F;Bitmap allocations, and native wrappers in media players, you often also need to know which call stack issued the malloc&#x2F;new request.</p>
+<p>This article covers heapprofd. Its value is bringing native allocations, frees, and call stacks into a Perfetto trace, where you can inspect them alongside application events, thread scheduling, and Binder on the same timeline.</p>
+<p>Use heapprofd after confirming the trend. First establish it with RSS&#x2F;PSS, meminfo, or production monitoring; then use heapprofd to locate malloc&#x2F;new call stacks. This article does not address Java object references or graphics backing memory.</p>
+<p>We will cover when to use heapprofd, how to capture a profile, how to read it in the UI and SQL, how to interpret sampling intervals and symbolization, and finally what to check before publishing a report.</p>
+<span id="more"></span>
+
+<p><a id="series"></a></p>
+<h2 id="Perfetto-Series-Catalog"><a href="#Perfetto-Series-Catalog" class="headerlink" title="Perfetto Series Catalog"></a>Perfetto Series Catalog</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/03/27/Android-Perfetto-101/">Android Perfetto Series Catalog</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto Series 1: Introduction to Perfetto</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto Series 4: Opening Large Traces via Command Line</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Choreographer-based Rendering Flow</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto Series 6: Why 120Hz? Advantages and Challenges</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto Series 7: MainThread and RenderThread Deep Dive</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto Series 8: Understanding Vsync and Performance Analysis</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto Series 9: Interpreting CPU Information</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto Series 10: Binder Scheduling and Lock Contention</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-11-PerfettoSQL-TraceProcessor-Automation/">Android Perfetto Series 11: PerfettoSQL, Trace Processor and Regression Detection</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">Android Perfetto Series 12: Trace Dataflow and Data Loss</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event and App Field Traces</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto Series 14: heapprofd and Memory Profiling</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces and Long-running Field Tracing</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters and Hardware Bottlenecks</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-17-Engineering-Domain-And-Platform-Tracing/">Android Perfetto Series 17: Scenario Automation and Platform Tracing</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto Series 18: Input Response Latency</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV1oi82efE4D/?vd_source=0c6d2191e785de0a36dc21a9da7e664e">Video (Bilibili) - Android Perfetto Basics and Case Studies</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV17A6bBLECu/">Video (Bilibili) - Android Perfetto: Trace Graph Types - AOSP, WebView, Flutter + OEM System Optimization</a></li>
+</ol>
+<h2 id="Keep-Memory-Accounting-Categories-Separate"><a href="#Keep-Memory-Accounting-Categories-Separate" class="headerlink" title="Keep Memory Accounting Categories Separate"></a>Keep Memory Accounting Categories Separate</h2><p>Before capturing a heapprofd profile, separate memory data into several categories. Many incorrect conclusions come from mixing them together.</p>
+<table>
+<thead>
+<tr>
+<th>Data</th>
+<th>Common sources</th>
+<th>Questions it answers</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Process RSS &#x2F; swap trends</td>
+<td><code>linux.process_stats</code></td>
+<td>Are the target process’s RSS, anon&#x2F;file RSS, swap, or <code>oom_score_adj</code> changing?</td>
+</tr>
+<tr>
+<td>Process PSS &#x2F; Private Dirty</td>
+<td><code>dumpsys meminfo</code>, <code>/proc/&lt;pid&gt;/smaps_rollup</code>, <code>process_stats_config.scan_smaps_rollup</code></td>
+<td>Are PSS, Private Dirty, or SwapPss rising? <code>scan_smaps_rollup</code> is subject to permissions and target-process restrictions.</td>
+</tr>
+<tr>
+<td>System memory pressure</td>
+<td><code>linux.sys_stats</code></td>
+<td>Do <code>MemAvailable</code>, Cached, ZRAM, vmstat, and PSI indicate reclaim activity or memory pressure?</td>
+</tr>
+<tr>
+<td>Native allocation call stacks</td>
+<td><code>android.heapprofd</code></td>
+<td>Which malloc&#x2F;new call stacks contributed allocations, and which allocations remain unreleased?</td>
+</tr>
+<tr>
+<td>Java object retention relationships</td>
+<td><code>android.java_hprof</code>, MAT, Android Studio Profiler</td>
+<td>Which Java objects are still held, and by whom?</td>
+</tr>
+</tbody></table>
+<p>By default, heapprofd accounts for the bytes the target process requests from allocators such as libc malloc&#x2F;free and new&#x2F;delete. This is not RSS, and it does not cover all native backing memory.</p>
+<p>GraphicBuffer, dma-buf, GPU textures, driver-side allocations, direct mmap&#x2F;memfd&#x2F;ashmem allocations, and allocators that bypass libc malloc are outside the default malloc accounting. For malloc-backed arenas, you may see only the large arena allocation, not the objects inside it. To include a custom allocator, use heapprofd’s custom allocator API (<code>AHeapProfile_registerHeap</code> and related APIs, Android 10+; this requires linking the client library and changing the allocation path), then name the custom heap in <code>heapprofd_config.heaps</code>. This requires dedicated integration work; it is not a default capability. For graphics memory, start with meminfo Graphics&#x2F;GL, dmabuf, GPU&#x2F;graphics counters, and SurfaceFlinger &#x2F; BufferQueue relationships.</p>
+<p>heapprofd only adds malloc&#x2F;new evidence along app&#x2F;HWUI&#x2F;Skia&#x2F;JNI paths.</p>
+<p>Use this table to choose the next step:</p>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Preferred tools</th>
+<th>Role of heapprofd</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Java heap grows, with clear object retention</td>
+<td>HPROF &#x2F; MAT &#x2F; Android Studio</td>
+<td>Not the first entry point</td>
+</tr>
+<tr>
+<td>Native Heap &#x2F; malloc wrappers grow</td>
+<td>heapprofd</td>
+<td>Locate malloc&#x2F;new call stacks</td>
+</tr>
+<tr>
+<td>Graphics &#x2F; GL &#x2F; dmabuf &#x2F; Surface buffers grow</td>
+<td>meminfo, dmabuf, GPU&#x2F;graphics, SurfaceFlinger</td>
+<td>Only check whether app&#x2F;native wrappers are also allocating</td>
+</tr>
+<tr>
+<td>RSS&#x2F;PSS grows but heapprofd values remain low</td>
+<td>smaps_rollup, maps, mmap&#x2F;syscall, dmabuf&#x2F;graphics</td>
+<td>Separate the accounting categories first; do not immediately conclude that the heapprofd capture is wrong</td>
+</tr>
+<tr>
+<td>RSS grows but PSS does not</td>
+<td>smaps &#x2F; file mappings &#x2F; allocator caches</td>
+<td>Do not conclude that there is a leak yet</td>
+</tr>
+</tbody></table>
+<p>Allocator thread caches, fragmentation, ZRAM, and page granularity can all cause RSS and heapprofd to disagree. When RSS is high but heapprofd values are low, consider these boundaries before assuming a capture failure.</p>
+<p>The reverse also holds: high cumulative allocations on a call stack in heapprofd do not mean the process’s RSS will rise by the same amount. This may be allocation churn: memory is allocated frequently and freed quickly, producing a high <code>Total malloc size</code> but a low <code>Unreleased malloc size</code>. First distinguish memory that remains held from repeated creation of temporary objects.</p>
+<p>If you suspect large mmap allocations or allocations outside the native heap, investigate smaps <code>Private_Dirty/Rss/Pss</code>, maps regions, Android 14+ syscalls <code>sys_mmap/sys_munmap/sys_madvise</code>, or mmap syscall call stacks from perf&#x2F;simpleperf. Use heapprofd only to check whether malloc wrappers also contribute.</p>
+<p><img src="/en/images/Perfetto-11-18-Diagrams/04-heapprofd-flow.png" alt="From native allocation sampling to call stacks"></p>
+<p><em>Conceptual diagram: heapprofd samples native allocations and records call stacks; a Heap Profile is not an RSS ledger.</em></p>
+<h2 id="When-to-Use-heapprofd"><a href="#When-to-Use-heapprofd" class="headerlink" title="When to Use heapprofd"></a>When to Use heapprofd</h2><p>When a Java heap dump cannot explain the growth, first identify which memory category is growing. Proceed to heapprofd only when the native heap or native wrappers are clearly suspect.</p>
+<p>heapprofd is suitable for these problems:</p>
+<ul>
+<li>Native Heap &#x2F; malloc wrappers keep growing, but a Java heap dump shows no obvious object retention.</li>
+<li>Bitmap, Skia, media-player buffers, or JNI&#x2F;C++ modules may be holding native backing memory allocated through libc malloc&#x2F;new.</li>
+<li>Abnormal malloc&#x2F;new behavior in C++ modules, native services, or daemons.</li>
+<li>Checking whether unreleased allocations increase after a particular application operation.</li>
+<li>Correlating memory growth with thread execution, Binder, and application Track Events.</li>
+</ul>
+<p>These problems should not start with heapprofd:</p>
+<ul>
+<li>You only need Java object reference relationships. Use a Java heap dump.</li>
+<li>You want an exact ledger of every small allocation. heapprofd is a sampling profiler by default.</li>
+<li>The target app on a user build is neither <code>debuggable</code> nor <code>profileable</code>. Such processes generally cannot be profiled by the shell.</li>
+<li>GraphicBuffer, dma-buf, GPU driver memory, or Surface buffer counts are rising. Start with evidence from meminfo Graphics&#x2F;GL, dmabuf, GPU&#x2F;graphics, and SurfaceFlinger; use heapprofd only to rule out or locate malloc&#x2F;new wrapper allocations.</li>
+</ul>
+<p>Target eligibility also needs separate consideration. User builds primarily support debuggable&#x2F;profileable Java apps; userdebug&#x2F;eng builds can profile most apps and system services, but some critical services may be prohibited by SELinux policies such as <code>never_profile_heap</code>. System processes are not unlocked through <code>&lt;profileable&gt;</code>.</p>
+<h2 id="Capture-a-Native-Heap-Profile-Quickly"><a href="#Capture-a-Native-Heap-Profile-Quickly" class="headerlink" title="Capture a Native Heap Profile Quickly"></a>Capture a Native Heap Profile Quickly</h2><p>The official recommendation is to start with the <code>tools/heap_profile</code> script. It handles many device-side details and works well for quickly investigating a single process.</p>
+<p>This command captures by process name for 15 seconds, with a sampling interval of 4096 bytes and a continuous dump every 5 seconds:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">tools/heap_profile android \</span><br><span class="line">  -n com.example.app \</span><br><span class="line">  -d 15000 \</span><br><span class="line">  -i 4096 \</span><br><span class="line">  -c 5000 \</span><br><span class="line">  -o /tmp/heapprofd-com-example-app</span><br></pre></td></tr></table></figure>
+
+<p>The output directory contains <code>raw-trace</code> and converted profile files. Drag <code>raw-trace</code> into Perfetto UI to see Heap Profile diamonds.</p>
+<p>Capturing by process name differs significantly from capturing by PID. <code>-n com.example.app</code> matches an already-running process with that name and also waits for newly launched processes; heapprofd can attach early as the target specializes from zygote into an app process. For a multiprocess app, specify multiple <code>-n</code> &#x2F; <code>process_cmdline</code> entries, such as <code>com.example.app</code>, <code>com.example.app:remote</code>, and <code>com.example.app:player</code>; otherwise malloc allocations in remote&#x2F;native child processes will not enter the profile. PID-based capture is better suited to a process already running steadily, but misses early startup allocations. The official documentation also warns that even name-based capture may miss the earliest allocations during zygote specialization.</p>
+<p>To capture an app through adb &#x2F; shell on a user build, allow shell profiling in its manifest:</p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">application</span> <span class="attr">...</span>&gt;</span></span><br><span class="line">  <span class="tag">&lt;<span class="name">profileable</span> <span class="attr">android:shell</span>=<span class="string">&quot;true&quot;</span> /&gt;</span></span><br><span class="line"><span class="tag">&lt;/<span class="name">application</span>&gt;</span></span><br></pre></td></tr></table></figure>
+
+<p>This only grants local shell profiling access. It does not mean that arbitrary user processes can be profiled remotely in production.</p>
+<p>Starting with Android 15 (API 35), apps can request a heap profile through <code>ProfilingManager</code>. Android 16’s Profiling module targets field profiling on public devices, but results are redacted, contain only information related to the requesting process, and are subject to system rate limits; not every request is guaranteed to be fulfilled. Design this production path separately from the laboratory adb&#x2F;<code>profileable</code> path.</p>
+<h2 id="Capture-It-Alongside-a-System-Trace"><a href="#Capture-It-Alongside-a-System-Trace" class="headerlink" title="Capture It Alongside a System Trace"></a>Capture It Alongside a System Trace</h2><p>The script is useful for quick investigation, while a handwritten TraceConfig lets you combine heapprofd with system data sources. Start with the minimum heapprofd settings: <code>android.heapprofd</code>, <code>process_cmdline</code>, the sampling interval, continuous dumps, shared memory, and the blocking policy.</p>
+<p>System context is optional enrichment: <code>process_stats</code> provides RSS&#x2F;PSS trends, <code>sys_stats</code> shows system memory pressure, <code>ftrace</code> correlates threads and time windows, and <code>track_event</code> connects application operations. In allocation-heavy scenarios, combining heapprofd and ftrace increases perturbation. A heap+system-context preset should be limited to short laboratory reproductions, with ftrace&#x2F;heapprofd stats recorded and a check of whether profiling changed the scenario’s duration.</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br></pre></td><td class="code"><pre><span class="line">duration_ms: <span class="number">15000</span></span><br><span class="line"></span><br><span class="line">buffers &#123; size_kb: <span class="number">131072</span> fill_policy: DISCARD &#125; # <span class="number">0</span>: heapprofd</span><br><span class="line">buffers &#123; size_kb: <span class="number">32768</span>  fill_policy: RING_BUFFER &#125; # <span class="number">1</span>: system context</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    process_stats_config &#123;</span><br><span class="line">      scan_all_processes_on_start: <span class="literal">true</span></span><br><span class="line">      proc_stats_poll_ms: <span class="number">1000</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.sys_stats&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    sys_stats_config &#123;</span><br><span class="line">      meminfo_period_ms: <span class="number">1000</span></span><br><span class="line">      meminfo_counters: MEMINFO_MEM_AVAILABLE</span><br><span class="line">      meminfo_counters: MEMINFO_CACHED</span><br><span class="line">      meminfo_counters: MEMINFO_SWAP_FREE</span><br><span class="line">      meminfo_counters: MEMINFO_ZRAM</span><br><span class="line">      vmstat_period_ms: <span class="number">1000</span></span><br><span class="line">      vmstat_counters: VMSTAT_PGFAULT</span><br><span class="line">      vmstat_counters: VMSTAT_PGMAJFAULT</span><br><span class="line">      vmstat_counters: VMSTAT_OOM_KILL</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;am&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;view&quot;</span></span><br><span class="line">      atrace_apps: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;track_event&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    track_event_config &#123;</span><br><span class="line">      disabled_categories: <span class="string">&quot;*&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;memory&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;app&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">  producer_name_filter: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;android.heapprofd&quot;</span></span><br><span class="line">    target_buffer: <span class="number">0</span></span><br><span class="line">    heapprofd_config &#123;</span><br><span class="line">      sampling_interval_bytes: <span class="number">4096</span></span><br><span class="line">      process_cmdline: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">      continuous_dump_config &#123;</span><br><span class="line">        dump_phase_ms: <span class="number">5000</span></span><br><span class="line">        dump_interval_ms: <span class="number">5000</span></span><br><span class="line">      &#125;</span><br><span class="line">      shmem_size_bytes: <span class="number">8388608</span></span><br><span class="line">      block_client: <span class="literal">false</span></span><br><span class="line">      # Android <span class="number">11</span>+ / matching Perfetto builds only.</span><br><span class="line">      max_heapprofd_memory_kb: <span class="number">262144</span></span><br><span class="line">      max_heapprofd_cpu_secs: <span class="number">30</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>This is still a native heap template, not a graphics memory template. For GraphicBuffer, dma-buf, GPU textures, and Surface buffers, additionally compare dmabuf data, GPU&#x2F;graphics counters, <code>dumpsys meminfo</code> Graphics&#x2F;GL, and SurfaceFlinger layer &#x2F; buffer information. heapprofd can only establish whether malloc&#x2F;new contributes corresponding allocations.</p>
+<p>When the heapprofd buffer uses <code>DISCARD</code>, it must be large enough. Heap profiles often write data in bursts at dump points. Once a DISCARD buffer fills, new data is dropped, putting the final diamond and the largest unreleased allocations at particular risk. After capture, check <code>traced_buf_chunks_discarded</code> and <code>heapprofd_*</code> stats. For long traces or uncertain write volumes, give heapprofd its own large buffer; switch to RING if necessary, and state in the report that older dumps may have been overwritten.</p>
+<p>For ad hoc investigation, piping the PBTX directly into <code>perfetto</code> through stdin is the most reliable approach. Place the Android output under <code>/data/misc/perfetto-traces/</code>:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">adb push config.pbtx /data/local/tmp/config.pbtx</span><br><span class="line">adb shell <span class="string">&#x27;cat /data/local/tmp/config.pbtx | perfetto -c - --txt -o /data/misc/perfetto-traces/heap.pftrace&#x27;</span></span><br><span class="line">adb pull /data/misc/perfetto-traces/heap.pftrace .</span><br></pre></td></tr></table></figure>
+
+<p>A handwritten <code>HeapprofdConfig</code> does not have exactly the same defaults as <code>tools/heap_profile</code>. <code>block_client</code> can block the target process when heapprofd shared memory fills, trading application progress for data completeness. The script enables <code>--block-client</code> by default, but a handwritten configuration requires an explicit decision.</p>
+<p>For a laboratory leak reproduction, you can set <code>block_client: true</code> with <code>block_client_timeout_us</code>, accepting blocking on the target process’s malloc path for more complete data. Do not enable it by default for interaction performance analysis, because it can itself affect jank&#x2F;latency. Interactive scenarios normally use <code>block_client: false</code>, then accept the risk of incompleteness through a larger sampling interval, more <code>shmem_size_bytes</code>, and stats checks. You must check <code>heapprofd_buffer_overran</code>, <code>heapprofd_non_finalized_profile</code>, and whether <code>heapprofd_last_profile_timestamp</code> covers the target window.</p>
+<p>When adding heapprofd to a system trace, retain a small set of application markers as well. In-app <code>android.os.Trace</code> &#x2F; AndroidX Trace events go through atrace; Perfetto SDK Track Events require the <code>track_event</code> data source to be enabled separately.</p>
+<p>A media-player scenario, for example, should have at least four marker categories: <code>operation_start</code>, <code>steady_state</code>, <code>operation_end</code>, and <code>release_done/gc_idle_done</code>. Without a release marker, the conclusion can only be “retained allocations increased after the operation,” not “a leak.” The official documentation lists <code>android.log</code> support for userdebug. A rooted user build may also capture it if logd&#x2F;SELinux permissions allow, but <code>adb root</code> alone does not establish support on every device. On ordinary production user builds, do not assume this configuration captures logcat evidence by default.</p>
+<h2 id="Reading-Heap-Profiles-in-the-UI"><a href="#Reading-Heap-Profiles-in-the-UI" class="headerlink" title="Reading Heap Profiles in the UI"></a>Reading Heap Profiles in the UI</h2><p>After importing the trace, find the <code>Heap Profile</code> track under the target process. Each diamond on the track represents a dump. Clicking a diamond opens a flamegraph in the bottom panel.</p>
+<p>Each continuous-dump diamond represents cumulative results from the start of recording up to that point. First inspect unreleased bytes to identify memory that remains held, then total allocations to identify churn. Read the profile in this order:</p>
+<ol>
+<li>Check whether <code>Unreleased malloc size</code> keeps rising across consecutive diamonds.</li>
+<li>Check <code>Total malloc size</code> to see whether allocation churn is high but frees are also prompt.</li>
+<li>Use the Left Heavy view to find the largest call stacks.</li>
+<li>Locate the first app, SDK, or application-domain frame above the allocator &#x2F; ART glue.</li>
+<li>Return to the timeline and correlate the triggering operation, application Track Events, and thread execution.</li>
+</ol>
+<p><img src="/en/images/Perfetto-11-18-Diagrams/05-heap-profile-reading.png" alt="Observing retained-memory changes across continuous dumps"></p>
+<p><em>Illustration with hypothetical data: unreleased bytes across consecutive dumps are 2→5→4 MiB. The flamegraph shows call-stack contributions; a single point cannot establish a leak.</em></p>
+<p>Do not diagnose a leak from one diamond. At minimum, compare points before the operation, after the operation, and after cleanup. If memory rises after the operation and still does not fall after cleanup, inspect the unreleased call stacks.</p>
+<p>In the laboratory, <code>adb shell killall -USR1 heapprofd</code> can trigger an additional snapshot. Triggering one before entering a screen, one after the screen stabilizes, and one after leaving it and completing release&#x2F;close&#x2F;destruction often makes it easier to align application operations with diamonds than relying only on a fixed 5-second interval.</p>
+<p>Include “waiting for idle, finalizers, and GC to complete” in this state point only when the native backing is owned by a Java wrapper, <code>NativeAllocationRegistry</code>, or a Cleaner&#x2F;finalizer. Allocator caches and fragmentation can also mean that heapprofd values fall while RSS does not fall immediately. “Cache” is not a euphemism for “never freed”: there must be a capacity limit, evidence of hits&#x2F;reuse, and a reclamation policy on exit or under pressure. Otherwise, describe it only as suspected long-term retention.</p>
+<h2 id="Querying-Unreleased-Allocations-with-SQL"><a href="#Querying-Unreleased-Allocations-with-SQL" class="headerlink" title="Querying Unreleased Allocations with SQL"></a>Querying Unreleased Allocations with SQL</h2><p>heapprofd writes to these call-stack-related tables:</p>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>heap_profile_allocation</code></td>
+<td>Allocation&#x2F;free samples and sizes</td>
+</tr>
+<tr>
+<td><code>stack_profile_callsite</code></td>
+<td>Call-stack nodes</td>
+</tr>
+<tr>
+<td><code>stack_profile_frame</code></td>
+<td>Function frames</td>
+</tr>
+<tr>
+<td><code>stack_profile_mapping</code></td>
+<td>so, apk, jar, and binary mappings</td>
+</tr>
+<tr>
+<td><code>stack_profile_symbol</code></td>
+<td>Offline symbolization results</td>
+</tr>
+</tbody></table>
+<p>For a quick view of a single-target profile, start with the official standard library’s summary tree. It aggregates entire call stacks along <code>stack_profile_callsite.parent_id</code>, producing results closer to the flamegraph’s cumulative view:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.memory.heap_profile.summary_tree;</span><br><span class="line"></span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  name,</span><br><span class="line">  mapping_name <span class="keyword">AS</span> map_name,</span><br><span class="line">  cumulative_size <span class="operator">/</span> <span class="number">1024.0</span> <span class="operator">/</span> <span class="number">1024.0</span> <span class="keyword">AS</span> unreleased_mb</span><br><span class="line"><span class="keyword">FROM</span> android_heap_profile_summary_tree</span><br><span class="line"><span class="keyword">WHERE</span> cumulative_size <span class="operator">&gt;</span> <span class="number">0</span></span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cumulative_size <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">50</span>;</span><br></pre></td></tr></table></figure>
+
+<p>The summary tree aggregates records across all processes, heaps, and times in the trace. This example is only suitable for inspecting the final cumulative state when capturing a single process’s native heap; it is not a snapshot of an arbitrary diamond. It has no process column, so do not directly use it for multiprocess regression statistics. For multiprocess apps, <code>:remote</code> processes, or restarts of identically named processes, return to the raw tables and filter by <code>upid</code>, PID, process name, and diamond timestamp to avoid attributing another process’s allocations to the target.</p>
+<p>For a rough inspection by process, diamond timestamp, and leaf frame, return to the raw tables. This SQL computes retained bytes through the end of the final dump. The key is <code>SUM(a.size)</code>: allocations are positive and frees are negative, so the sum more closely matches that diamond’s <code>Unreleased malloc size</code>. This is not final attribution; the final report must return to the complete call stack. <code>heap_profile_allocation</code> stores each dump’s delta relative to the previous dump, not a complete snapshot at every dump; you must accumulate <code>ts &lt;= dump_ts</code>. The following query counts only <code>libc.malloc</code>, avoiding the misclassification of <code>com.android.art</code>, which does not record frees, as unreleased native memory.</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> target_process <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> upid, pid, name, cmdline</span><br><span class="line">  <span class="keyword">FROM</span> process</span><br><span class="line">  <span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">  <span class="keyword">ORDER</span> <span class="keyword">BY</span> start_ts <span class="keyword">DESC</span></span><br><span class="line">  LIMIT <span class="number">1</span></span><br><span class="line">),</span><br><span class="line">target_dump <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> <span class="built_in">MAX</span>(ts_end) <span class="keyword">AS</span> dump_ts</span><br><span class="line">  <span class="keyword">FROM</span> heap_profile</span><br><span class="line">  <span class="keyword">WHERE</span> upid <span class="operator">=</span> (<span class="keyword">SELECT</span> upid <span class="keyword">FROM</span> target_process)</span><br><span class="line">    <span class="keyword">AND</span> heap_name <span class="operator">=</span> <span class="string">&#x27;libc.malloc&#x27;</span></span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  d.dump_ts,</span><br><span class="line">  p.upid,</span><br><span class="line">  p.pid,</span><br><span class="line">  p.name <span class="keyword">AS</span> process_name,</span><br><span class="line">  p.cmdline <span class="keyword">AS</span> process_cmdline,</span><br><span class="line">  a.callsite_id,</span><br><span class="line">  f.name <span class="keyword">AS</span> frame_name,</span><br><span class="line">  m.name <span class="keyword">AS</span> mapping_name,</span><br><span class="line">  <span class="built_in">SUM</span>(a.size) <span class="operator">/</span> <span class="number">1024.0</span> <span class="operator">/</span> <span class="number">1024.0</span> <span class="keyword">AS</span> leaf_unreleased_mb,</span><br><span class="line">  <span class="built_in">SUM</span>(a.count) <span class="keyword">AS</span> unreleased_count</span><br><span class="line"><span class="keyword">FROM</span> heap_profile_allocation a</span><br><span class="line"><span class="keyword">JOIN</span> target_process p <span class="keyword">USING</span> (upid)</span><br><span class="line"><span class="keyword">JOIN</span> target_dump d <span class="keyword">ON</span> a.ts <span class="operator">&lt;=</span> d.dump_ts</span><br><span class="line"><span class="keyword">JOIN</span> stack_profile_callsite c <span class="keyword">ON</span> a.callsite_id <span class="operator">=</span> c.id</span><br><span class="line"><span class="keyword">JOIN</span> stack_profile_frame f <span class="keyword">ON</span> c.frame_id <span class="operator">=</span> f.id</span><br><span class="line"><span class="keyword">JOIN</span> stack_profile_mapping m <span class="keyword">ON</span> f.mapping <span class="operator">=</span> m.id</span><br><span class="line"><span class="keyword">WHERE</span> a.heap_name <span class="operator">=</span> <span class="string">&#x27;libc.malloc&#x27;</span></span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> d.dump_ts, p.upid, p.pid, p.name, p.cmdline, a.callsite_id, f.name, m.name</span><br><span class="line"><span class="keyword">HAVING</span> leaf_unreleased_mb <span class="operator">&gt;</span> <span class="number">0</span></span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> dump_ts <span class="keyword">DESC</span>, leaf_unreleased_mb <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">50</span>;</span><br></pre></td></tr></table></figure>
+
+<p>SQL helps you quickly find the largest contributors. Raw-table queries split call stacks into frame rows and can leave you looking only at leaf frames such as <code>malloc</code> and <code>realloc</code>; the summary tree and UI flamegraph are better for reading full attribution. Before writing a stable script, run <code>PRAGMA table_info(heap_profile_allocation);</code> to confirm the fields and avoid queries breaking across Perfetto versions.</p>
+<p>A dump with no change in allocations may contain no new allocation rows. Therefore, select the dump using <code>heap_profile.ts_end</code>, then accumulate the allocation table. With older Trace Processor versions, first confirm the <code>heap_profile</code> schema. If that table is absent, confirm the dump time in the UI; do not fall back to the allocation table’s <code>MAX(ts)</code> and pretend it proves that the final dump succeeded. Also check heapprofd stats. Summation cannot recover historical deltas that have been overwritten.</p>
+<p>Leak assessment requires a three-point comparison: before the operation, after the operation, and after release. The following is a report-query skeleton; <code>baseline_dump_ts</code>, <code>after_action_dump_ts</code>, and <code>after_release_dump_ts</code> can come from heap dumps nearest to application markers:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> target_process <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> upid, pid, name</span><br><span class="line">  <span class="keyword">FROM</span> process</span><br><span class="line">  <span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">  <span class="keyword">ORDER</span> <span class="keyword">BY</span> start_ts <span class="keyword">DESC</span></span><br><span class="line">  LIMIT <span class="number">1</span></span><br><span class="line">),</span><br><span class="line">selected_dumps(label, dump_ts) <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">VALUES</span></span><br><span class="line">    (<span class="string">&#x27;baseline&#x27;</span>, <span class="number">100000000000</span>),</span><br><span class="line">    (<span class="string">&#x27;after_action&#x27;</span>, <span class="number">120000000000</span>),</span><br><span class="line">    (<span class="string">&#x27;after_release&#x27;</span>, <span class="number">150000000000</span>)</span><br><span class="line">),</span><br><span class="line">valid_dumps <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> d.<span class="operator">*</span> <span class="keyword">FROM</span> selected_dumps d</span><br><span class="line">  <span class="keyword">WHERE</span> <span class="keyword">EXISTS</span> (</span><br><span class="line">    <span class="keyword">SELECT</span> <span class="number">1</span> <span class="keyword">FROM</span> heap_profile h</span><br><span class="line">    <span class="keyword">WHERE</span> h.upid <span class="operator">=</span> (<span class="keyword">SELECT</span> upid <span class="keyword">FROM</span> target_process)</span><br><span class="line">      <span class="keyword">AND</span> h.heap_name <span class="operator">=</span> <span class="string">&#x27;libc.malloc&#x27;</span> <span class="keyword">AND</span> h.ts_end <span class="operator">=</span> d.dump_ts</span><br><span class="line">  )</span><br><span class="line">),</span><br><span class="line">alloc_by_dump <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span></span><br><span class="line">    d.label,</span><br><span class="line">    a.callsite_id,</span><br><span class="line">    <span class="built_in">SUM</span>(a.size) <span class="operator">/</span> <span class="number">1024.0</span> <span class="operator">/</span> <span class="number">1024.0</span> <span class="keyword">AS</span> unreleased_mb,</span><br><span class="line">    <span class="built_in">SUM</span>(a.count) <span class="keyword">AS</span> unreleased_count</span><br><span class="line">  <span class="keyword">FROM</span> heap_profile_allocation a</span><br><span class="line">  <span class="keyword">JOIN</span> valid_dumps d <span class="keyword">ON</span> a.ts <span class="operator">&lt;=</span> d.dump_ts</span><br><span class="line">  <span class="keyword">WHERE</span> a.upid <span class="operator">=</span> (<span class="keyword">SELECT</span> upid <span class="keyword">FROM</span> target_process)</span><br><span class="line">    <span class="keyword">AND</span> a.heap_name <span class="operator">=</span> <span class="string">&#x27;libc.malloc&#x27;</span></span><br><span class="line">  <span class="keyword">GROUP</span> <span class="keyword">BY</span> d.label, a.callsite_id</span><br><span class="line">),</span><br><span class="line">pivot <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span></span><br><span class="line">    callsite_id,</span><br><span class="line">    <span class="built_in">SUM</span>(<span class="keyword">CASE</span> <span class="keyword">WHEN</span> label <span class="operator">=</span> <span class="string">&#x27;baseline&#x27;</span> <span class="keyword">THEN</span> unreleased_mb <span class="keyword">ELSE</span> <span class="number">0</span> <span class="keyword">END</span>) <span class="keyword">AS</span> baseline_unreleased_mb,</span><br><span class="line">    <span class="built_in">SUM</span>(<span class="keyword">CASE</span> <span class="keyword">WHEN</span> label <span class="operator">=</span> <span class="string">&#x27;after_action&#x27;</span> <span class="keyword">THEN</span> unreleased_mb <span class="keyword">ELSE</span> <span class="number">0</span> <span class="keyword">END</span>) <span class="keyword">AS</span> after_action_unreleased_mb,</span><br><span class="line">    <span class="built_in">SUM</span>(<span class="keyword">CASE</span> <span class="keyword">WHEN</span> label <span class="operator">=</span> <span class="string">&#x27;after_release&#x27;</span> <span class="keyword">THEN</span> unreleased_mb <span class="keyword">ELSE</span> <span class="number">0</span> <span class="keyword">END</span>) <span class="keyword">AS</span> after_release_unreleased_mb</span><br><span class="line">  <span class="keyword">FROM</span> alloc_by_dump</span><br><span class="line">  <span class="keyword">GROUP</span> <span class="keyword">BY</span> callsite_id</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  callsite_id,</span><br><span class="line">  baseline_unreleased_mb,</span><br><span class="line">  after_action_unreleased_mb,</span><br><span class="line">  after_release_unreleased_mb,</span><br><span class="line">  after_action_unreleased_mb <span class="operator">-</span> baseline_unreleased_mb <span class="keyword">AS</span> action_delta_mb,</span><br><span class="line">  after_release_unreleased_mb <span class="operator">-</span> baseline_unreleased_mb <span class="keyword">AS</span> retained_delta_mb,</span><br><span class="line">  after_action_unreleased_mb <span class="operator">-</span> after_release_unreleased_mb <span class="keyword">AS</span> released_delta_mb,</span><br><span class="line">  <span class="keyword">CASE</span></span><br><span class="line">    <span class="keyword">WHEN</span> after_release_unreleased_mb <span class="operator">-</span> baseline_unreleased_mb <span class="operator">&gt;</span> <span class="number">1</span> <span class="keyword">THEN</span> <span class="string">&#x27;leak_candidate&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> after_action_unreleased_mb <span class="operator">&gt;</span> baseline_unreleased_mb</span><br><span class="line">      <span class="keyword">AND</span> after_release_unreleased_mb <span class="operator">&lt;=</span> baseline_unreleased_mb <span class="keyword">THEN</span> <span class="string">&#x27;peak&#x27;</span></span><br><span class="line">    <span class="keyword">ELSE</span> <span class="string">&#x27;unknown&#x27;</span></span><br><span class="line">  <span class="keyword">END</span> <span class="keyword">AS</span> conclusion_type</span><br><span class="line"><span class="keyword">FROM</span> pivot</span><br><span class="line"><span class="keyword">WHERE</span> (<span class="keyword">SELECT</span> <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">FROM</span> valid_dumps) <span class="operator">=</span> <span class="number">3</span></span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> retained_delta_mb <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">50</span>;</span><br></pre></td></tr></table></figure>
+
+<p>First confirm that all three timestamps correspond to successfully completed dumps of the target heap. Do not use the placeholder timestamps directly. This example returns results only when all three dumps exist. If a dump is missing, the caller should report unavailable data; <code>CASE ... ELSE 0</code> must not turn missing capture into apparent release. The 1 MiB threshold is only an illustrative filter.</p>
+<p>Retention after release is more suggestive of a leak. Growth during an operation that falls back after release is a peak. Long-term retention can be described as a cache only if it has a capacity limit, evidence of reuse, and a reclamation policy under pressure.</p>
+<p>A report can use this fixed set of fields:</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">trace_name,process_name,upid,pid,scenario,dump_phase,dump_ts_ms,sampling_interval_bytes,dump_interval_ms,top_stack_frame,mapping_name,unreleased_mb,retained_delta_mb,total_malloc_mb,allocation_count,symbol_status,profileable_state,data_loss_status,evidence_grade,conclusion_type,next_action</span><br><span class="line">heap-run01,com.example.app,42,1234,player_open,after_release,150000,4096,5000,PlayerBuffer::Alloc,libplayer.so,8.4,6.9,42.1,128,strong,profileable,clean,strong,leak_candidate,inspect_owner_module</span><br></pre></td></tr></table></figure>
+
+<h2 id="Understanding-the-Sampling-Interval"><a href="#Understanding-the-Sampling-Interval" class="headerlink" title="Understanding the Sampling Interval"></a>Understanding the Sampling Interval</h2><p>heapprofd does not record every allocation by default. <code>sampling_interval_bytes: 4096</code> means that it samples once per 4096 allocated bytes on average, then attributes allocations to call stacks using sampling probabilities. Sufficiently large allocations may be recorded at their actual size, but do not interpret the sampling interval as a hard boundary where everything below it is estimated and everything above it is exact. Android versions and heap configurations also affect actual behavior.</p>
+<p>How to choose an interval:</p>
+<ul>
+<li>4096 bytes is a common starting point, suitable for most local analysis.</li>
+<li>If you suspect large numbers of small native allocations, reduce the interval, at the cost of greater overhead.</li>
+<li>If a high allocation rate causes buffer overruns, first increase shared memory or increase the sampling interval.</li>
+<li>A handwritten <code>HeapprofdConfig</code> must explicitly set a nonzero sampling interval. Setting it to 1 approaches exact capture but has high overhead. Zero is invalid and, before Android 12, could even crash the target process.</li>
+</ul>
+<p>Do not describe sampled results as “exactly 12.34 MB was allocated.” A better formulation is: “At a 4096-byte sampling interval, unreleased allocations were concentrated in call stacks A&#x2F;B&#x2F;C, with A contributing the largest share.” A sampling profiler helps establish direction and ranking; it does not replace allocator accounting.</p>
+<p>Top-stack rankings become unstable with dense small-object allocations, few samples, short windows, or allocations spread across many call stacks. Before&#x2F;after comparisons must use the same sampling interval, comparable workloads, and the same target window. Do not compare small differences such as 1% or 2% unless they reproduce across multiple runs. You can assign <code>evidence_grade</code> as follows: sufficient samples, consistent trends across continuous dumps, and complete symbols qualify as <code>strong</code>; data loss, an incomplete profile, unknown symbols, few samples, or only one reproduction make the evidence <code>weak</code>. For <code>weak</code> evidence, say “candidate call stack,” not “root-cause call stack.”</p>
+<h2 id="Java-Heap-Dumps-and-Java-Allocation-Sampling"><a href="#Java-Heap-Dumps-and-Java-Allocation-Sampling" class="headerlink" title="Java Heap Dumps and Java Allocation Sampling"></a>Java Heap Dumps and Java Allocation Sampling</h2><p>This section supplements the memory accounting categories introduced earlier. heapprofd can inspect native malloc&#x2F;new and, on Android 12 or later, switch to Java allocation sampling, but it still does not replace a Java heap dump.</p>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Output</th>
+<th>Suitable questions</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>heapprofd native profiling</td>
+<td>malloc&#x2F;new call stacks</td>
+<td>Who allocated native memory?</td>
+</tr>
+<tr>
+<td>Java heap dump</td>
+<td>Object retention graph</td>
+<td>Who holds Java objects?</td>
+</tr>
+<tr>
+<td>Java allocation sampling</td>
+<td>Call stacks that create Java objects</td>
+<td>Which code generates heavy Java allocation churn?</td>
+</tr>
+</tbody></table>
+<p>Enable Java allocation sampling through heapprofd with <code>heaps: &quot;com.android.art&quot;</code>, or use the script argument <code>--heaps com.android.art</code>. It requires Android 12 or later. It records call stacks at object creation, not when objects are garbage-collected, and is not equivalent to the retention relationships in a Java heap dump.</p>
+<h2 id="Symbolization-and-Confidence"><a href="#Symbolization-and-Confidence" class="headerlink" title="Symbolization and Confidence"></a>Symbolization and Confidence</h2><p>If the flamegraph contains only addresses, <code>unknown</code>, or obfuscated Java&#x2F;Kotlin names, address symbolization and deobfuscation first. The official recommendation is to run <code>traceconv bundle</code> on the collected trace to produce an archive containing symbol information, then supply native symbols and ProGuard&#x2F;R8 mappings as described in the symbolization documentation.</p>
+<p>Record the APK&#x2F;build ID, native-symbol version, and ProGuard&#x2F;R8 mapping version in the report. A Build ID mismatch reduces the evidence to address-level observations. When a third-party SDK or stripped so leaves only addresses, the next step is to obtain the matching build’s unstripped symbols &#x2F; mapping, not to immediately change application code.</p>
+<p>Do not blindly filter out <code>libart.so</code>, allocator glue, or system libraries while reading stacks. ART frames can provide essential context for Java-to-native calls, <code>NativeAllocationRegistry</code>, or object creation paths.</p>
+<p>First find the first app, SDK, or application-domain frame above allocator&#x2F;ART glue. Filter a class of frames only after confirming that they are merely repetitive glue. Treat <code>DEDUPED</code>, function folding caused by ICF, Build ID mismatches, and single-frame stacks as symbolization issues first.</p>
+<p>Also assess unwinding confidence: the share of unknown frames, the share of single-frame stacks, Build ID matching, Java-frame availability, and known issues for the target ABI &#x2F; Android version. Missing symbols affect attribution confidence. Distinguish “symbolized and attributable” from “localized only to an so &#x2F; allocator glue” in the report.</p>
+<p>At minimum, document:</p>
+<ul>
+<li>Whether the target process is profileable&#x2F;debuggable.</li>
+<li><code>sampling_interval_bytes</code> and the continuous-dump interval.</li>
+<li>Whether <code>stats</code> records heapprofd buffer overruns, client errors, incomplete profiles, <code>heapprofd_unwind_time_us</code>, <code>heapprofd_client_spinlock_blocked</code>, <code>heapprofd_sampling_interval_adjusted</code>, or data loss.</li>
+</ul>
+<p>When data loss or heapprofd buffer overruns occur, do not present the numbers as an exact ledger. Prefer wording such as “This call stack is a major contributor to unreleased allocations under the following sampling conditions.”</p>
+<p>For the general trace health check (buffer&#x2F;ftrace loss), use the stats query from article 12; run a separate heapprofd health check. <code>heapprofd_buffer_overran</code>, <code>heapprofd_client_error</code>, and <code>heapprofd_hit_guardrail</code> already exist in v57.2&#x2F;v58.2. Most are indexed stats whose records are generated on demand. Seeing only two single-value entries in a trace without a heap profile does not imply that the other entries are exclusive to newer versions.</p>
+<p>Before interpreting the exception query below, establish that a profile or dump for the target process&#x2F;heap exists, covers the window, and has completed. With no profile, report <code>profile_unavailable</code>, not “all clean.” Even when a profile exists, an empty exception query only means these exceptions were not recorded. <code>heapprofd_unwind_time_us</code>, <code>heapprofd_client_spinlock_blocked</code>, and <code>heapprofd_sampling_interval_adjusted</code> provide overhead&#x2F;sampling context; they should not all be treated as failures in the same way as nonzero error&#x2F;data_loss entries.</p>
+<p><code>heapprofd_last_profile_timestamp</code> is a supporting timestamp for the last profile packet. It cannot replace <code>heap_profile.ts_end</code>, diamonds, and final completion status as proof that the target window is complete. The following query retains this context for review:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> <span class="keyword">value</span> <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line">  <span class="keyword">AND</span> (</span><br><span class="line">    name GLOB <span class="string">&#x27;heapprofd_*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name GLOB <span class="string">&#x27;stackprofile_*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name GLOB <span class="string">&#x27;symbolization_*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name <span class="keyword">IN</span> (</span><br><span class="line">      <span class="string">&#x27;symbolization_tmp_build_id_not_found&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_buffer_overran&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_buffer_corrupted&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_client_error&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_missing_packet&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_non_finalized_profile&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_rejected_concurrent&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_hit_guardrail&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_sampling_interval_adjusted&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;heapprofd_client_spinlock_blocked&#x27;</span></span><br><span class="line">    )</span><br><span class="line">  )</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> name, idx;</span><br></pre></td></tr></table></figure>
+
+<h2 id="Checks-Before-Publishing-a-Report"><a href="#Checks-Before-Publishing-a-Report" class="headerlink" title="Checks Before Publishing a Report"></a>Checks Before Publishing a Report</h2><p>Capture conditions:</p>
+<ul>
+<li>heapprofd requires Android 10 or later; Java allocation sampling requires Android 12 or later.</li>
+<li>Capturing a target app through adb &#x2F; shell on a user build generally requires <code>debuggable</code> or <code>&lt;profileable android:shell=&quot;true&quot;/&gt;</code>.</li>
+<li>Capturing a running process by PID may miss early startup allocations; waiting for startup by process name covers more of startup.</li>
+<li>Runtime profiling does not take effect immediately. If the target process is very idle, profiling may not activate until another wave of allocations.</li>
+<li>A target process can be profiled by only one relevant session at a time. If there is a conflict, check for an old <code>perfetto</code> session first.</li>
+</ul>
+<p>Data confidence:</p>
+<ul>
+<li>32-bit programs have restrictions on some older Android versions. If the profile is empty, consult the official Known Issues for version differences.</li>
+<li>Review heapprofd, stackprofile, and symbolization stats. Downgrade confidence for overruns, non-finalized profiles, and unknown symbols.</li>
+<li>Disagreement between heapprofd numbers and RSS is common. Fragmentation, thread caches, allocator caches, and ZRAM can all contribute.</li>
+</ul>
+<p>Conclusion boundaries:</p>
+<ul>
+<li>A high <code>Total malloc size</code> does not mean a leak. Compare it with <code>Unreleased malloc size</code>, consecutive diamonds, and application-operation timestamps first.</li>
+<li>High graphics backing memory does not necessarily produce high heapprofd values. Account for Graphics&#x2F;GL, dmabuf, GPU, and Surface buffers separately.</li>
+<li>Classify the conclusion as <code>leak / peak / cache / churn / out-of-scope graphics memory / evidence insufficient</code>, each with a different next action.</li>
+</ul>
+<h2 id="Connecting-Memory-Trends-to-Call-Stacks"><a href="#Connecting-Memory-Trends-to-Call-Stacks" class="headerlink" title="Connecting Memory Trends to Call Stacks"></a>Connecting Memory Trends to Call Stacks</h2><p>heapprofd addresses native allocation call stacks. It replaces neither Java heap dumps nor RSS&#x2F;PSS trends; it supplies the missing answer to “Who allocated native heap memory managed by libc malloc&#x2F;new?” GraphicBuffer, dma-buf, GPU textures, and Surface buffers belong to separate graphics memory accounting. heapprofd can only help determine whether app&#x2F;native wrappers are also creating malloc&#x2F;new pressure.</p>
+<p>In practice, follow this sequence:</p>
+<ol>
+<li>Confirm the memory trend with process stats, meminfo, smaps, or production monitoring.</li>
+<li>If the growth is in Native Heap &#x2F; malloc wrappers &#x2F; allocator paths visible to heapprofd, use heapprofd. If only RSS&#x2F;PSS is rising, first separate the categories using smaps_rollup, meminfo classifications, mmap&#x2F;syscall data, or dmabuf&#x2F;graphics evidence.</li>
+<li>Inspect Unreleased malloc size and the flamegraph in the UI.</li>
+<li>Find the largest contributors with SQL, then return to the flamegraph for complete call stacks.</li>
+<li>Complete symbolization and document sampling conditions and confidence.</li>
+<li>Classify the result as a leak, peak, cache, churn, graphics memory outside heapprofd’s scope, or insufficient evidence.</li>
+</ol>
+<h2 id="References"><a href="#References" class="headerlink" title="References"></a>References</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/native-heap-profiler">Memory: Callstack-based Allocation Profiling</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/java-heap-profiler">Memory: Java heap dumps</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/memory-counters">Memory counters and events</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/design-docs/heapprofd-design">heapprofd design</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/reference/trace-config-proto">TraceConfig reference</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/instrumentation/track-events">Track Events</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/android-log">Android Log data source</a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.android.com/reference/android/os/ProfilingManager">ProfilingManager</a></li>
+<li><a target="_blank" rel="noopener" href="https://source.android.com/docs/core/ota/modular-system/profiling">Android Profiling module</a></li>
+</ol>
+<p>Source version verified: <code>b23c67be1159e3f0b0657bd97be9e139e0d8ee2c</code> (2026-09-19).</p>
+<ul>
+<li><a target="_blank" rel="noopener" href="https://github.com/google/perfetto/blob/b23c67be1159e3f0b0657bd97be9e139e0d8ee2c/src/trace_processor/importers/proto/profile_packet_sequence_state.cc">heapprofd incremental import implementation</a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/google/perfetto/blob/b23c67be1159e3f0b0657bd97be9e139e0d8ee2c/src/trace_processor/perfetto_sql/stdlib/android/memory/heap_profile/summary_tree.sql">Heap summary tree aggregation implementation</a></li>
+</ul>
+<h2 id="About-Me-and-the-Blog"><a href="#About-Me-and-the-Blog" class="headerlink" title="About Me and the Blog"></a>About Me and the Blog</h2><p>Follow <a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/">Android Performance</a>.</p>
+
+    </article>
+    <!-- license -->
+        <div class="license-wrapper">
+            <p>Author：<a href="https://androidperformance.com/en">Gracker</a>
+            <p>Link：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">https://androidperformance.com/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/</a>
+            <p>Publish date：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">May 4th 2026, 10:14:00 am</a>
+            <p>Update date：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">September 20th 2026, 12:52:22 am</a>
+            <p>License：This work is licensed under <a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a></p>
+        </div>
+    <!-- paginator -->
+    <ul class="post-paginator">
+        <li class="next">
+                <div class="nextSlogan">Next Post</div>
+                <a href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/" title="Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems">
+                    <div class="nextTitle">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</div>
+                </a>
+        </li>
+        <li class="previous">
+                <div class="prevSlogan">Previous Post</div>
+                <a href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/" title="Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing">
+                    <div class="prevTitle">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</div>
+                </a>
+        </li>
+    </ul>
+    <!-- comment -->
+        <div class="post-comment">
+            <!-- 来必力 City 版安装代码 -->
+
+            
+            
+            
+            <!-- utteranc评论 -->
+
+            <!-- partial('_partial/comment/changyan') -->
+            <!--PC版-->
+
+            
+            
+            
+        </div>
+    <!-- timeliness note -->
+    <!-- idea from: https://hexo.fluid-dev.com/posts/hexo-injector/#%E6%96%87%E7%AB%A0%E6%97%B6%E6%95%88%E6%80%A7%E6%8F%90%E7%A4%BA -->
+    <!-- Mathjax -->
+</main>
+
+                <!-- profile -->
+            </div>
+            <footer class="footer footer-unloaded">
+    <!-- social  -->
+        <div class="social">
+                            <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title="email" ></a>
+                <a href="https://github.com/gracker" class="iconfont-archer github" target="_blank" title="github"></a>
+                <span class="iconfont-archer wechat" title="wechat">
+                        <img class="profile-qr" src="/en/assets/Wechat.jpeg" />
+                </span>
+                <span class="iconfont-archer qq" title="qq: 553000664">
+                </span>
+                <a href="https://weibo.com/gracker520" class="iconfont-archer weibo" target="_blank" title="weibo"></a>
+                <a href="https://www.zhihu.com/people/gracker" class="iconfont-archer zhihu" target="_blank" title="zhihu"></a>
+                <a href="https://twitter.com/Gracker_Gao" class="iconfont-archer twitter" target="_blank" title="twitter"></a>
+                <a href="https://juejin.im/user/557b0590e4b052e031453d76" class="iconfont-archer juejin" target="_blank" title="juejin"></a>
+                <a href="https://www.youtube.com/@grackers" class="iconfont-archer youtube" target="_blank" title="youtube"></a>
+                <a href="/en/atom.xml" class="iconfont-archer rss" target="_blank" title="rss"></a>
+
+        </div>
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- website approve for Chinese user -->
+        <div class="website-approve">
+                <span id="icp-approve" class="icp-approve">
+                    <a href="https://beian.miit.gov.cn/" target="_blank">蜀 ICP 备 20016190 号</a>
+                </span>
+        </div>
+</footer>
+
+        </div>
+        <!-- toc -->
+            <div class="toc-wrapper toc-wrapper-loding" style=    top:50vh;
+>
+                <div class="toc-catalog">
+                    <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+                </div>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-Series-Catalog"><span class="toc-number">1.</span> <span class="toc-text">Perfetto Series Catalog</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Keep-Memory-Accounting-Categories-Separate"><span class="toc-number">2.</span> <span class="toc-text">Keep Memory Accounting Categories Separate</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#When-to-Use-heapprofd"><span class="toc-number">3.</span> <span class="toc-text">When to Use heapprofd</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Capture-a-Native-Heap-Profile-Quickly"><span class="toc-number">4.</span> <span class="toc-text">Capture a Native Heap Profile Quickly</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Capture-It-Alongside-a-System-Trace"><span class="toc-number">5.</span> <span class="toc-text">Capture It Alongside a System Trace</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Reading-Heap-Profiles-in-the-UI"><span class="toc-number">6.</span> <span class="toc-text">Reading Heap Profiles in the UI</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Querying-Unreleased-Allocations-with-SQL"><span class="toc-number">7.</span> <span class="toc-text">Querying Unreleased Allocations with SQL</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Understanding-the-Sampling-Interval"><span class="toc-number">8.</span> <span class="toc-text">Understanding the Sampling Interval</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Java-Heap-Dumps-and-Java-Allocation-Sampling"><span class="toc-number">9.</span> <span class="toc-text">Java Heap Dumps and Java Allocation Sampling</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Symbolization-and-Confidence"><span class="toc-number">10.</span> <span class="toc-text">Symbolization and Confidence</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Checks-Before-Publishing-a-Report"><span class="toc-number">11.</span> <span class="toc-text">Checks Before Publishing a Report</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Connecting-Memory-Trends-to-Call-Stacks"><span class="toc-number">12.</span> <span class="toc-text">Connecting Memory Trends to Call Stacks</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#References"><span class="toc-number">13.</span> <span class="toc-text">References</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#About-Me-and-the-Blog"><span class="toc-number">14.</span> <span class="toc-text">About Me and the Blog</span></a></li></ol>
+            </div>
+        <!-- sidebar -->
+        <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+        <div class="sidebar-panel-archives">
+    <!-- 在 ejs 中将 archive 按照时间排序 -->
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 140
+        </div>
+    </div>
+    <div class="post-archive">
+            <div class="archive-year"> 2026 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2026/09/19/SmartPerfetto-v1.12.0-Release-Notes/">SmartPerfetto v1.12.0 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2026/09/19/AIW-Open-Source-Android-Internals-Wiki/">Half a Year in the Making: Open-Sourcing an Android Internals Ebook</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/en/2026/08/21/SmartPerfetto-Five-Week-Update/">SmartPerfetto v1.7.0 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/17</span>
+            <a class="archive-post-title" href="/en/2026/07/17/SmartPerfetto-Six-Week-Update/">SmartPerfetto v1.1.1 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/04</span>
+            <a class="archive-post-title" href="/en/2026/06/04/SmartPerfetto-Three-Week-Update/">SmartPerfetto v1.0.28 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/17</span>
+            <a class="archive-post-title" href="/en/2026/05/17/SmartPerfetto-Two-Week-Update/">SmartPerfetto v1.0.7 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">Android Perfetto Series 12: Trace Dataflow and Data Loss Troubleshooting</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto Series 14: heapprofd and Memory Profiling</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-11-PerfettoSQL-TraceProcessor-Automation/">Android Perfetto Series 11: PerfettoSQL, Trace Processor, and Regression Detection</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto Series 18: Response Latency in Practice, from Input Events to First-Frame Feedback</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-17-Engineering-Domain-And-Platform-Tracing/">Android Perfetto Series 17: Domain Automation, Issue Checklists, and Platform Infrastructure</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/29</span>
+            <a class="archive-post-title" href="/en/2026/04/29/SmartPerfetto-Open-Source-Perfetto-AI-Assistant/">SmartPerfetto Is Open Source: A Perfetto AI Assistant for Android Trace Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/28</span>
+            <a class="archive-post-title" href="/en/2026/04/28/Agent-OS-Task-Entry/">Long-form Forecast: Phones May No Longer Start from Apps: How Agent OS Takes Over the Task Entry Point</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/10</span>
+            <a class="archive-post-title" href="/en/2026/04/10/SmartPerfetto-Architecture-Deep-Dive-QA/">SmartPerfetto Architecture Q&A: 8 In-Depth Technical Questions</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/10</span>
+            <a class="archive-post-title" href="/en/2026/04/10/SmartPerfetto-Architecture-Deep-Dive/">From Trace to Insight: Harness Engineering in SmartPerfetto AI Agent</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/10</span>
+            <a class="archive-post-title" href="/en/2026/03/10/OpenClaw-FAQ/">OpenClaw FAQ: Token Costs, Use Cases, Local Models, Privacy, and Day-to-Day Experience</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/08</span>
+            <a class="archive-post-title" href="/en/2026/03/08/OpenClaw-Local-Practice/">After Running OpenClaw Locally for Three Weeks, I Realized It's Not a Chatbot</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2025 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/16</span>
+            <a class="archive-post-title" href="/en/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto Series 10: Binder Scheduling and Lock Contention</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/en/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto Series 9: CPU Information Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/en/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto Series 8: Understanding Vsync Mechanism and Performance Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/02</span>
+            <a class="archive-post-title" href="/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto Series 7: MainThread and RenderThread Deep Dive</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/26</span>
+            <a class="archive-post-title" href="/en/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto Series 6: Why 120Hz? Advantages and Challenges</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/26</span>
+            <a class="archive-post-title" href="/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Choreographer-based Rendering Flow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto Series 4: Opening Large Traces via Command Line</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-01-ANR-Design/">Android ANR Series 1: Understanding Android ANR Design Philosophy</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2024 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto Series 1: Introduction to Perfetto</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/en/2024/03/27/Android-Perfetto-101/">Android Perfetto Series Catalog</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/01</span>
+            <a class="archive-post-title" href="/en/2024/01/01/2023-review/">Reflections on 2023: Health, Career, and the Future</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2023 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/en/2023/08/21/the-performance-design-of-os/">Performance Considerations in Operating System Design</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/en/2023/05/14/bad-android-app-with-system-permissions/">Can an App Really Do Whatever It Wants With System Permissions?</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2022 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/en/2022/03/27/the-performance-tea-part-01/">The Performance Community Tea Talk - Episode 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-sleep/">Systrace Thread CPU State Analysis Tips - Sleep and Uninterruptible Sleep</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-running/">Systrace Thread CPU State Analysis Tips - Running</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2022/01/21/android-systrace-cpu-state-runnable/">Systrace Thread CPU State Analysis Tips - Runnable</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/en/2022/01/07/The-Performace-1-Performance-Tools/">Android Performance Optimization: Techniques, Methods, and Tools</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/en/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/03</span>
+            <a class="archive-post-title" href="/en/2022/01/03/2021-Review/">2021 Year in Review: Baby, Career, and Growth</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2021 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/27</span>
+            <a class="archive-post-title" href="/en/2021/10/27/if-i-write-a-book-about-performance/">What Should Be in a Book About Android Smoothness?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/26</span>
+            <a class="archive-post-title" href="/en/2021/10/26/build-android-12/">Android System Development Series (1): Downloading, Compiling, and Flashing Android 12</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace Responsiveness in Action 3 - Extended Knowledge on Responsiveness</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace Responsiveness in Action 1 - Understanding Responsiveness Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace Responsiveness in Action 2 - Responsiveness Analysis - Using App Startup as an Example</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace Smoothness in Action 3 - FAQs During Jank Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2020 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span>
+            <a class="archive-post-title" href="/en/2020/08/20/weibo-imageload-opt-on-huawei/">Why is the Weibo Experience Better on Huawei? A Technical Analysis and Reflection</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/en/2020/05/26/samsung_crash/">An Incident Caused by a 'Leap' Month - Analysis of Samsung System Reboots</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/en/2020/05/07/Android-App-Chain-Wakeup/">Analysis of Android App Chain Wakeups</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/14</span>
+            <a class="archive-post-title" href="/en/2020/02/14/Android-Systrace-SurfaceFlinger/">Android Systrace Basics - SurfaceFlinger Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/03</span>
+            <a class="archive-post-title" href="/en/2020/02/03/android-development-learning-path-2020-edition/">Android Developer Learning Path (2020 Edition)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span>
+            <a class="archive-post-title" href="/en/2020/01/28/2020-read/">My 2020 Reading List</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2019 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/21</span>
+            <a class="archive-post-title" href="/en/2019/12/21/Android-Systrace-CPU/">Android Systrace Basics - CPU Info Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/15</span>
+            <a class="archive-post-title" href="/en/2019/12/15/Android-Systrace-Triple-Buffer/">Android Systrace Basics - Triple Buffer Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/06</span>
+            <a class="archive-post-title" href="/en/2019/12/06/Android-Systrace-Binder/">Android Systrace Basics - Binder and Lock Contention Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/en/2019/12/01/BlogMap/">[Sticky] Blog Article Directory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/en/2019/12/01/Android-Systrace-Vsync/">Android Systrace Basics - Vsync Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/06</span>
+            <a class="archive-post-title" href="/en/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Android Systrace Basics - MainThread and RenderThread Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/04</span>
+            <a class="archive-post-title" href="/en/2019/11/04/Android-Systrace-Input/">Android Systrace Basics - Input Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/24</span>
+            <a class="archive-post-title" href="/en/2019/10/24/Android-Background-Animation/">Analysis of 'Zombie Animations' in the Android Background</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/22</span>
+            <a class="archive-post-title" href="/en/2019/10/22/Android-Choreographer/">Detailed Explanation of Android Rendering Mechanism Based on Choreographer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/en/2019/09/18/Android-Jank-Due-To-Low-Memory/">Overview of Jank and Frame Drops in Android - Low Memory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/17</span>
+            <a class="archive-post-title" href="/en/2019/09/17/Android-Kill-Background-App-Debug/">Case Study: Debugging the Android Launcher Kill Problem</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Debug/">Overview of Jank and Frame Drops in Android - Methodology</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/en/2019/09/01/Android-Activity-Lunch-Mode/">A Detailed Guide to Activity Launch Modes in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/en/2019/07/27/Android-Hardware-Layer/">A Deep Dive into Hardware Layers in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/en/2019/07/27/Android-Hardware-Layer-NEW/">Detailed Explanation of Hardware Layer in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/23</span>
+            <a class="archive-post-title" href="/en/2019/07/23/Android-Systrace-Pre/">Android Systrace Basics - Prerequisites for Analyzing Systrace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/29</span>
+            <a class="archive-post-title" href="/en/2019/06/29/Android-Systrace-SystemServer/">Android Systrace Basics - SystemServer Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/en/2019/05/28/Android-Systrace-About/">Android Systrace Basics - Introduction to Systrace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/27</span>
+            <a class="archive-post-title" href="/en/2019/05/27/why-60-fps/">Android Systrace Basics - Why 60 FPS?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/en/2019/05/26/Android_Systrace_0/">Android Systrace -- Series Article Index</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/15</span>
+            <a class="archive-post-title" href="/en/2019/05/15/90hz-on-android/">A New Era of Smoothness: Thoughts on 90Hz on Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/en/2019/04/07/Sharp-Tools/">Sharp Tools - Efficient Tool Recommendations</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/en/2019/04/07/liqi/">Liqi - High-Efficiency Tools Recommendation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2019/01/21/android-performance-case-jank-accessbility/">Case Analysis of System-wide Stutter Caused by Android Accessibility Service</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/12</span>
+            <a class="archive-post-title" href="/en/2019/01/12/recommend-of-2018/">2018 Best Items Recommendations - A Reward for Your Hard Work</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2018 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span>
+            <a class="archive-post-title" href="/en/2018/11/01/android-system-develop-0/">Setting Up the Android System Development Environment</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/25</span>
+            <a class="archive-post-title" href="/en/2018/10/25/How-do-engineers-count-well/">Lu Qi: Besides Good Code, What Makes an Engineer Excellent?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/01</span>
+            <a class="archive-post-title" href="/en/2018/10/01/how-to-stop-sucking-and-be-awesome-instead-8/">The Programmer's Apprenticeship - 08: The Beauty of Reading</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/30</span>
+            <a class="archive-post-title" href="/en/2018/09/30/how-to-stop-sucking-and-be-awesome-instead-7/">The Programmer's Apprenticeship - 07: Games and Programming</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/29</span>
+            <a class="archive-post-title" href="/en/2018/09/29/how-to-stop-sucking-and-be-awesome-instead-6/">The Programmer's Apprenticeship - 06: All About the Internet</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/28</span>
+            <a class="archive-post-title" href="/en/2018/09/28/how-to-stop-sucking-and-be-awesome-instead-5/">The Programmer's Apprenticeship - 05: Know Your Users</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/27</span>
+            <a class="archive-post-title" href="/en/2018/09/27/how-to-stop-sucking-and-be-awesome-instead-4/">The Programmer's Apprenticeship - 04: Reflections on Testing</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/26</span>
+            <a class="archive-post-title" href="/en/2018/09/26/how-to-stop-sucking-and-be-awesome-instead-3/">The Programmer's Apprenticeship - 03: Web Design Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/20</span>
+            <a class="archive-post-title" href="/en/2018/09/20/how-to-stop-sucking-and-be-awesome-instead-2/">The Programmer's Apprenticeship - 02: The Way of Programming</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2018/09/19/how-to-stop-sucking-and-be-awesome-instead-1/">The Programmer's Apprenticeship - 01: The Art of Fighting Back</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2018/09/13/android-memory/">Does the Android System Not Release Memory?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/13</span>
+            <a class="archive-post-title" href="/en/2018/08/13/Some-Thoughts-on-the-Fluency-of-Android/">Some Thoughts on Android System Fluency</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/20</span>
+            <a class="archive-post-title" href="/en/2018/05/20/zhihu-startingwindow/">Zhihu: Save Your StartingWindow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/en/2018/05/07/Android-performance-optimization-skills-and-tools/">[Sticky] Android Performance Optimization: Must-Know Skills and Tools</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/en/2018/01/06/2017-most-recommended/">2017 Best Recommendations - A Reward for Hard-Working Self</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/en/2018/01/06/Most-Recommended-of-2017/">2017 Annual Best Recommendations - Reward Yourself for Hard Work</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2017 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/23</span>
+            <a class="archive-post-title" href="/en/2017/04/23/About-work/">Reflections on Work and Growth (2017)</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2016 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/en/2016/04/05/android-bottom-bar-2/">Android Bottom Navigation Spec Part 2: Style, Behavior, and Dimensions</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/en/2016/04/05/android-bottom-bar-1/">Android Bottom Navigation Spec Part 1: Usage</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2015 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/31</span>
+            <a class="archive-post-title" href="/en/2015/12/31/How-to-calculation-android-app-lunch-time/">How to Calculate App Startup Time in Android?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/29</span>
+            <a class="archive-post-title" href="/en/2015/12/29/Android-App-Launch-Optimization-DelayLoad-Part-2/">Android App Launch Optimization: Implementation and Principles of DelayLoad (Part 2)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2015/11/18/Android-app-lunch-optimize-delay-load/">Android App Startup Optimization - DelayLoad Implementation and Principles (Part 1)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/12</span>
+            <a class="archive-post-title" href="/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/">RenderThread Workflow in Android hwui</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/en/2015/08/05/HashMap/">Java 7 HashMap Source Code Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-onTrimMemory/">Android Code Memory Optimization Suggestions - OnTrimMemory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-AndroidResource/">Android Code Memory Optimization Suggestions - Android Resources</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/29</span>
+            <a class="archive-post-title" href="/en/2015/05/29/Nexus6-with-Android-M/">Enabling Multi-Window Mode on Nexus 6 with Android M</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/06</span>
+            <a class="archive-post-title" href="/en/2015/05/06/Java-Singleton/">A Detailed Guide to Java Singleton Pattern</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-3/">Android Performance Patterns: Understanding VSYNC</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-2/">Android Performance Patterns: Understanding Overdraw</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-4/">Android Performance Patterns: Profile GPU Rendering</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-1/">Android Performance Patterns: Render Performance</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns/">Overview of Android Performance Patterns</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/">Android Memory Optimization (3) - Viewing Original Bitmaps in MAT</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/31</span>
+            <a class="archive-post-title" href="/en/2015/03/31/android-performance-case-study-follow-up/">Android Performance Case Study Follow-up</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-3/">Android Tips Round-Up, Part 3</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-4/">Android Tips Round-Up, Part 4</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/04</span>
+            <a class="archive-post-title" href="/en/2015/02/04/build-rom-for-nexus5/">Compiling Android Lollipop Firmware for Nexus 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/30</span>
+            <a class="archive-post-title" href="/en/2015/01/30/android-performance-tools-systrace-1/">Android Performance Optimization - Introduction to Systrace (Part 1)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/16</span>
+            <a class="archive-post-title" href="/en/2015/01/16/view-android-source-code-with-androidstudio/">Viewing Android Lollipop Source Code with Android Studio</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/13</span>
+            <a class="archive-post-title" href="/en/2015/01/13/android-performance-optimization-overdraw-2/">Android Performance Optimization: Overdraw - Practical Application</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2014 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/en/2014/10/20/android-performance-optimization-overdraw-1/">Android Performance Optimization: Overdraw - Theory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/03</span>
+            <a class="archive-post-title" href="/en/2014/06/03/android-edittext-do-not-auto-get-focus/">Android Tips: How to Prevent EditText from Automatically Getting Focus</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/31</span>
+            <a class="archive-post-title" href="/en/2014/05/31/android-tips-round-up-2/">Android Tips Round-Up, Part 2</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/en/2014/05/28/android-tips-round-up-1/">Android Tips Round-Up, Part 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/02</span>
+            <a class="archive-post-title" href="/en/2014/05/02/android_log_to_file/">Android Tools - Log2File</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/25</span>
+            <a class="archive-post-title" href="/en/2014/03/25/ubuntu-adb-can-not-find-devices/">Ubuntu: Adb Command Cannot Find Device</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/17</span>
+            <a class="archive-post-title" href="/en/2014/03/17/android-build-your-own-android-notification-service-app/">Android Service: Building Your Own Notification Center (1) - Introduction to Accessibility Service</a>
+        </li>
+            </ul>
+    </div>
+</div>
+
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Yearly Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Yearly Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
+            </span>
+            <span class="sidebar-tag-name" data-tags="Year in Review">
+                <span class="iconfont-archer">&#xe606;</span>
+                Year in Review
+            </span>
+            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Knowledge Planet
+            </span>
+            <span class="sidebar-tag-name" data-tags="Essays">
+                <span class="iconfont-archer">&#xe606;</span>
+                Essays
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="AOSP">
+                <span class="iconfont-archer">&#xe606;</span>
+                AOSP
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="AIW">
+                <span class="iconfont-archer">&#xe606;</span>
+                AIW
+            </span>
+            <span class="sidebar-tag-name" data-tags="Open Source">
+                <span class="iconfont-archer">&#xe606;</span>
+                Open Source
+            </span>
+            <span class="sidebar-tag-name" data-tags="Agent OS">
+                <span class="iconfont-archer">&#xe606;</span>
+                Agent OS
+            </span>
+            <span class="sidebar-tag-name" data-tags="AI">
+                <span class="iconfont-archer">&#xe606;</span>
+                AI
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenAI">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenAI
+            </span>
+            <span class="sidebar-tag-name" data-tags="Mobile OS">
+                <span class="iconfont-archer">&#xe606;</span>
+                Mobile OS
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Thread Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Thread Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Battery Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Battery Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR Analysis">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR Analysis
+            </span>
+            <span class="sidebar-tag-name" data-tags="Page Response">
+                <span class="iconfont-archer">&#xe606;</span>
+                Page Response
+            </span>
+            <span class="sidebar-tag-name" data-tags="Trace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Trace
+            </span>
+            <span class="sidebar-tag-name" data-tags="DataFlow">
+                <span class="iconfont-archer">&#xe606;</span>
+                DataFlow
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="Locking">
+                <span class="iconfont-archer">&#xe606;</span>
+                Locking
+            </span>
+            <span class="sidebar-tag-name" data-tags="Scheduling">
+                <span class="iconfont-archer">&#xe606;</span>
+                Scheduling
+            </span>
+            <span class="sidebar-tag-name" data-tags="heapprofd">
+                <span class="iconfont-archer">&#xe606;</span>
+                heapprofd
+            </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
+            <span class="sidebar-tag-name" data-tags="SQL">
+                <span class="iconfont-archer">&#xe606;</span>
+                SQL
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceProcessor">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceProcessor
+            </span>
+            <span class="sidebar-tag-name" data-tags="GPU">
+                <span class="iconfont-archer">&#xe606;</span>
+                GPU
+            </span>
+            <span class="sidebar-tag-name" data-tags="Power">
+                <span class="iconfont-archer">&#xe606;</span>
+                Power
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="Input">
+                <span class="iconfont-archer">&#xe606;</span>
+                Input
+            </span>
+            <span class="sidebar-tag-name" data-tags="Latency">
+                <span class="iconfont-archer">&#xe606;</span>
+                Latency
+            </span>
+            <span class="sidebar-tag-name" data-tags="Camera">
+                <span class="iconfont-archer">&#xe606;</span>
+                Camera
+            </span>
+            <span class="sidebar-tag-name" data-tags="Audio">
+                <span class="iconfont-archer">&#xe606;</span>
+                Audio
+            </span>
+            <span class="sidebar-tag-name" data-tags="SDK">
+                <span class="iconfont-archer">&#xe606;</span>
+                SDK
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceEvent">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceEvent
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="Annual Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Annual Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenClaw">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenClaw
+            </span>
+            <span class="sidebar-tag-name" data-tags="AI Agent">
+                <span class="iconfont-archer">&#xe606;</span>
+                AI Agent
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Local Models">
+                <span class="iconfont-archer">&#xe606;</span>
+                Local Models
+            </span>
+            <span class="sidebar-tag-name" data-tags="Sharp Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Sharp Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity
+            </span>
+            <span class="sidebar-tag-name" data-tags="SmartPerfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                SmartPerfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="MCP">
+                <span class="iconfont-archer">&#xe606;</span>
+                MCP
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Specs">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Specs
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Kotlin">
+                <span class="iconfont-archer">&#xe606;</span>
+                Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="Stutter">
+                <span class="iconfont-archer">&#xe606;</span>
+                Stutter
+            </span>
+            <span class="sidebar-tag-name" data-tags="Overdraw">
+                <span class="iconfont-archer">&#xe606;</span>
+                Overdraw
+            </span>
+            <span class="sidebar-tag-name" data-tags="Programmer">
+                <span class="iconfont-archer">&#xe606;</span>
+                Programmer
+            </span>
+            <span class="sidebar-tag-name" data-tags="Reading Notes">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading Notes
+            </span>
+            <span class="sidebar-tag-name" data-tags="The Programmer's Apprenticeship">
+                <span class="iconfont-archer">&#xe606;</span>
+                The Programmer's Apprenticeship
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Principles">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Principles
+            </span>
+            <span class="sidebar-tag-name" data-tags="Internet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Internet
+            </span>
+            <span class="sidebar-tag-name" data-tags="User Experience">
+                <span class="iconfont-archer">&#xe606;</span>
+                User Experience
+            </span>
+            <span class="sidebar-tag-name" data-tags="Game Programming">
+                <span class="iconfont-archer">&#xe606;</span>
+                Game Programming
+            </span>
+            <span class="sidebar-tag-name" data-tags="Testing">
+                <span class="iconfont-archer">&#xe606;</span>
+                Testing
+            </span>
+            <span class="sidebar-tag-name" data-tags="Reading">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading
+            </span>
+            <span class="sidebar-tag-name" data-tags="Liqi">
+                <span class="iconfont-archer">&#xe606;</span>
+                Liqi
+            </span>
+            <span class="sidebar-tag-name" data-tags="Community">
+                <span class="iconfont-archer">&#xe606;</span>
+                Community
+            </span>
+            <span class="sidebar-tag-name" data-tags="Smooth">
+                <span class="iconfont-archer">&#xe606;</span>
+                Smooth
+            </span>
+            <span class="sidebar-tag-name" data-tags="Experience Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Experience Optimization
+            </span>
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+        缺失模块，请参考主题文档进行安装配置：https://github.com/fi3ework/hexo-theme-archer#%E5%AE%89%E8%A3%85%E4%B8%BB%E9%A2%98
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="Essays">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Essays
+        </span>
+        <span class="sidebar-category-name" data-categories="Casual Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Casual Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Reading Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Reading Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Android">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android
+        </span>
+        <span class="sidebar-category-name" data-categories="AI">
+            <span class="iconfont-archer">&#xe60a;</span>
+            AI
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
+        </span>
+        <span class="sidebar-category-name" data-categories="Android Performance Optimization">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android Performance Optimization
+        </span>
+        <span class="sidebar-category-name" data-categories="SmartPerfetto">
+            <span class="iconfont-archer">&#xe60a;</span>
+            SmartPerfetto
+        </span>
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+
+    </div>
+</div>
+
+        <!-- site-meta -->
+        <script>
+    var siteMetaRoot = "/en/"
+    if (siteMetaRoot === "undefined") {
+        siteMetaRoot = '/'
+    }
+    var siteMeta = {
+        url: "https://androidperformance.com/en",
+        root: siteMetaRoot,
+        author: "Gracker"
+    }
+</script>
+
+        <!-- import experimental options here -->
+        <!-- Custom Font -->
+
+        <!-- jquery (must load before main.js) -->
+        <script src="/en/lib/jquery.min.js" defer></script>
+        <!-- main func (depends on jQuery) -->
+        <script src="/en/scripts/main.js" defer></script>
+        <script>
+    (function () {
+      function scheduleAfterLoad(task, delay, idleTimeout) {
+        function run() {
+          window.setTimeout(function () {
+            if (window.requestIdleCallback) {
+              window.requestIdleCallback(task, { timeout: idleTimeout || 3000 })
+            } else {
+              task()
+            }
+          }, delay || 0)
+        }
+
+        if (document.readyState === 'complete') {
+          run()
+        } else {
+          window.addEventListener('load', run, { once: true })
+        }
+      }
+
+      function loadScript(src, options) {
+        options = options || {}
+        if (options.id && document.getElementById(options.id)) return
+
+        var done = false
+        var script = document.createElement('script')
+        script.src = src
+        script.async = true
+        if (options.id) script.id = options.id
+        if (options.crossOrigin) script.crossOrigin = options.crossOrigin
+        if (options.referrerPolicy) script.referrerPolicy = options.referrerPolicy
+        script.onload = function () {
+          done = true
+          if (options.onload) options.onload()
+        }
+        script.onerror = function () {
+          done = true
+          if (script.parentNode) script.parentNode.removeChild(script)
+        }
+        if (options.timeout) {
+          window.setTimeout(function () {
+            if (done) return
+            script.onload = null
+            script.onerror = null
+            if (script.parentNode) script.parentNode.removeChild(script)
+          }, options.timeout)
+        }
+        document.head.appendChild(script)
+      }
+
+      function loadStyle(href, id) {
+        if (id && document.getElementById(id)) return
+        var link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = href
+        if (id) link.id = id
+        document.head.appendChild(link)
+      }
+
+      scheduleAfterLoad(function () {
+        if (!document.querySelector('[data-fancybox]')) return
+        loadStyle('/en/lib/fancybox/fancybox.css', 'fancybox-css')
+        loadScript('/en/lib/fancybox/fancybox.umd.js', {
+          id: 'fancybox-js',
+          timeout: 4000,
+          onload: function () {
+            if (window.Fancybox) window.Fancybox.bind('[data-fancybox]')
+          },
+        })
+      }, 1000, 3000)
+
+
+
+
+      scheduleAfterLoad(function () {
+        window.dataLayer = window.dataLayer || []
+        window.gtag = window.gtag || function () { window.dataLayer.push(arguments) }
+        window.gtag('js', new Date())
+        loadScript('https://www.googletagmanager.com/gtag/js?id=UA-50993302-2', {
+          id: 'gtag-js',
+          timeout: 4000,
+          onload: function () {
+            window.gtag('config', 'UA-50993302-2')
+          },
+        })
+      }, 4000, 3000)
+    })();
+</script>
+
+        <!-- search -->
+            <div class="site-search site-search-loading local-search-shell">
+    <div class="algolia-popup popup local-search-popup" role="dialog" aria-modal="true" aria-label="Search posts">
+        <div class="algolia-search local-search-header">
+            <div class="algolia-search-input-icon">
+                <i class="iconfont-archer">&#xe627;</i>
+            </div>
+            <div class="algolia-search-input local-search-input">
+                <input id="local-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search for Posts">
+            </div>
+            <button class="popup-btn-close local-search-close" type="button" aria-label="Close search">
+                <i class="iconfont-archer" aria-hidden="true">&#xe609;</i>
+            </button>
+        </div>
+
+        <div class="algolia-results local-search-results">
+            <div
+                id="local-search-config"
+                data-path="/en/search.xml"
+                data-per-page="10"
+                data-empty="We did not find any results for: ${query}"
+                data-stats="${hits} results found"
+                data-loading="Loading search index..."
+                data-error="Failed to load the search index. Please try again later."></div>
+            <div id="local-search-stats" class="algolia-stats"></div>
+            <div id="local-search-hits"></div>
+        </div>
+    </div>
+</div>
+
+            <script src="/en/scripts/local-search.js" async></script>
+        <!-- async load share.js on first click -->
+            <script>
+                (function(){
+                  var loaded = false
+                  function loadShare(){
+                    if (loaded) return
+                    loaded = true
+                    var s = document.createElement('script')
+                    s.src = '/en/scripts/share.js'
+                    s.async = true
+                    document.head.appendChild(s)
+                  }
+                  document.addEventListener('click', function(e){
+                    var t = e.target
+                    if (!t) return
+                    if (t.closest && t.closest('.share-wrapper')) { loadShare() }
+                    else if (t.classList && t.classList.contains('share-wrapper')) { loadShare() }
+                  }, true)
+                })();
+            </script>
+        <!-- mermaid -->
+    </body>
+</html>

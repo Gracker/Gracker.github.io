@@ -1,0 +1,2078 @@
+<!DOCTYPE html>
+<html lang="en">
+    <!-- title -->
+            <!-- keywords -->
+
+                  <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <meta name="author" content="Gracker">
+                    <meta name="renderer" content="webkit">
+                    <meta name="copyright" content="Gracker">
+                      <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,Optimization,Startup,Perfetto,Systrace,RenderThread,Java,Responsiveness,Smoothness">
+                          <meta name="description" content="Technical blog about Android system performance optimization">
+                          <meta name="description" content="Many performance problems cannot be reproduced with a single tap. Slow boot, intermittent jank, problems after turning the screen on or off, audio interruptions after several hours, periodic stutters">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems">
+<meta property="og:url" content="https://androidperformance.com/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/index.html">
+<meta property="og:site_name" content="Android Performance">
+<meta property="og:description" content="Many performance problems cannot be reproduced with a single tap. Slow boot, intermittent jank, problems after turning the screen on or off, audio interruptions after several hours, periodic stutters">
+<meta property="og:locale" content="en_US">
+<meta property="article:published_time" content="2026-05-04T02:15:00.000Z">
+<meta property="article:modified_time" content="2026-09-19T16:52:22.731Z">
+<meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Android">
+<meta property="article:tag" content="Perfetto">
+<meta property="article:tag" content="Performance">
+<meta property="article:tag" content="Trace">
+<meta property="article:tag" content="Field">
+<meta name="twitter:card" content="summary">
+                            <meta http-equiv="Cache-control" content="no-cache">
+                            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+                            <link rel="icon" href="/en/assets/favicon.ico">
+                                <title>
+                                  Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems · Android Performance
+                                </title>
+                                
+<link rel="canonical" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">
+                                  <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/en/font/Oswald-Regular.woff2") format('woff2'),
+             url("/en/font/Oswald-Regular.ttf") format('truetype');
+        font-display: swap;
+    }
+
+    body {
+        margin: 0;
+    }
+
+    /* Removed initial hide to show content immediately */
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(
+            -45deg,
+            #444 0,
+            #444 80px,
+            #333 80px,
+            #333 160px
+        );
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+</style>
+
+                                    <link id="stylesheet-base" rel="stylesheet" href="/en/css/style.css">
+                                    <link id="stylesheet-mobile" rel="stylesheet" href="/en/css/mobile.css" media="screen and (max-width: 960px)">
+                                    <link id="stylesheet-theme-dark" rel="stylesheet" href="/en/css/dark.css">
+                                    <link id="stylesheet-custom" rel="stylesheet" href="/en/css/custom.css">
+                                    <link rel="preload" href="/en/lib/jquery.min.js" as="script">
+                                    <link rel="preload" href="/en/scripts/main.js" as="script">
+                                    <!-- algolia -->
+                                                    <!-- Hreflang Tags -->
+                                                    
+                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/" />
+                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/" />
+                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/" />
+                  <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/en/atom.xml" title="Android Performance" type="application/atom+xml">
+</head>
+
+        <body class="post-body">
+        <!-- header -->
+        <header class="header header-mobile">
+    <!-- top read progress line -->
+    <div class="header-element">
+        <div class="read-progress"></div>
+    </div>
+    <!-- sidebar menu button -->
+    <div class="header-element">
+        <div
+            class="header-sidebar-menu">
+                    <div style="padding-left: 1px;">&#xe775;</div>
+        </div>
+    </div>
+    <!-- header actions -->
+    <div class="header-actions">
+        <!-- search button -->
+            <span class="header-search-btn header-element popup-trigger" role="button" aria-label="Search" data-tooltip="Search">
+                <span class="iconfont-archer search-icon" aria-hidden="true">&#xe627;</span>
+            </span>
+        <!-- theme mode switch button -->
+        <span class="header-theme-btn header-element" role="button" aria-label="Theme" data-tooltip="Theme">
+            <span aria-hidden="true">&#9680;</span>
+        </span>
+        <!-- language transition button -->
+        <span class="header-lang-btn header-element" data-tooltip="Language">
+            <a href="javascript:void(0)" onclick="toggleLanguage()" class="lang-text" aria-label="Language">EN</a>
+            <script>
+                // Update language button text based on current path
+                (function() {
+                    var path = window.location.pathname;
+                    var isEn = /^\/en(\/|$)/.test(path);
+                    var langBtn = document.querySelector('.header-lang-btn .lang-text');
+                    if (langBtn) {
+                        langBtn.textContent = isEn ? 'CN' : 'EN';
+                    }
+                })();
+                
+                function toggleLanguage() {
+                    var path = window.location.pathname;
+                    var isEn = /^\/en(\/|$)/.test(path);
+
+                    if (isEn) {
+                        var newPath = path.replace(/^\/en(\/|$)/, '/');
+                        if (newPath === '') newPath = '/';
+                        window.location.href = newPath;
+                    } else {
+                        var suffix = path;
+                        if (suffix === '/') suffix = '';
+                        window.location.href = '/en' + suffix;
+                    }
+                }
+            </script>
+        </span>
+        <!-- home button -->
+        <span class="home-link header-element">
+            <a href="/en/" aria-label="Home" data-tooltip="Home">
+                <svg class="home-icon" aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="m3 10.5 9-7 9 7"></path>
+                    <path d="M5 9.5V21h14V9.5"></path>
+                    <path d="M10 21v-6h4v6"></path>
+                </svg>
+            </a>
+        </span>
+    </div>
+    <!-- toggle banner -->
+                <div class="banner">
+                        <div class="blog-title header-element">
+                            <a href="/en/">
+                                Android Performance
+                            </a>
+                        </div>
+                        <div class="post-title header-element">
+                            <a href="#" class="post-name">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</a>
+                        </div>
+                </div>
+</header>
+
+        <!-- fixed footer -->
+        <footer class="footer-fixed">
+    <!-- donate button -->
+    <div class="donate-popup donate-popup--hidden">
+    <div class="donate-popup__title">Buy Me A Coffee</div>
+    <div class="donate-popup__content">
+        <div class="donate-popup__content-description">If you find this article helpful, consider buying me a coffee.</div>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Wechat"
+            alt="Wechat"
+            src="/en/assets/donate-wechat.webp"
+        ></img>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Alipay"
+            alt="Alipay"
+            src="/en/assets/donate-alipay.png"
+        ></img>
+    </div>
+</div>
+
+    <div
+        title="Donate to the author"
+        class="footer-fixed-btn footer-fixed-btn--hidden donate-btn"
+    >
+        <span aria-hidden="true">&#165;</span>
+    </div>
+
+    <!-- back to top button -->
+    <div class="footer-fixed-btn footer-fixed-btn--hidden back-top">
+        <div>&#xe639;</div>
+    </div>
+</footer>
+
+        <!-- wrapper -->
+        <div class="wrapper">
+            <div class="site-intro" style="    height:50vh;
+">
+    <!-- 主页  -->
+    <!-- 404页  -->
+    <div class="site-intro-placeholder"></div>
+    <picture>
+            <source type="image/webp" srcset="/en/intro/post-bg.webp">
+        <img class="site-intro-img"
+             src="/en/intro/post-bg.jpg"
+             alt=""
+loading="lazy"             decoding="async"
+             fetchpriority="auto"
+             sizes="100vw">
+    </picture>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+                Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Captu...
+            <!-- 404 -->
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            <!-- 404 -->
+        </p>
+        <!-- 文章页 meta -->
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                    <div class="post-intro-tags" >
+        <span class="post-category" data-categories="Android">
+            <span class="iconfont-archer post-category-icon" aria-hidden="true">&#xe666;</span>
+            <span class="post-category-text">
+                Android
+            </span>
+        </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Trace">Trace</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Field">Field</a>
+</div>
+
+                <!-- 文章字数统计 -->
+                    <div class="post-intro-read">
+                        <span>Word count: <span class="post-count word-count">5.8k</span>Reading time: <span class="post-count reading-time">36 min</span></span>
+                    </div>
+                <div class="post-intro-meta">
+                    <!-- 撰写日期 -->
+                    <span class="iconfont-archer post-intro-calander">&#xe676;</span>
+                    <span class="post-intro-time">2026/05/04</span>
+                    <!-- 文章分享 -->
+                    <span class="share-wrapper">
+                        <span class="iconfont-archer share-icon">&#xe71d;</span>
+                        <span class="share-text">Share</span>
+                        <ul class="share-list">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+    </div>
+</div>
+
+            
+            <script>
+  (function () {
+    var done = false
+
+    function fontLoaded() {
+      if (done) return
+      done = true
+
+      var introTitle = document.getElementsByClassName('intro-title')[0]
+      var introSubtitle = document.getElementsByClassName('intro-subtitle')[0]
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+
+      if (introTitle) introTitle.classList.add('intro-fade-in')
+      if (introSubtitle) introSubtitle.classList.add('intro-fade-in')
+      if (postIntros) postIntros.classList.add('post-fade-in')
+    }
+
+    function waitForLocalFont() {
+      if (document.fonts && document.fonts.load) {
+        Promise.race([
+          document.fonts.load('1em Oswald-Regular'),
+          new Promise(function (resolve) { setTimeout(resolve, 1000) })
+        ]).then(fontLoaded, fontLoaded)
+      } else {
+        fontLoaded()
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', waitForLocalFont, false)
+    } else {
+      waitForLocalFont()
+    }
+  })()
+</script>
+
+            <img class="loading" src="/en/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" alt="loading">
+            <div class="container container-unloaded">
+                <main class="main post-page">
+    <article class="article-entry">
+        <p>Many performance problems cannot be reproduced with a single tap. Slow boot, intermittent jank, problems after turning the screen on or off, audio interruptions after several hours, periodic stutters in an automotive system, and performance degradation as temperature rises are all poor fits for a manually recorded 10-second trace.</p>
+<p>This article covers long-running field traces: defining the observation window in advance, using triggers to preserve the incident, ensuring the file finishes writing safely, and determining whether the collected data is trustworthy. Boot tracing is covered below as a special observation window. Part 02 already covered basic interactive capture methods—the command line, official scripts, Developer options, and the web interface. Here, we focus on what changes in the field and during long-running recording.</p>
+<span id="more"></span>
+
+<p><a id="series"></a></p>
+<h2 id="Perfetto-Series-Catalog"><a href="#Perfetto-Series-Catalog" class="headerlink" title="Perfetto Series Catalog"></a>Perfetto Series Catalog</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/03/27/Android-Perfetto-101/">Android Perfetto Series Catalog</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto Series 1: Introduction to Perfetto</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto Series 4: Opening Large Traces via Command Line</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Choreographer-based Rendering Flow</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto Series 6: Why 120Hz? Advantages and Challenges</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto Series 7: MainThread and RenderThread Deep Dive</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto Series 8: Understanding Vsync and Performance Analysis</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto Series 9: Interpreting CPU Information</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto Series 10: Binder Scheduling and Lock Contention</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-11-PerfettoSQL-TraceProcessor-Automation/">Android Perfetto Series 11: PerfettoSQL, Trace Processor and Regression Detection</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">Android Perfetto Series 12: Trace Dataflow and Data Loss</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event and App Field Traces</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto Series 14: heapprofd and Memory Profiling</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces and Long-running Field Tracing</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters and Hardware Bottlenecks</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-17-Engineering-Domain-And-Platform-Tracing/">Android Perfetto Series 17: Scenario Automation and Platform Tracing</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto Series 18: Input Response Latency</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV1oi82efE4D/?vd_source=0c6d2191e785de0a36dc21a9da7e664e">Video (Bilibili) - Android Perfetto Basics and Case Studies</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV17A6bBLECu/">Video (Bilibili) - Android Perfetto: Trace Graph Types - AOSP, WebView, Flutter + OEM System Optimization</a></li>
+</ol>
+<h2 id="Design-the-Evidence-Window-First"><a href="#Design-the-Evidence-Window-First" class="headerlink" title="Design the Evidence Window First"></a>Design the Evidence Window First</h2><p>Long-running traces require tradeoffs: how much to retain before and after the problem, and which data sources are worth keeping. Before writing the configuration, establish the observation window:</p>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Configuration implications</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>How often does the problem recur?</td>
+<td><code>duration_ms</code>, whether background execution is needed, whether periodic snapshots are needed</td>
+</tr>
+<tr>
+<td>Does the root cause precede or follow the observed problem?</td>
+<td>Choose a STOP or START trigger</td>
+</tr>
+<tr>
+<td>How many seconds before the problem must be retained?</td>
+<td>Ring buffer size, breadth of data sources, file-write interval</td>
+</tr>
+<tr>
+<td>Can the user stop recording manually?</td>
+<td>Whether automatic triggers or bugreport integration are needed</td>
+</tr>
+<tr>
+<td>Is ADB unavailable during the early phase?</td>
+<td>Boot tracing, platform provisioning, init&#x2F;service activation, or a vendor solution</td>
+</tr>
+<tr>
+<td>Might USB disconnect after recording starts?</td>
+<td><code>--background-wait</code>, detached mode, snapshots, or a background service</td>
+</tr>
+<tr>
+<td>What is the maximum file size?</td>
+<td><code>max_file_size_bytes</code>, upload policy, local TTL</td>
+</tr>
+<tr>
+<td>Is the data sensitive?</td>
+<td>Log tag allowlist, whether to disable <code>atrace_apps: &quot;*&quot;</code></td>
+</tr>
+</tbody></table>
+<p>Intermittent UI jank usually requires tens of seconds before the problem; thermal throttling may require several minutes of trends; long-term automotive stability problems may require hours of execution. Such scenarios often use periodic snapshot retrieval or upload only a summary.</p>
+<p>Map common scenarios to presets before writing the TraceConfig:</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Recommended mode</th>
+<th>Trigger and acceptance checks</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Intermittent UI jank</td>
+<td>Ring buffer + STOP trigger</td>
+<td>App markers, FrameTimeline coverage of the target window, sufficient pre-trigger history</td>
+</tr>
+<tr>
+<td>Signs of an impending ANR</td>
+<td>Ring buffer + STOP trigger</td>
+<td>Main thread, Binder, lock waits, I&#x2F;O, and critical business phases are all present</td>
+</tr>
+<tr>
+<td>Thermal throttling</td>
+<td><code>write_into_file</code> or snapshots</td>
+<td>Preserve minute-scale trends for CPU frequency, idle, thermal state, and critical app phases</td>
+</tr>
+<tr>
+<td>Business-operation timeout</td>
+<td>App marker + STOP&#x2F;START trigger</td>
+<td>Use STOP when the root cause precedes the timeout; use START when recovery needs further observation</td>
+</tr>
+<tr>
+<td>Audio underrun</td>
+<td>Ring buffer + STOP trigger</td>
+<td>Align audio&#x2F;server events, sched, Binder, wakeups, and the underrun marker</td>
+</tr>
+</tbody></table>
+<h2 id="Device-Capabilities-and-Permissions-Constrain-Field-Capture"><a href="#Device-Capabilities-and-Permissions-Constrain-Field-Capture" class="headerlink" title="Device Capabilities and Permissions Constrain Field Capture"></a>Device Capabilities and Permissions Constrain Field Capture</h2><p>A field capture strategy depends on more than TraceConfig: device version, build type, and the trigger emitter’s permissions also matter.</p>
+<table>
+<thead>
+<tr>
+<th>Environment</th>
+<th>What you can rely on</th>
+<th>What you should not assume</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>userdebug &#x2F; rooted development device</td>
+<td><code>adb root</code>, <code>/data/misc/perfetto-configs</code>, <code>android.log</code>, more system services and ftrace events</td>
+<td>Log allowlists, buffer sizes, and upload scope still need limits</td>
+</tr>
+<tr>
+<td>user build + adb shell</td>
+<td>Ordinary system traces, package-scoped atrace, reviewed presets</td>
+<td>Do not rely on <code>android.log</code> by default; non-root access on Android 10&#x2F;11 may not be able to read configurations from <code>/data/misc/perfetto-configs</code></td>
+</tr>
+<tr>
+<td>Ordinary app</td>
+<td>Record app-side ATrace &#x2F; Track Event and activate predeclared triggers</td>
+<td>It cannot decide which system data to collect, how much to capture, or where to upload it</td>
+</tr>
+<tr>
+<td>CPU &#x2F; native &#x2F; Java profiling</td>
+<td>Check <code>debuggable</code>, <code>profileable</code>, and Android version as required by the data source</td>
+<td>Do not treat <code>&lt;profileable&gt;</code> as a universal permission switch for system tracing in the field</td>
+</tr>
+</tbody></table>
+<p>Text proto configurations may use either <code>.pbtxt</code> or <code>.pbtx</code>; parsing is determined by <code>perfetto --txt</code> or an encoding step in the toolchain. This article consistently uses <code>.pbtxt</code> filenames below.</p>
+<h2 id="Boot-Tracing-Is-a-Special-Field-Observation-Window"><a href="#Boot-Tracing-Is-a-Special-Field-Observation-Window" class="headerlink" title="Boot Tracing Is a Special Field Observation Window"></a>Boot Tracing Is a Special Field Observation Window</h2><p>App cold starts and system boot are different problems. The older Systrace response-latency walkthrough covered app startup paths, and Part 05 covered rendering after startup. Here, we focus only on device-level boot: when ADB is not yet available but Android has reached the boot phase after <code>/data</code> is mounted, how do we capture a complete system trace, interpret it correctly, and produce reviewable conclusions?</p>
+<p>Common scenarios requiring boot tracing include:</p>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Why an ordinary trace is insufficient</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Slow boot to the home screen</td>
+<td>The problem occurs before ADB is available</td>
+</tr>
+<tr>
+<td>Slow first boot after an OTA</td>
+<td>init, zygote, dexopt, and system_server all need examination</td>
+</tr>
+<tr>
+<td>Late Launcher first frame</td>
+<td>system_server, SurfaceFlinger, and Launcher need to be examined together</td>
+</tr>
+<tr>
+<td>A service blocks during boot</td>
+<td>init&#x2F;service manager&#x2F;Binder context is needed</td>
+</tr>
+<tr>
+<td>A user reports “it takes a long time to become usable after reboot”</td>
+<td>The readiness criterion must be defined first</td>
+</tr>
+</tbody></table>
+<p>Boot tracing is a specialized platform or system-startup observation window; app cold-start analysis takes a different route. Establish these boundaries before analysis:</p>
+<ul>
+<li>Android boot tracing is available on Android 13+. Earlier versions require a vendor-specific boot capture solution.</li>
+<li>Recording begins after persistent properties load, which means <code>/data</code> is already mounted. It does not cover PMIC power-on, the bootloader, early kernel boot, or first-stage init. Earlier phases require pstore, kernel cmdline&#x2F;ftrace persistent buffers, or vendor init instrumentation.</li>
+<li>This workflow generally assumes <code>adb root</code> is available on a development or userdebug device. Production user builds require platform provisioning, an engineering build, or a vendor diagnostic entry point.</li>
+<li>The start of the UI’s relative timeline is not the moment the power button is pressed or the PMIC powers on. SQL <code>ts</code> retains timestamps in Trace Processor’s unified clock domain and does not automatically reset to zero when tracing starts. Compare relative phases within the same trace in reports; do not directly compare absolute <code>ts</code> values across devices.</li>
+<li>There is no single definition of “boot complete.” Launcher first frame, accepting input, network availability, navigation service readiness, and background-task completion may be different teams’ metrics.</li>
+<li>The output file is not ready until tracing stops, or at least until the first flush&#x2F;file-write interval. <code>persist.debug.perfetto.boottrace</code> is one-shot and must be set again before the next boot.</li>
+</ul>
+<p><code>boottrace.pbtxt</code> must specify a sensible <code>duration_ms</code> or <code>flush_period_ms</code>. Keep the initial configuration focused: init, sched, frequency, idle, process lifecycle, process stats, and Activity&#x2F;Window&#x2F;SurfaceFlinger-related ATrace. Enable logs only with an allowlist on userdebug or platform diagnostic builds.</p>
+<p>The boot trace’s buffer policy must match the readiness milestone. <code>DISCARD</code> is better at preserving early init&#x2F;zygote events, but loses later readiness events once the buffer fills. <code>RING_BUFFER</code> preserves the recent window but may overwrite early boot evidence. Do not expect a 32 MB <code>DISCARD</code> buffer to handle a 90-second boot window. Increase the buffer, narrow the data sources, or enable periodic file writes and check <code>traced_buf_chunks_discarded</code>.</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br></pre></td><td class="code"><pre><span class="line">duration_ms: <span class="number">90000</span></span><br><span class="line">flush_period_ms: <span class="number">10000</span></span><br><span class="line">write_into_file: <span class="literal">true</span></span><br><span class="line">file_write_period_ms: <span class="number">5000</span></span><br><span class="line">max_file_size_bytes: <span class="number">536870912</span></span><br><span class="line"></span><br><span class="line">buffers &#123; size_kb: <span class="number">131072</span> fill_policy: DISCARD &#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;task/task_newtask&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;task/task_rename&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_process_exec&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_process_exit&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_process_fork&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_process_free&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/cpu_frequency&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/cpu_idle&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;am&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;wm&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;gfx&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    process_stats_config &#123;</span><br><span class="line">      scan_all_processes_on_start: <span class="literal">true</span></span><br><span class="line">      proc_stats_poll_ms: <span class="number">1000</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>A reusable capture workflow can look like this. Do not pull the file merely because it is nonempty: an automation script should wait for the configured duration to end, then verify that the file size remains stable across consecutive checks:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br></pre></td><td class="code"><pre><span class="line">adb root</span><br><span class="line">adb push boottrace.pbtxt /data/misc/perfetto-configs/boottrace.pbtxt</span><br><span class="line">adb shell setprop persist.debug.perfetto.boottrace 1</span><br><span class="line">adb reboot</span><br><span class="line">adb wait-for-device</span><br><span class="line">adb root</span><br><span class="line">adb shell <span class="string">&#x27;</span></span><br><span class="line"><span class="string">  path=/data/misc/perfetto-traces/boottrace.perfetto-trace</span></span><br><span class="line"><span class="string">  sleep 100</span></span><br><span class="line"><span class="string">  stable=0</span></span><br><span class="line"><span class="string">  prev=0</span></span><br><span class="line"><span class="string">  attempts=0</span></span><br><span class="line"><span class="string">  while [ &quot;$stable&quot; -lt 3 ] &amp;&amp; [ &quot;$attempts&quot; -lt 30 ]; do</span></span><br><span class="line"><span class="string">    attempts=$((attempts + 1))</span></span><br><span class="line"><span class="string">    size=$(stat -c %s &quot;$path&quot; 2&gt;/dev/null || echo 0)</span></span><br><span class="line"><span class="string">    if [ &quot;$size&quot; -gt 0 ] &amp;&amp; [ &quot;$size&quot; = &quot;$prev&quot; ]; then</span></span><br><span class="line"><span class="string">      stable=$((stable + 1))</span></span><br><span class="line"><span class="string">    else</span></span><br><span class="line"><span class="string">      stable=0</span></span><br><span class="line"><span class="string">    fi</span></span><br><span class="line"><span class="string">    prev=$size</span></span><br><span class="line"><span class="string">    sleep 2</span></span><br><span class="line"><span class="string">  done</span></span><br><span class="line"><span class="string">  [ &quot;$stable&quot; -ge 3 ] || &#123; echo &quot;Trace missing or not stable&quot; &gt;&amp;2; exit 1; &#125;</span></span><br><span class="line"><span class="string">&#x27;</span> || <span class="built_in">exit</span> 1</span><br><span class="line">adb pull /data/misc/perfetto-traces/boottrace.perfetto-trace \</span><br><span class="line">  boottrace-$(<span class="built_in">date</span> +%Y%m%d-%H%M%S).perfetto-trace</span><br></pre></td></tr></table></figure>
+
+<p>Validate the boot trace before analyzing it:</p>
+<ul>
+<li>Does the trace cover the Android boot window after <code>/data</code> is mounted through the target readiness milestone?</li>
+<li>Does <code>stats</code> report data loss, packet loss, or ftrace setup errors?</li>
+<li>Are processes such as init, system_server, surfaceflinger, and launcher visible?</li>
+<li>Do process stats, sched, and frequency all contain data? Check logs only when both the configuration and build type support them.</li>
+<li>Was this a cold boot, an <code>adb reboot</code>, or the first boot after an OTA?</li>
+<li>Does <code>metadata.json</code> record the button&#x2F;reboot method, boot ID, readiness criterion, trace start&#x2F;end, device build, and capture operator’s permissions?</li>
+</ul>
+<p>Use a consistent analysis order: init&#x2F;service startup, zygote, system_server, PackageManager&#x2F;ActivityTaskManager, SurfaceFlinger, Launcher, and the first-frame&#x2F;input-ready milestone. State the readiness criterion explicitly in the report; otherwise, “boot is three seconds slower” can easily become a cross-team dispute.</p>
+<p>To read the final portion of ftrace before a crash-induced reboot, see <code>linux.frozen_ftrace</code> in <a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/previous-boot-trace">Tracing across reboot</a>. It relies on a persistent ring buffer provisioned in the kernel and is a different approach from the boottrace workflow here, which automatically records during the next Android boot.</p>
+<h2 id="Three-Modes-for-Long-Running-Field-Traces"><a href="#Three-Modes-for-Long-Running-Field-Traces" class="headerlink" title="Three Modes for Long-Running Field Traces"></a>Three Modes for Long-Running Field Traces</h2><p>Long-running Perfetto field traces can use these three modes:</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Behavior</th>
+<th>Suitable scenarios</th>
+<th>Risks</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Ring buffer + STOP trigger</td>
+<td>Continuously records the most recent window and stops after an anomaly</td>
+<td>Dropped frames, impending ANRs, audio underruns</td>
+<td>A small buffer overwrites the root cause; without a matching trigger, no incident trace is returned</td>
+</tr>
+<tr>
+<td>Long recording with <code>write_into_file</code></td>
+<td>Periodically writes the buffer to a file</td>
+<td>Trends spanning tens of minutes to hours</td>
+<td>I&#x2F;O overhead and oversized files</td>
+</tr>
+<tr>
+<td><code>--clone-by-name</code> snapshot</td>
+<td>Clones the current window on demand while the original session continues</td>
+<td>Parameter tuning, thermal management, power-policy experiments</td>
+<td>The device’s <code>perfetto</code> must support <code>--clone-by-name</code>; check <code>perfetto --help</code> &#x2F; <code>--version</code>. On Android, this generally requires Android 14 (U)+ or a newer Perfetto integrated by the vendor</td>
+</tr>
+</tbody></table>
+<p>Do not combine all three into one all-purpose configuration. Choose the mode for the problem first, then choose the data sources.</p>
+<h2 id="A-Baseline-Ring-Buffer-Configuration"><a href="#A-Baseline-Ring-Buffer-Configuration" class="headerlink" title="A Baseline Ring Buffer Configuration"></a>A Baseline Ring Buffer Configuration</h2><p>The following configuration targets intermittent UI jank. Recording starts immediately, and the ring buffer retains only the recent window. When the app, a platform service, or a test harness detects a slow frame and activates the <code>app_ui_jank</code> trigger, Perfetto records for one more second and stops.</p>
+<p>This configuration assumes that app-side business markers and a trigger emitter, discussed in Part 13, are already integrated. <code>trigger_config</code> does not automatically trigger based on FrameTimeline. Without an emitter, the session simply waits for cleanup at <code>trigger_timeout_ms</code>; it does not provide a fallback capture of the final window.</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br></pre></td><td class="code"><pre><span class="line">unique_session_name: <span class="string">&quot;ui_jank_flight_recorder&quot;</span></span><br><span class="line"></span><br><span class="line">buffers &#123;</span><br><span class="line">  size_kb: <span class="number">65536</span></span><br><span class="line">  fill_policy: RING_BUFFER</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">buffers &#123;</span><br><span class="line">  size_kb: <span class="number">8192</span></span><br><span class="line">  fill_policy: RING_BUFFER</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">trigger_config &#123;</span><br><span class="line">  trigger_mode: STOP_TRACING</span><br><span class="line">  trigger_timeout_ms: <span class="number">3600000</span></span><br><span class="line">  triggers &#123;</span><br><span class="line">    name: <span class="string">&quot;app_ui_jank&quot;</span></span><br><span class="line">    producer_name_regex: <span class="string">&quot;com\\.example\\.app&quot;</span></span><br><span class="line">    stop_delay_ms: <span class="number">1000</span></span><br><span class="line">    max_per_24_h: <span class="number">10</span></span><br><span class="line">    skip_probability: <span class="number">0.0</span></span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">incremental_state_config &#123;</span><br><span class="line">  clear_period_ms: <span class="number">10000</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    target_buffer: <span class="number">0</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      buffer_size_kb: <span class="number">4096</span></span><br><span class="line">      buffer_size_lower_bound: <span class="literal">true</span></span><br><span class="line">      drain_period_ms: <span class="number">250</span></span><br><span class="line">      compact_sched &#123;</span><br><span class="line">        enabled: <span class="literal">true</span></span><br><span class="line">      &#125;</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/cpu_frequency&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/cpu_idle&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;gfx&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;view&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;wm&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;input&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;binder_driver&quot;</span></span><br><span class="line">      atrace_apps: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;android.surfaceflinger.frametimeline&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;track_event&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    track_event_config &#123;</span><br><span class="line">      disabled_categories: <span class="string">&quot;*&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;ui&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;memory&quot;</span></span><br><span class="line">      enabled_categories: <span class="string">&quot;app&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">  producer_name_filter: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    process_stats_config &#123;</span><br><span class="line">      scan_all_processes_on_start: <span class="literal">true</span></span><br><span class="line">      proc_stats_poll_ms: <span class="number">5000</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>There are two buffers: high-frequency ftrace&#x2F;atrace goes into the large buffer, while FrameTimeline, process stats, and app Track Events go into the smaller semantic buffer. For graphics problems, retaining sched events is not enough if FrameTimeline, app markers, or process descriptions have been overwritten. You would still be unable to determine whether the jank came from the app, SurfaceFlinger, BufferQueue, or system scheduling.</p>
+<p><code>producer_name_regex</code> restricts which producers may activate the trigger. The regular expression must match the actual emitter’s producer name. If a test harness triggers on its behalf, add the harness producer to the allowlist or give the harness a separate trigger name.</p>
+<p><code>ftrace_config.buffer_size_kb</code>, <code>buffer_size_lower_bound</code>, and <code>drain_period_ms</code> increase kernel per-CPU ftrace buffer usage and the frequency of <code>traced_probes</code> drain wakeups. They should not be defaults for every field preset. They are included in this UI jank preset to reduce the chance of high-frequency scheduling events being overwritten in kernel ftrace within a short window. Before rollout, use a short trace to validate <code>ftrace_setup_errors</code>, CPU overhead, and write rate.</p>
+<p>FrameTimeline requires Android 12 or later. It is not a trigger emitter: it provides facts in the trace, including app frames, SurfaceFlinger frames, <code>jank_type</code>, <code>present_type</code>, <code>on_time_finish</code>, and app-to-SF flows. Restrict <code>atrace_apps</code> to the target package; do not use <code>atrace_apps: &quot;*&quot;</code> as a field default.</p>
+<p>Ring buffer retention is determined by the write rate and buffer size, not by <code>trigger_timeout_ms</code>. The estimate remains the one from Part 12: <code>retained window in seconds = buffer MB / write rate in MB/s</code>.</p>
+<p>For ftrace, examine three buffer layers: kernel per-CPU ftrace buffers, producer shared memory, and the Perfetto central buffer. Enlarging the central buffer only extends the final retained window. It cannot recover events lost earlier because <code>traced_probes</code> could not drain the kernel buffer in time.</p>
+<p>Consider <code>ftrace_config.buffer_size_kb</code>, <code>buffer_size_lower_bound</code>, <code>drain_period_ms</code>, and <code>drain_buffer_percent</code> when tuning long-running field traces, after checking overhead and device compatibility in short traces. The current semantics of <code>drain_buffer_percent</code> were introduced in Perfetto v48, and the official proto comments state that it has no effect on Linux kernels older than 6.9. Do not treat it as a universal replacement for <code>drain_period_ms</code> on older kernels.</p>
+<p>At an ftrace write rate of 2 MB&#x2F;s, 64 MB retains only about 32 seconds. Enabling logs, Track Events, and camera&#x2F;audio events in the field makes that window shorter. Retaining two minutes before the problem requires fewer data sources, a larger buffer, or periodic file writes. A STOP trigger returns no trace data unless it is matched; manually stopping cannot bypass that condition. For a manual fallback, activate a preauthorized manual trigger or start a separate named snapshot&#x2F;fallback session that is not subject to that trigger restriction. Whether a snapshot can read pre-trigger data must also be verified for the specific version.</p>
+<p>After recording with the UI jank preset, first confirm that FrameTimeline data actually exists:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> <span class="string">&#x27;expected&#x27;</span> <span class="keyword">AS</span> table_name, <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> <span class="keyword">rows</span></span><br><span class="line"><span class="keyword">FROM</span> expected_frame_timeline_slice</span><br><span class="line"><span class="keyword">UNION</span> <span class="keyword">ALL</span></span><br><span class="line"><span class="keyword">SELECT</span> <span class="string">&#x27;actual&#x27;</span> <span class="keyword">AS</span> table_name, <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> <span class="keyword">rows</span></span><br><span class="line"><span class="keyword">FROM</span> actual_frame_timeline_slice;</span><br></pre></td></tr></table></figure>
+
+<p>Then confirm that both the app and SurfaceFlinger have frame records within the target window:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> target_window <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> trace_start() <span class="keyword">AS</span> ts, trace_dur() <span class="keyword">AS</span> dur</span><br><span class="line">),</span><br><span class="line">frame_process <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span></span><br><span class="line">    p.name <span class="keyword">AS</span> process_name,</span><br><span class="line">    <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> frame_count,</span><br><span class="line">    <span class="built_in">MIN</span>(a.ts) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> first_frame_s,</span><br><span class="line">    <span class="built_in">MAX</span>(a.ts) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> last_frame_s</span><br><span class="line">  <span class="keyword">FROM</span> actual_frame_timeline_slice a</span><br><span class="line">  <span class="keyword">JOIN</span> process p <span class="keyword">USING</span> (upid)</span><br><span class="line">  <span class="keyword">JOIN</span> target_window tw</span><br><span class="line">  <span class="keyword">WHERE</span> a.ts <span class="keyword">BETWEEN</span> tw.ts <span class="keyword">AND</span> tw.ts <span class="operator">+</span> tw.dur</span><br><span class="line">    <span class="keyword">AND</span> (</span><br><span class="line">      p.name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">      <span class="keyword">OR</span> p.name <span class="operator">=</span> <span class="string">&#x27;surfaceflinger&#x27;</span></span><br><span class="line">      <span class="keyword">OR</span> p.name <span class="operator">=</span> <span class="string">&#x27;/system/bin/surfaceflinger&#x27;</span></span><br><span class="line">      <span class="keyword">OR</span> p.cmdline <span class="keyword">LIKE</span> <span class="string">&#x27;%surfaceflinger%&#x27;</span></span><br><span class="line">    )</span><br><span class="line">  <span class="keyword">GROUP</span> <span class="keyword">BY</span> p.name</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  process_name,</span><br><span class="line">  frame_count,</span><br><span class="line">  first_frame_s,</span><br><span class="line">  last_frame_s</span><br><span class="line"><span class="keyword">FROM</span> frame_process</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> frame_count <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure>
+
+<p>If you suspect hardirq, softirq, or kworker activity is taking CPU time, do not put these events into the default long-running trace. Start with a focused short-window preset, then decide from the results whether to include them in field capture:</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      ftrace_events: <span class="string">&quot;irq/irq_handler_entry&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;irq/irq_handler_exit&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;irq/softirq_entry&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;irq/softirq_exit&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;irq/softirq_raise&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;workqueue/workqueue_queue_work&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;workqueue/workqueue_execute_start&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;workqueue/workqueue_execute_end&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h2 id="Long-Recordings-Need-Periodic-File-Writes"><a href="#Long-Recordings-Need-Periodic-File-Writes" class="headerlink" title="Long Recordings Need Periodic File Writes"></a>Long Recordings Need Periodic File Writes</h2><p>Problems spanning hours cannot rely only on memory buffers. This fragment shows only the fields relevant to long recordings; add data sources before using it:</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">duration_ms: <span class="number">3600000</span></span><br><span class="line">prefer_suspend_clock_for_duration: <span class="literal">true</span></span><br><span class="line">write_into_file: <span class="literal">true</span></span><br><span class="line">file_write_period_ms: <span class="number">10000</span></span><br><span class="line">max_file_size_bytes: <span class="number">2147483648</span></span><br><span class="line">flush_period_ms: <span class="number">30000</span></span><br><span class="line"></span><br><span class="line">buffers &#123;</span><br><span class="line">  size_kb: <span class="number">32768</span></span><br><span class="line">  fill_policy: RING_BUFFER</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>By default, <code>duration_ms</code> excludes system suspend time. For field problems measured by wall-clock time, such as screen on&#x2F;off, standby, or automotive sleep, consider <code>prefer_suspend_clock_for_duration: true</code>. It also changes the time semantics of a trigger’s <code>stop_delay_ms</code>.</p>
+<p>The official buffers documentation gives a typical Android scheduler tracing rate of about 1–2 MB&#x2F;s; use the measured rate for your actual preset. Estimate recording time as <code>max_file_size_bytes / measured write rate</code>. At 1–2 MB&#x2F;s, a 2 GB limit lasts only about 17–34 minutes, not an hour. To record for an hour, narrow the data sources, raise the file-size limit, or switch to a summary&#x2F;snapshot strategy.</p>
+<p>Logs, syscalls, page faults, camera&#x2F;audio events, and overly broad Track Event collection can increase the write rate by an order of magnitude. <code>flush_period_ms</code> is useful for long traces because it reduces ordering and import problems caused by low-frequency data sources holding data for too long before submitting it. Frequent flushes increase producer wakeups and I&#x2F;O pressure. Field presets typically start with 10–30 seconds; record the Perfetto&#x2F;Android versions, <code>write_flush_mode</code>, and measured write rate in the report.</p>
+<h2 id="Background-Recording-and-Safe-Shutdown"><a href="#Background-Recording-and-Safe-Shutdown" class="headerlink" title="Background Recording and Safe Shutdown"></a>Background Recording and Safe Shutdown</h2><p>USB often disconnects during field testing. Prefer <code>--background-wait</code> for ordinary long-running field traces: it waits for data sources to start before returning the PID, reducing the chance of missing the beginning compared with plain <code>--background</code>.</p>
+<p>On Android 12+, when root&#x2F;userdebug access or a platform-provisioned path is available, place the configuration in <code>/data/misc/perfetto-configs</code>, then start the background trace:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">adb push field.pbtxt /data/misc/perfetto-configs/field.pbtxt</span><br><span class="line"></span><br><span class="line">PID=$(adb shell perfetto --background-wait --txt \</span><br><span class="line">  -c /data/misc/perfetto-configs/field.pbtxt \</span><br><span class="line">  -o /data/misc/perfetto-traces/field.perfetto-trace | <span class="built_in">tr</span> -d <span class="string">&#x27;\r&#x27;</span>)</span><br><span class="line"></span><br><span class="line"><span class="built_in">echo</span> <span class="string">&quot;perfetto pid: <span class="variable">$PID</span>&quot;</span></span><br></pre></td></tr></table></figure>
+
+<p>Do not assume that this path is readable on non-root Android 10&#x2F;11 user builds; use stdin instead. Production M2M toolchains should use reviewed presets or binary TraceConfig rather than allowing a server to send arbitrary text configurations:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">PID=$(adb shell perfetto --background-wait --txt \</span><br><span class="line">  -c - \</span><br><span class="line">  -o /data/misc/perfetto-traces/field.perfetto-trace &lt; field.pbtxt | <span class="built_in">tr</span> -d <span class="string">&#x27;\r&#x27;</span>)</span><br><span class="line"></span><br><span class="line"><span class="built_in">echo</span> <span class="string">&quot;perfetto pid: <span class="variable">$PID</span>&quot;</span></span><br></pre></td></tr></table></figure>
+
+<p>When stopping, do not run <code>adb pull</code> immediately after <code>kill</code>. Perfetto still needs to finish writing the tail of the trace. At minimum, wait for the <code>perfetto</code> process to exit, then confirm that the file exists and its size is stable before pulling it:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">case</span> <span class="string">&quot;<span class="variable">$PID</span>&quot;</span> <span class="keyword">in</span></span><br><span class="line">  <span class="string">&#x27;&#x27;</span>|*[!0-9]*) <span class="built_in">echo</span> <span class="string">&quot;Invalid perfetto PID&quot;</span> &gt;&amp;2; <span class="built_in">exit</span> 1 ;;</span><br><span class="line"><span class="keyword">esac</span></span><br><span class="line">[ <span class="string">&quot;<span class="variable">$PID</span>&quot;</span> -gt 1 ] || <span class="built_in">exit</span> 1</span><br><span class="line">adb shell <span class="string">&quot;kill -INT <span class="variable">$PID</span>&quot;</span> || <span class="built_in">exit</span> 1</span><br><span class="line">adb shell <span class="string">&quot;attempts=0; while kill -0 <span class="variable">$PID</span> 2&gt;/dev/null; do</span></span><br><span class="line"><span class="string">  attempts=\$((attempts + 1))</span></span><br><span class="line"><span class="string">  [ \$attempts -lt 60 ] || exit 1</span></span><br><span class="line"><span class="string">  sleep 1</span></span><br><span class="line"><span class="string">done&quot;</span> || <span class="built_in">exit</span> 1</span><br><span class="line">adb shell <span class="string">&#x27;</span></span><br><span class="line"><span class="string">  path=/data/misc/perfetto-traces/field.perfetto-trace</span></span><br><span class="line"><span class="string">  stable=0</span></span><br><span class="line"><span class="string">  prev=0</span></span><br><span class="line"><span class="string">  attempts=0</span></span><br><span class="line"><span class="string">  while [ &quot;$stable&quot; -lt 3 ] &amp;&amp; [ &quot;$attempts&quot; -lt 60 ]; do</span></span><br><span class="line"><span class="string">    attempts=$((attempts + 1))</span></span><br><span class="line"><span class="string">    size=$(stat -c %s &quot;$path&quot; 2&gt;/dev/null || echo 0)</span></span><br><span class="line"><span class="string">    if [ &quot;$size&quot; -gt 0 ] &amp;&amp; [ &quot;$size&quot; = &quot;$prev&quot; ]; then</span></span><br><span class="line"><span class="string">      stable=$((stable + 1))</span></span><br><span class="line"><span class="string">    else</span></span><br><span class="line"><span class="string">      stable=0</span></span><br><span class="line"><span class="string">    fi</span></span><br><span class="line"><span class="string">    prev=$size</span></span><br><span class="line"><span class="string">    sleep 1</span></span><br><span class="line"><span class="string">  done</span></span><br><span class="line"><span class="string">  [ &quot;$stable&quot; -ge 3 ] || &#123; echo &quot;Trace missing or not stable&quot; &gt;&amp;2; exit 1; &#125;</span></span><br><span class="line"><span class="string">&#x27;</span> || <span class="built_in">exit</span> 1</span><br><span class="line"></span><br><span class="line">adb pull /data/misc/perfetto-traces/field.perfetto-trace</span><br></pre></td></tr></table></figure>
+
+<p>If the script controls both ends, it can start <code>inotifyd</code> to watch for <code>close_write</code> before sending <code>kill</code>. When the device lacks <code>inotifyd</code>, consecutive stable-size checks after process exit provide a fallback. Stable file size alone does not prove that the file has closed. An unmatched trigger, startup failure, or empty file must cause a timeout and exit; the script must not wait forever or proceed with the pull.</p>
+<h2 id="Using-Triggers"><a href="#Using-Triggers" class="headerlink" title="Using Triggers"></a>Using Triggers</h2><p>The value of Perfetto triggers is permission separation. A privileged party declares trigger names and behavior in advance. An ordinary app or system component only reports that an event occurred; it cannot decide what to capture, how much to capture, or where to upload it.</p>
+<p>A field capture strategy must identify the trigger emitter explicitly. For UI jank, app-side JankStats, FrameMetrics, or a custom threshold detector can activate <code>app_ui_jank</code>; a platform service or test harness can also activate it on the app’s behalf. Either path requires deduplication and rate limiting, with the trigger source, activation time, and decision threshold recorded in metadata.</p>
+<p>A useful app-emitter contract is a fixed JSON event accompanied by a Track Event with the same <code>event_id</code>:</p>
+<figure class="highlight json"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="punctuation">&#123;</span></span><br><span class="line">  <span class="attr">&quot;event_id&quot;</span><span class="punctuation">:</span> <span class="string">&quot;evt-20260504-153012-001&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trigger_name&quot;</span><span class="punctuation">:</span> <span class="string">&quot;app_ui_jank&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trigger_source&quot;</span><span class="punctuation">:</span> <span class="string">&quot;app_jankstats&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;page&quot;</span><span class="punctuation">:</span> <span class="string">&quot;Feed&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;action&quot;</span><span class="punctuation">:</span> <span class="string">&quot;scroll&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;reason&quot;</span><span class="punctuation">:</span> <span class="string">&quot;slow_frame&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;threshold_ms&quot;</span><span class="punctuation">:</span> <span class="number">50</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;observed_value_ms&quot;</span><span class="punctuation">:</span> <span class="number">83.4</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;window_start_elapsed_ns&quot;</span><span class="punctuation">:</span> <span class="number">123456700000000</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;window_end_elapsed_ns&quot;</span><span class="punctuation">:</span> <span class="number">123456789000000</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;dedupe_key&quot;</span><span class="punctuation">:</span> <span class="string">&quot;Feed:scroll:slow_frame:202605041530&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;sample_decision&quot;</span><span class="punctuation">:</span> <span class="string">&quot;record&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;app_state&quot;</span><span class="punctuation">:</span> <span class="string">&quot;foreground&quot;</span></span><br><span class="line"><span class="punctuation">&#125;</span></span><br></pre></td></tr></table></figure>
+
+<p>The server or analysis script uses <code>event_id</code> and the time window to align external trigger records, Track Events inside the trace, and slow FrameTimeline frames. If they do not align, the trace provides only system-side context; it cannot directly attribute the problem to a page or business action.</p>
+<p>In a test environment, you can activate the trigger directly:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">adb shell /system/bin/trigger_perfetto app_ui_jank</span><br></pre></td></tr></table></figure>
+
+<p>Alternatively, activate the same trigger using a configuration containing only <code>activate_triggers</code>:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="built_in">echo</span> <span class="string">&#x27;activate_triggers: &quot;app_ui_jank&quot;&#x27;</span> | \</span><br><span class="line">  adb shell perfetto --txt -c -</span><br></pre></td></tr></table></figure>
+
+<p>STOP triggers suit problems whose root cause precedes activation, such as slow frames, impending ANRs, and audio underruns. START triggers suit cases that need observation after the event, such as recording for another 10 seconds after temperature enters the hot state.</p>
+<p>When using a START trigger, do not also configure an ordinary <code>duration_ms</code>; <code>trigger_config</code> manages the trigger window.</p>
+<p>The toolchain must also handle the case where no trigger matches. Under the official TraceConfig semantics, if <code>trigger_timeout_ms</code> expires without any matching trigger, both STOP_TRACING and START_TRACING stop the session and return no data. The output file is empty by design, not because capture failed. The script should explicitly record <code>trigger_matched=false</code> and clean up the empty file. An empty trace is not evidence that no problem occurred. Conversely, once a trigger matches, the session ends after <code>stop_delay_ms</code>. To maintain long-term flight-recorder coverage, platform-side supervisory logic must restart the next session and generate a fresh case ID and output filename for each round, avoiding overwriting the previous incident.</p>
+<h2 id="Snapshots-for-Parameter-Tuning"><a href="#Snapshots-for-Parameter-Tuning" class="headerlink" title="Snapshots for Parameter Tuning"></a>Snapshots for Parameter Tuning</h2><p>Some scenarios call for a snapshot of the current window every few seconds without stopping the original trace—for example, tuning CPU policies, thermal parameters, or power policies. The <code>--clone-by-name</code> command-line entry point was added in Perfetto v49.0. Session cloning itself also requires Android 14 (U)+ platform support or a vendor integration. Ultimately, check <code>adb shell perfetto --help</code> &#x2F; <code>--version</code>.</p>
+<p>Name the session in the configuration:</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">unique_session_name: <span class="string">&quot;thermal_snapshot&quot;</span></span><br><span class="line"></span><br><span class="line">buffers &#123;</span><br><span class="line">  size_kb: <span class="number">65536</span></span><br><span class="line">  fill_policy: RING_BUFFER</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>After it starts, clone the current ring buffer on demand. The original session keeps running:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">adb shell perfetto --clone-by-name thermal_snapshot \</span><br><span class="line">  -o /data/misc/perfetto-traces/thermal_snap_1.pftrace</span><br><span class="line"></span><br><span class="line">adb pull /data/misc/perfetto-traces/thermal_snap_1.pftrace</span><br></pre></td></tr></table></figure>
+
+<p>Snapshots are not the only way to capture field problems. They suit experiments that repeatedly observe trends, rather than trigger-based problems that require a single capture to preserve the incident.</p>
+<h2 id="Use-Detached-Mode-Sparingly"><a href="#Use-Detached-Mode-Sparingly" class="headerlink" title="Use Detached Mode Sparingly"></a>Use Detached Mode Sparingly</h2><p><code>--detach</code> separates the tracing session from the lifetime of the <code>perfetto</code> command, leaving the <code>traced</code> service holding the session. The official documentation explicitly discourages routine use because it can leak sessions and leave devices tracing for long periods.</p>
+<p>If detached mode is necessary, enable <code>write_into_file</code> in the configuration and prepare commands to inspect and stop the session:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">adb shell perfetto --detach=field_session --txt \</span><br><span class="line">  -c /data/misc/perfetto-configs/field.pbtxt \</span><br><span class="line">  -o /data/misc/perfetto-traces/field.perfetto-trace</span><br><span class="line"></span><br><span class="line">adb shell perfetto --is_detached=field_session</span><br><span class="line">adb shell perfetto --attach=field_session --stop</span><br></pre></td></tr></table></figure>
+
+<p>Automation scripts need fallback cleanup: check for old sessions before starting, stop sessions after testing, and stop them automatically when their TTL expires.</p>
+<h2 id="Bugreport-as-a-Field-Fallback"><a href="#Bugreport-as-a-Field-Fallback" class="headerlink" title="Bugreport as a Field Fallback"></a>Bugreport as a Field Fallback</h2><p>Users, testers, or operations staff often initiate a bugreport first when a field problem occurs. A long-running trace intended for inclusion in a bugreport must explicitly declare that in TraceConfig:</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">unique_session_name: <span class="string">&quot;field_ui_jank_bugreport&quot;</span></span><br><span class="line">bugreport_score: <span class="number">100</span></span><br><span class="line">bugreport_filename: <span class="string">&quot;field-ui-jank.pftrace&quot;</span></span><br><span class="line"></span><br><span class="line">buffers &#123;</span><br><span class="line">  size_kb: <span class="number">65536</span></span><br><span class="line">  fill_policy: RING_BUFFER</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>Only sessions with <code>bugreport_score &gt; 0</code> become bugreport candidates; higher scores receive higher priority for saving. <code>bugreport_filename</code> supplies a readable filename for <code>--save-all-for-bugreport</code> starting with Android V &#x2F; Perfetto v42; older versions use a default name. This is distinct from ordinary <code>-o /path/trace.perfetto-trace</code> and <code>--upload</code>: the former serves bugreports, while the latter two serve the current command’s output or framework reporting.</p>
+<p>Development or platform scripts can verify bugreport behavior with these commands:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">adb shell perfetto --save-for-bugreport</span><br><span class="line">adb shell perfetto --save-all-for-bugreport</span><br></pre></td></tr></table></figure>
+
+<p>On Android S&#x2F;T, saving for a bugreport takes the trace contents and stops the session early. On Android U+, the system creates a read-only snapshot and the original session can continue. Record the Android version and verification-command output in the report. Do not treat bugreport packaging as equivalent to ordinary background tracing.</p>
+<h2 id="What-a-Field-Evidence-Package-Should-Contain"><a href="#What-a-Field-Evidence-Package-Should-Contain" class="headerlink" title="What a Field Evidence Package Should Contain"></a>What a Field Evidence Package Should Contain</h2><p>A <code>.perfetto-trace</code> file alone is not enough. At minimum, a field evidence package must explain the scenario, when it was triggered, and whether the file is complete.</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">case-20260504-153012/</span><br><span class="line">  trace.perfetto-trace</span><br><span class="line">  config.pbtxt</span><br><span class="line">  metadata.json</span><br><span class="line">  stats.sql.txt</span><br><span class="line">  log_excerpt.txt</span><br><span class="line">  summary.json</span><br></pre></td></tr></table></figure>
+
+<p>Recommended fields for <code>metadata.json</code> include:</p>
+<figure class="highlight json"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="punctuation">&#123;</span></span><br><span class="line">  <span class="attr">&quot;case_id&quot;</span><span class="punctuation">:</span> <span class="string">&quot;case-20260504-153012&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trace_config&quot;</span><span class="punctuation">:</span> <span class="string">&quot;ui_jank_flight_recorder_v3&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trigger&quot;</span><span class="punctuation">:</span> <span class="string">&quot;app_ui_jank&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trigger_source&quot;</span><span class="punctuation">:</span> <span class="string">&quot;app_jankstats&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trigger_elapsed_realtime_ns&quot;</span><span class="punctuation">:</span> <span class="number">123456789000000</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trigger_wall_time&quot;</span><span class="punctuation">:</span> <span class="string">&quot;2026-05-04T15:30:12+08:00&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trace_start_elapsed_realtime_ns&quot;</span><span class="punctuation">:</span> <span class="number">123456730000000</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trace_end_elapsed_realtime_ns&quot;</span><span class="punctuation">:</span> <span class="number">123457790000000</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;boot_id&quot;</span><span class="punctuation">:</span> <span class="string">&quot;device_boot_id&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;device&quot;</span><span class="punctuation">:</span> <span class="string">&quot;device_name&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;build_fingerprint&quot;</span><span class="punctuation">:</span> <span class="string">&quot;fingerprint&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;app_version&quot;</span><span class="punctuation">:</span> <span class="string">&quot;1.2.3&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;battery_percent&quot;</span><span class="punctuation">:</span> <span class="number">78</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;thermal_state&quot;</span><span class="punctuation">:</span> <span class="string">&quot;nominal&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;upload_reason&quot;</span><span class="punctuation">:</span> <span class="string">&quot;slow_frame&quot;</span></span><br><span class="line"><span class="punctuation">&#125;</span></span><br></pre></td></tr></table></figure>
+
+<p>This metadata does not replace the trace. It helps investigators locate the problem window, filter versions, and assess environmental differences. Part 13 covered adding app-side page, business-phase, and user-action information. Metadata in the field evidence package must align those business markers.</p>
+<p><code>summary.json</code> is the entry point for automation, with fields that directly drive triage, upload, and retention:</p>
+<figure class="highlight json"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br></pre></td><td class="code"><pre><span class="line"><span class="punctuation">&#123;</span></span><br><span class="line">  <span class="attr">&quot;case_id&quot;</span><span class="punctuation">:</span> <span class="string">&quot;case-20260504-153012&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;preset_id&quot;</span><span class="punctuation">:</span> <span class="string">&quot;ui_jank_flight_recorder_v3&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trigger_name&quot;</span><span class="punctuation">:</span> <span class="string">&quot;app_ui_jank&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trigger_source&quot;</span><span class="punctuation">:</span> <span class="string">&quot;app_jankstats&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trigger_ts_elapsed_ns&quot;</span><span class="punctuation">:</span> <span class="number">123456789000000</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trace_start_ns&quot;</span><span class="punctuation">:</span> <span class="number">123456730000000</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trace_end_ns&quot;</span><span class="punctuation">:</span> <span class="number">123457790000000</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;pre_trigger_window_ms&quot;</span><span class="punctuation">:</span> <span class="number">59</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;post_trigger_window_ms&quot;</span><span class="punctuation">:</span> <span class="number">1001</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;trigger_matched&quot;</span><span class="punctuation">:</span> <span class="literal"><span class="keyword">true</span></span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;file_complete&quot;</span><span class="punctuation">:</span> <span class="literal"><span class="keyword">true</span></span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;stats_status&quot;</span><span class="punctuation">:</span> <span class="string">&quot;warning&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;affected_sources&quot;</span><span class="punctuation">:</span> <span class="punctuation">[</span><span class="string">&quot;linux.ftrace&quot;</span><span class="punctuation">,</span> <span class="string">&quot;android.surfaceflinger.frametimeline&quot;</span><span class="punctuation">]</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;usable_metrics&quot;</span><span class="punctuation">:</span> <span class="punctuation">[</span><span class="string">&quot;frame_timeline&quot;</span><span class="punctuation">,</span> <span class="string">&quot;main_thread_sched&quot;</span><span class="punctuation">]</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;evidence_grade&quot;</span><span class="punctuation">:</span> <span class="string">&quot;B&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;privacy_mode&quot;</span><span class="punctuation">:</span> <span class="string">&quot;log_tag_whitelist&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;upload_mode&quot;</span><span class="punctuation">:</span> <span class="string">&quot;summary_first&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;conclusion_level&quot;</span><span class="punctuation">:</span> <span class="string">&quot;probable&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;next_action&quot;</span><span class="punctuation">:</span> <span class="string">&quot;collect_short_irq_preset&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;sampling_policy_version&quot;</span><span class="punctuation">:</span> <span class="string">&quot;2026-05-04&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;sample_rate&quot;</span><span class="punctuation">:</span> <span class="number">1.0</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;skip_probability&quot;</span><span class="punctuation">:</span> <span class="number">0.0</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;sample_decision&quot;</span><span class="punctuation">:</span> <span class="string">&quot;record&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;quota_bucket&quot;</span><span class="punctuation">:</span> <span class="string">&quot;ui_jank_daily&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;quota_remaining&quot;</span><span class="punctuation">:</span> <span class="number">8</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;upload_allowed&quot;</span><span class="punctuation">:</span> <span class="literal"><span class="keyword">true</span></span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;upload_block_reason&quot;</span><span class="punctuation">:</span> <span class="string">&quot;&quot;</span><span class="punctuation">,</span></span><br><span class="line">  <span class="attr">&quot;retention_until&quot;</span><span class="punctuation">:</span> <span class="string">&quot;2026-05-07T15:30:12+08:00&quot;</span></span><br><span class="line"><span class="punctuation">&#125;</span></span><br></pre></td></tr></table></figure>
+
+<p>Keep <code>summary.json</code> to machine-readable states, rather than narrative conclusions. <code>evidence_grade</code> can use A&#x2F;B&#x2F;C&#x2F;D: A means the target window, key data sources, stats, and metadata are all complete; B means there is minor data loss but the core judgment remains usable; C permits only directional judgments; D means the trace can only document the environment.</p>
+<p>Long-running traces also need explicit clock-domain information. ftrace commonly uses <code>CLOCK_BOOTTIME</code>, Android logs carry wall time, and other data sources may be synchronized through Perfetto’s ClockSnapshot.</p>
+<p>External metadata should record at least elapsed realtime, wall time, and boot ID together. A more robust approach also records the trigger itself as a Track Event inside the trace. If analysis reveals clock synchronization failures or invalid clock snapshots, reduce confidence in alignment across data sources.</p>
+<h2 id="Trim-at-Capture-Time-First"><a href="#Trim-at-Capture-Time-First" class="headerlink" title="Trim at Capture Time First"></a>Trim at Capture Time First</h2><p>Perfetto traces contain incremental state, track descriptors, stats, and metadata. Cutting a binary file after capture can easily break parsing. The recommended order is:</p>
+<ul>
+<li>Use a ring buffer to retain only the recent window.</li>
+<li>Use <code>stop_delay_ms</code> to control how much to retain after the trigger.</li>
+<li>Use <code>max_file_size_bytes</code> to cap file size.</li>
+<li>Upload the original trace covering the complete incident window.</li>
+<li>Generate summaries, screenshots, and SQL results on the server as lightweight indexes.</li>
+</ul>
+<p>If offline trimming is unavoidable, the tool must rewrite TracePackets and retain the necessary descriptors and stats. Do not use <code>dd</code>, text truncation, or arbitrary cuts through a protobuf byte stream.</p>
+<h2 id="Upload-and-Cleanup-Policies"><a href="#Upload-and-Cleanup-Policies" class="headerlink" title="Upload and Cleanup Policies"></a>Upload and Cleanup Policies</h2><p>Long-running field traces are collected close to real user environments, so upload policies must consider more than engineering convenience:</p>
+<ul>
+<li>Upload by default only under conditions such as Wi-Fi, charging, or user authorization.</li>
+<li>When a file exceeds the threshold, upload the summary first and retain the original trace locally for manual export.</li>
+<li>Collect logs using a tag allowlist and redact them before upload.</li>
+<li>Give trace files a TTL, such as automatic cleanup after three days.</li>
+<li>Apply both TraceConfig’s <code>max_per_24_h</code> and client-side rate limiting to triggers.</li>
+<li>Run <code>stats</code> before upload and record data loss in metadata.</li>
+<li>Do not allow servers to send arbitrary text proto configurations to user devices; allow selection only from reviewed presets.</li>
+</ul>
+<p>These constraints reduce ad hoc tuning flexibility, but control upload, privacy, and stability risks.</p>
+<h2 id="Standard-Checks-Before-Analysis"><a href="#Standard-Checks-Before-Analysis" class="headerlink" title="Standard Checks Before Analysis"></a>Standard Checks Before Analysis</h2><p>Long-running field traces are more susceptible to data loss. Before analysis, check two acceptance criteria: whether the time covered by the trace meets expectations, and whether <code>stats</code> supports trusting the key data sources.</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  trace_start() <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> trace_start_s,</span><br><span class="line">  trace_dur() <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> trace_dur_s;</span><br></pre></td></tr></table></figure>
+
+<p>If the duration is unexpected, first check <code>trigger_timeout_ms</code>, <code>max_file_size_bytes</code>, whether the background process was killed, whether the file is still open, and whether <code>duration_ms</code> accounts for suspend as intended. When data is incomplete, explicitly state which conclusions must be withheld.</p>
+<p>Then run the global quality check. Part 12 already provides the complete stats health-check query and a mapping from common stats items to corrective actions. Reuse that SQL at the beginning of your analysis script; it is not repeated here. Long-running field traces need two additional layers of checking.</p>
+<p>First, check each buffer. For <code>traced_buf_*</code>, <code>idx</code> is the buffer index. The global flush&#x2F;config items listed alongside them below must not be interpreted as buffer-specific indices:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> <span class="keyword">value</span> <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line">  <span class="keyword">AND</span> (</span><br><span class="line">    name GLOB <span class="string">&#x27;traced_buf_*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name <span class="keyword">IN</span> (</span><br><span class="line">      <span class="string">&#x27;traced_flushes_failed&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_final_flush_failed&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;config_write_into_file_no_flush&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;config_write_into_file_discard&#x27;</span></span><br><span class="line">    )</span><br><span class="line">  )</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> idx, name;</span><br></pre></td></tr></table></figure>
+
+<p>With RING_BUFFER, <code>traced_buf_chunks_overwritten</code> does not necessarily indicate an error: it usually means old data outside the retained window was overwritten. Check separately whether it overwrote the root cause before the trigger:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;traced_buf_chunks_overwritten&#x27;</span></span><br><span class="line">  <span class="keyword">AND</span> <span class="keyword">value</span> <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> idx;</span><br></pre></td></tr></table></figure>
+
+<p>If ftrace is enabled in the field, also record the ftrace clock, available events, and setup errors. When comparing traces, differences in clocks or event sets directly affect the credibility of sched&#x2F;frequency conclusions:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">adb shell <span class="built_in">cat</span> /sys/kernel/tracing/trace_clock</span><br><span class="line">adb shell <span class="built_in">cat</span> /sys/kernel/tracing/available_events | <span class="built_in">head</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="Turn-Intermittent-Problems-into-Evidence"><a href="#Turn-Intermittent-Problems-into-Evidence" class="headerlink" title="Turn Intermittent Problems into Evidence"></a>Turn Intermittent Problems into Evidence</h2><p>Long-running field traces require observation windows, triggers, completeness criteria, and upload boundaries to be defined in advance. A ring buffer retains the recent window; triggers preserve the incident; <code>write_into_file</code> controls long recordings; <code>--background-wait</code> and file-close checks help ensure the data reaches disk; and <code>stats</code> plus metadata establish how much of that evidence remains trustworthy.</p>
+<p>Part 13 covered app-side Track Events, while this article covers field observation windows. Together, they provide the foundation for bringing slow frames, impending ANRs, and business-operation timeouts into a single incident package.</p>
+<h2 id="References"><a href="#References" class="headerlink" title="References"></a>References</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/concepts/config">Trace configuration</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/concepts/buffers">Buffers and dataflow</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/learning-more/tracing-in-background">Tracing in Background</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/concepts/detached-mode">Running perfetto in detached mode</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/reference/perfetto-cli">Perfetto command-line reference</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/reference/trace-config-proto">TraceConfig proto reference</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/getting-started/local-android-trace-recording#recipe-tracing-android-boot">Android boot tracing</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/frametimeline">FrameTimeline</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/atrace">ATrace</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/android-log">Android Log</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/concepts/clock-sync">Clock synchronization</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/analysis/sql-stats">Trace Processor Stats</a></li>
+</ol>
+<p>Source revision checked: <code>b23c67be1159e3f0b0657bd97be9e139e0d8ee2c</code> (2026-09-19).</p>
+<ul>
+<li><a target="_blank" rel="noopener" href="https://github.com/google/perfetto/blob/b23c67be1159e3f0b0657bd97be9e139e0d8ee2c/protos/perfetto/config/trace_config.proto">Trigger and duration semantics</a></li>
+</ul>
+<h2 id="About-Me-and-the-Blog"><a href="#About-Me-and-the-Blog" class="headerlink" title="About Me and the Blog"></a>About Me and the Blog</h2><p>Follow <a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/">Android Performance</a>.</p>
+
+    </article>
+    <!-- license -->
+        <div class="license-wrapper">
+            <p>Author：<a href="https://androidperformance.com/en">Gracker</a>
+            <p>Link：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">https://androidperformance.com/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/</a>
+            <p>Publish date：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">May 4th 2026, 10:15:00 am</a>
+            <p>Update date：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">September 20th 2026, 12:52:22 am</a>
+            <p>License：This work is licensed under <a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a></p>
+        </div>
+    <!-- paginator -->
+    <ul class="post-paginator">
+        <li class="next">
+                <div class="nextSlogan">Next Post</div>
+                <a href="/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/" title="Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis">
+                    <div class="nextTitle">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</div>
+                </a>
+        </li>
+        <li class="previous">
+                <div class="prevSlogan">Previous Post</div>
+                <a href="/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/" title="Android Perfetto Series 14: heapprofd and Memory Profiling">
+                    <div class="prevTitle">Android Perfetto Series 14: heapprofd and Memory Profiling</div>
+                </a>
+        </li>
+    </ul>
+    <!-- comment -->
+        <div class="post-comment">
+            <!-- 来必力 City 版安装代码 -->
+
+            
+            
+            
+            <!-- utteranc评论 -->
+
+            <!-- partial('_partial/comment/changyan') -->
+            <!--PC版-->
+
+            
+            
+            
+        </div>
+    <!-- timeliness note -->
+    <!-- idea from: https://hexo.fluid-dev.com/posts/hexo-injector/#%E6%96%87%E7%AB%A0%E6%97%B6%E6%95%88%E6%80%A7%E6%8F%90%E7%A4%BA -->
+    <!-- Mathjax -->
+</main>
+
+                <!-- profile -->
+            </div>
+            <footer class="footer footer-unloaded">
+    <!-- social  -->
+        <div class="social">
+                            <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title="email" ></a>
+                <a href="https://github.com/gracker" class="iconfont-archer github" target="_blank" title="github"></a>
+                <span class="iconfont-archer wechat" title="wechat">
+                        <img class="profile-qr" src="/en/assets/Wechat.jpeg" />
+                </span>
+                <span class="iconfont-archer qq" title="qq: 553000664">
+                </span>
+                <a href="https://weibo.com/gracker520" class="iconfont-archer weibo" target="_blank" title="weibo"></a>
+                <a href="https://www.zhihu.com/people/gracker" class="iconfont-archer zhihu" target="_blank" title="zhihu"></a>
+                <a href="https://twitter.com/Gracker_Gao" class="iconfont-archer twitter" target="_blank" title="twitter"></a>
+                <a href="https://juejin.im/user/557b0590e4b052e031453d76" class="iconfont-archer juejin" target="_blank" title="juejin"></a>
+                <a href="https://www.youtube.com/@grackers" class="iconfont-archer youtube" target="_blank" title="youtube"></a>
+                <a href="/en/atom.xml" class="iconfont-archer rss" target="_blank" title="rss"></a>
+
+        </div>
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- website approve for Chinese user -->
+        <div class="website-approve">
+                <span id="icp-approve" class="icp-approve">
+                    <a href="https://beian.miit.gov.cn/" target="_blank">蜀 ICP 备 20016190 号</a>
+                </span>
+        </div>
+</footer>
+
+        </div>
+        <!-- toc -->
+            <div class="toc-wrapper toc-wrapper-loding" style=    top:50vh;
+>
+                <div class="toc-catalog">
+                    <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+                </div>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-Series-Catalog"><span class="toc-number">1.</span> <span class="toc-text">Perfetto Series Catalog</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Design-the-Evidence-Window-First"><span class="toc-number">2.</span> <span class="toc-text">Design the Evidence Window First</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Device-Capabilities-and-Permissions-Constrain-Field-Capture"><span class="toc-number">3.</span> <span class="toc-text">Device Capabilities and Permissions Constrain Field Capture</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Boot-Tracing-Is-a-Special-Field-Observation-Window"><span class="toc-number">4.</span> <span class="toc-text">Boot Tracing Is a Special Field Observation Window</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Three-Modes-for-Long-Running-Field-Traces"><span class="toc-number">5.</span> <span class="toc-text">Three Modes for Long-Running Field Traces</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#A-Baseline-Ring-Buffer-Configuration"><span class="toc-number">6.</span> <span class="toc-text">A Baseline Ring Buffer Configuration</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Long-Recordings-Need-Periodic-File-Writes"><span class="toc-number">7.</span> <span class="toc-text">Long Recordings Need Periodic File Writes</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Background-Recording-and-Safe-Shutdown"><span class="toc-number">8.</span> <span class="toc-text">Background Recording and Safe Shutdown</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Using-Triggers"><span class="toc-number">9.</span> <span class="toc-text">Using Triggers</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Snapshots-for-Parameter-Tuning"><span class="toc-number">10.</span> <span class="toc-text">Snapshots for Parameter Tuning</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Use-Detached-Mode-Sparingly"><span class="toc-number">11.</span> <span class="toc-text">Use Detached Mode Sparingly</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Bugreport-as-a-Field-Fallback"><span class="toc-number">12.</span> <span class="toc-text">Bugreport as a Field Fallback</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#What-a-Field-Evidence-Package-Should-Contain"><span class="toc-number">13.</span> <span class="toc-text">What a Field Evidence Package Should Contain</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Trim-at-Capture-Time-First"><span class="toc-number">14.</span> <span class="toc-text">Trim at Capture Time First</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Upload-and-Cleanup-Policies"><span class="toc-number">15.</span> <span class="toc-text">Upload and Cleanup Policies</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Standard-Checks-Before-Analysis"><span class="toc-number">16.</span> <span class="toc-text">Standard Checks Before Analysis</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Turn-Intermittent-Problems-into-Evidence"><span class="toc-number">17.</span> <span class="toc-text">Turn Intermittent Problems into Evidence</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#References"><span class="toc-number">18.</span> <span class="toc-text">References</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#About-Me-and-the-Blog"><span class="toc-number">19.</span> <span class="toc-text">About Me and the Blog</span></a></li></ol>
+            </div>
+        <!-- sidebar -->
+        <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+        <div class="sidebar-panel-archives">
+    <!-- 在 ejs 中将 archive 按照时间排序 -->
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 140
+        </div>
+    </div>
+    <div class="post-archive">
+            <div class="archive-year"> 2026 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2026/09/19/SmartPerfetto-v1.12.0-Release-Notes/">SmartPerfetto v1.12.0 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2026/09/19/AIW-Open-Source-Android-Internals-Wiki/">Half a Year in the Making: Open-Sourcing an Android Internals Ebook</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/en/2026/08/21/SmartPerfetto-Five-Week-Update/">SmartPerfetto v1.7.0 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/17</span>
+            <a class="archive-post-title" href="/en/2026/07/17/SmartPerfetto-Six-Week-Update/">SmartPerfetto v1.1.1 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/04</span>
+            <a class="archive-post-title" href="/en/2026/06/04/SmartPerfetto-Three-Week-Update/">SmartPerfetto v1.0.28 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/17</span>
+            <a class="archive-post-title" href="/en/2026/05/17/SmartPerfetto-Two-Week-Update/">SmartPerfetto v1.0.7 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">Android Perfetto Series 12: Trace Dataflow and Data Loss Troubleshooting</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto Series 14: heapprofd and Memory Profiling</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-11-PerfettoSQL-TraceProcessor-Automation/">Android Perfetto Series 11: PerfettoSQL, Trace Processor, and Regression Detection</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto Series 18: Response Latency in Practice, from Input Events to First-Frame Feedback</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-17-Engineering-Domain-And-Platform-Tracing/">Android Perfetto Series 17: Domain Automation, Issue Checklists, and Platform Infrastructure</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/29</span>
+            <a class="archive-post-title" href="/en/2026/04/29/SmartPerfetto-Open-Source-Perfetto-AI-Assistant/">SmartPerfetto Is Open Source: A Perfetto AI Assistant for Android Trace Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/28</span>
+            <a class="archive-post-title" href="/en/2026/04/28/Agent-OS-Task-Entry/">Long-form Forecast: Phones May No Longer Start from Apps: How Agent OS Takes Over the Task Entry Point</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/10</span>
+            <a class="archive-post-title" href="/en/2026/04/10/SmartPerfetto-Architecture-Deep-Dive-QA/">SmartPerfetto Architecture Q&A: 8 In-Depth Technical Questions</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/10</span>
+            <a class="archive-post-title" href="/en/2026/04/10/SmartPerfetto-Architecture-Deep-Dive/">From Trace to Insight: Harness Engineering in SmartPerfetto AI Agent</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/10</span>
+            <a class="archive-post-title" href="/en/2026/03/10/OpenClaw-FAQ/">OpenClaw FAQ: Token Costs, Use Cases, Local Models, Privacy, and Day-to-Day Experience</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/08</span>
+            <a class="archive-post-title" href="/en/2026/03/08/OpenClaw-Local-Practice/">After Running OpenClaw Locally for Three Weeks, I Realized It's Not a Chatbot</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2025 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/16</span>
+            <a class="archive-post-title" href="/en/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto Series 10: Binder Scheduling and Lock Contention</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/en/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto Series 9: CPU Information Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/en/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto Series 8: Understanding Vsync Mechanism and Performance Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/02</span>
+            <a class="archive-post-title" href="/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto Series 7: MainThread and RenderThread Deep Dive</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/26</span>
+            <a class="archive-post-title" href="/en/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto Series 6: Why 120Hz? Advantages and Challenges</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/26</span>
+            <a class="archive-post-title" href="/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Choreographer-based Rendering Flow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto Series 4: Opening Large Traces via Command Line</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-01-ANR-Design/">Android ANR Series 1: Understanding Android ANR Design Philosophy</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2024 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto Series 1: Introduction to Perfetto</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/en/2024/03/27/Android-Perfetto-101/">Android Perfetto Series Catalog</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/01</span>
+            <a class="archive-post-title" href="/en/2024/01/01/2023-review/">Reflections on 2023: Health, Career, and the Future</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2023 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/en/2023/08/21/the-performance-design-of-os/">Performance Considerations in Operating System Design</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/en/2023/05/14/bad-android-app-with-system-permissions/">Can an App Really Do Whatever It Wants With System Permissions?</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2022 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/en/2022/03/27/the-performance-tea-part-01/">The Performance Community Tea Talk - Episode 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-sleep/">Systrace Thread CPU State Analysis Tips - Sleep and Uninterruptible Sleep</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-running/">Systrace Thread CPU State Analysis Tips - Running</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2022/01/21/android-systrace-cpu-state-runnable/">Systrace Thread CPU State Analysis Tips - Runnable</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/en/2022/01/07/The-Performace-1-Performance-Tools/">Android Performance Optimization: Techniques, Methods, and Tools</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/en/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/03</span>
+            <a class="archive-post-title" href="/en/2022/01/03/2021-Review/">2021 Year in Review: Baby, Career, and Growth</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2021 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/27</span>
+            <a class="archive-post-title" href="/en/2021/10/27/if-i-write-a-book-about-performance/">What Should Be in a Book About Android Smoothness?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/26</span>
+            <a class="archive-post-title" href="/en/2021/10/26/build-android-12/">Android System Development Series (1): Downloading, Compiling, and Flashing Android 12</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace Responsiveness in Action 3 - Extended Knowledge on Responsiveness</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace Responsiveness in Action 1 - Understanding Responsiveness Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace Responsiveness in Action 2 - Responsiveness Analysis - Using App Startup as an Example</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace Smoothness in Action 3 - FAQs During Jank Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2020 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span>
+            <a class="archive-post-title" href="/en/2020/08/20/weibo-imageload-opt-on-huawei/">Why is the Weibo Experience Better on Huawei? A Technical Analysis and Reflection</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/en/2020/05/26/samsung_crash/">An Incident Caused by a 'Leap' Month - Analysis of Samsung System Reboots</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/en/2020/05/07/Android-App-Chain-Wakeup/">Analysis of Android App Chain Wakeups</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/14</span>
+            <a class="archive-post-title" href="/en/2020/02/14/Android-Systrace-SurfaceFlinger/">Android Systrace Basics - SurfaceFlinger Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/03</span>
+            <a class="archive-post-title" href="/en/2020/02/03/android-development-learning-path-2020-edition/">Android Developer Learning Path (2020 Edition)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span>
+            <a class="archive-post-title" href="/en/2020/01/28/2020-read/">My 2020 Reading List</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2019 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/21</span>
+            <a class="archive-post-title" href="/en/2019/12/21/Android-Systrace-CPU/">Android Systrace Basics - CPU Info Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/15</span>
+            <a class="archive-post-title" href="/en/2019/12/15/Android-Systrace-Triple-Buffer/">Android Systrace Basics - Triple Buffer Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/06</span>
+            <a class="archive-post-title" href="/en/2019/12/06/Android-Systrace-Binder/">Android Systrace Basics - Binder and Lock Contention Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/en/2019/12/01/BlogMap/">[Sticky] Blog Article Directory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/en/2019/12/01/Android-Systrace-Vsync/">Android Systrace Basics - Vsync Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/06</span>
+            <a class="archive-post-title" href="/en/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Android Systrace Basics - MainThread and RenderThread Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/04</span>
+            <a class="archive-post-title" href="/en/2019/11/04/Android-Systrace-Input/">Android Systrace Basics - Input Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/24</span>
+            <a class="archive-post-title" href="/en/2019/10/24/Android-Background-Animation/">Analysis of 'Zombie Animations' in the Android Background</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/22</span>
+            <a class="archive-post-title" href="/en/2019/10/22/Android-Choreographer/">Detailed Explanation of Android Rendering Mechanism Based on Choreographer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/en/2019/09/18/Android-Jank-Due-To-Low-Memory/">Overview of Jank and Frame Drops in Android - Low Memory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/17</span>
+            <a class="archive-post-title" href="/en/2019/09/17/Android-Kill-Background-App-Debug/">Case Study: Debugging the Android Launcher Kill Problem</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Debug/">Overview of Jank and Frame Drops in Android - Methodology</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/en/2019/09/01/Android-Activity-Lunch-Mode/">A Detailed Guide to Activity Launch Modes in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/en/2019/07/27/Android-Hardware-Layer/">A Deep Dive into Hardware Layers in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/en/2019/07/27/Android-Hardware-Layer-NEW/">Detailed Explanation of Hardware Layer in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/23</span>
+            <a class="archive-post-title" href="/en/2019/07/23/Android-Systrace-Pre/">Android Systrace Basics - Prerequisites for Analyzing Systrace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/29</span>
+            <a class="archive-post-title" href="/en/2019/06/29/Android-Systrace-SystemServer/">Android Systrace Basics - SystemServer Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/en/2019/05/28/Android-Systrace-About/">Android Systrace Basics - Introduction to Systrace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/27</span>
+            <a class="archive-post-title" href="/en/2019/05/27/why-60-fps/">Android Systrace Basics - Why 60 FPS?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/en/2019/05/26/Android_Systrace_0/">Android Systrace -- Series Article Index</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/15</span>
+            <a class="archive-post-title" href="/en/2019/05/15/90hz-on-android/">A New Era of Smoothness: Thoughts on 90Hz on Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/en/2019/04/07/Sharp-Tools/">Sharp Tools - Efficient Tool Recommendations</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/en/2019/04/07/liqi/">Liqi - High-Efficiency Tools Recommendation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2019/01/21/android-performance-case-jank-accessbility/">Case Analysis of System-wide Stutter Caused by Android Accessibility Service</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/12</span>
+            <a class="archive-post-title" href="/en/2019/01/12/recommend-of-2018/">2018 Best Items Recommendations - A Reward for Your Hard Work</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2018 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span>
+            <a class="archive-post-title" href="/en/2018/11/01/android-system-develop-0/">Setting Up the Android System Development Environment</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/25</span>
+            <a class="archive-post-title" href="/en/2018/10/25/How-do-engineers-count-well/">Lu Qi: Besides Good Code, What Makes an Engineer Excellent?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/01</span>
+            <a class="archive-post-title" href="/en/2018/10/01/how-to-stop-sucking-and-be-awesome-instead-8/">The Programmer's Apprenticeship - 08: The Beauty of Reading</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/30</span>
+            <a class="archive-post-title" href="/en/2018/09/30/how-to-stop-sucking-and-be-awesome-instead-7/">The Programmer's Apprenticeship - 07: Games and Programming</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/29</span>
+            <a class="archive-post-title" href="/en/2018/09/29/how-to-stop-sucking-and-be-awesome-instead-6/">The Programmer's Apprenticeship - 06: All About the Internet</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/28</span>
+            <a class="archive-post-title" href="/en/2018/09/28/how-to-stop-sucking-and-be-awesome-instead-5/">The Programmer's Apprenticeship - 05: Know Your Users</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/27</span>
+            <a class="archive-post-title" href="/en/2018/09/27/how-to-stop-sucking-and-be-awesome-instead-4/">The Programmer's Apprenticeship - 04: Reflections on Testing</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/26</span>
+            <a class="archive-post-title" href="/en/2018/09/26/how-to-stop-sucking-and-be-awesome-instead-3/">The Programmer's Apprenticeship - 03: Web Design Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/20</span>
+            <a class="archive-post-title" href="/en/2018/09/20/how-to-stop-sucking-and-be-awesome-instead-2/">The Programmer's Apprenticeship - 02: The Way of Programming</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2018/09/19/how-to-stop-sucking-and-be-awesome-instead-1/">The Programmer's Apprenticeship - 01: The Art of Fighting Back</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2018/09/13/android-memory/">Does the Android System Not Release Memory?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/13</span>
+            <a class="archive-post-title" href="/en/2018/08/13/Some-Thoughts-on-the-Fluency-of-Android/">Some Thoughts on Android System Fluency</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/20</span>
+            <a class="archive-post-title" href="/en/2018/05/20/zhihu-startingwindow/">Zhihu: Save Your StartingWindow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/en/2018/05/07/Android-performance-optimization-skills-and-tools/">[Sticky] Android Performance Optimization: Must-Know Skills and Tools</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/en/2018/01/06/2017-most-recommended/">2017 Best Recommendations - A Reward for Hard-Working Self</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/en/2018/01/06/Most-Recommended-of-2017/">2017 Annual Best Recommendations - Reward Yourself for Hard Work</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2017 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/23</span>
+            <a class="archive-post-title" href="/en/2017/04/23/About-work/">Reflections on Work and Growth (2017)</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2016 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/en/2016/04/05/android-bottom-bar-2/">Android Bottom Navigation Spec Part 2: Style, Behavior, and Dimensions</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/en/2016/04/05/android-bottom-bar-1/">Android Bottom Navigation Spec Part 1: Usage</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2015 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/31</span>
+            <a class="archive-post-title" href="/en/2015/12/31/How-to-calculation-android-app-lunch-time/">How to Calculate App Startup Time in Android?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/29</span>
+            <a class="archive-post-title" href="/en/2015/12/29/Android-App-Launch-Optimization-DelayLoad-Part-2/">Android App Launch Optimization: Implementation and Principles of DelayLoad (Part 2)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2015/11/18/Android-app-lunch-optimize-delay-load/">Android App Startup Optimization - DelayLoad Implementation and Principles (Part 1)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/12</span>
+            <a class="archive-post-title" href="/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/">RenderThread Workflow in Android hwui</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/en/2015/08/05/HashMap/">Java 7 HashMap Source Code Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-onTrimMemory/">Android Code Memory Optimization Suggestions - OnTrimMemory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-AndroidResource/">Android Code Memory Optimization Suggestions - Android Resources</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/29</span>
+            <a class="archive-post-title" href="/en/2015/05/29/Nexus6-with-Android-M/">Enabling Multi-Window Mode on Nexus 6 with Android M</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/06</span>
+            <a class="archive-post-title" href="/en/2015/05/06/Java-Singleton/">A Detailed Guide to Java Singleton Pattern</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-3/">Android Performance Patterns: Understanding VSYNC</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-2/">Android Performance Patterns: Understanding Overdraw</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-4/">Android Performance Patterns: Profile GPU Rendering</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-1/">Android Performance Patterns: Render Performance</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns/">Overview of Android Performance Patterns</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/">Android Memory Optimization (3) - Viewing Original Bitmaps in MAT</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/31</span>
+            <a class="archive-post-title" href="/en/2015/03/31/android-performance-case-study-follow-up/">Android Performance Case Study Follow-up</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-3/">Android Tips Round-Up, Part 3</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-4/">Android Tips Round-Up, Part 4</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/04</span>
+            <a class="archive-post-title" href="/en/2015/02/04/build-rom-for-nexus5/">Compiling Android Lollipop Firmware for Nexus 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/30</span>
+            <a class="archive-post-title" href="/en/2015/01/30/android-performance-tools-systrace-1/">Android Performance Optimization - Introduction to Systrace (Part 1)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/16</span>
+            <a class="archive-post-title" href="/en/2015/01/16/view-android-source-code-with-androidstudio/">Viewing Android Lollipop Source Code with Android Studio</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/13</span>
+            <a class="archive-post-title" href="/en/2015/01/13/android-performance-optimization-overdraw-2/">Android Performance Optimization: Overdraw - Practical Application</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2014 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/en/2014/10/20/android-performance-optimization-overdraw-1/">Android Performance Optimization: Overdraw - Theory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/03</span>
+            <a class="archive-post-title" href="/en/2014/06/03/android-edittext-do-not-auto-get-focus/">Android Tips: How to Prevent EditText from Automatically Getting Focus</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/31</span>
+            <a class="archive-post-title" href="/en/2014/05/31/android-tips-round-up-2/">Android Tips Round-Up, Part 2</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/en/2014/05/28/android-tips-round-up-1/">Android Tips Round-Up, Part 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/02</span>
+            <a class="archive-post-title" href="/en/2014/05/02/android_log_to_file/">Android Tools - Log2File</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/25</span>
+            <a class="archive-post-title" href="/en/2014/03/25/ubuntu-adb-can-not-find-devices/">Ubuntu: Adb Command Cannot Find Device</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/17</span>
+            <a class="archive-post-title" href="/en/2014/03/17/android-build-your-own-android-notification-service-app/">Android Service: Building Your Own Notification Center (1) - Introduction to Accessibility Service</a>
+        </li>
+            </ul>
+    </div>
+</div>
+
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Yearly Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Yearly Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
+            </span>
+            <span class="sidebar-tag-name" data-tags="Year in Review">
+                <span class="iconfont-archer">&#xe606;</span>
+                Year in Review
+            </span>
+            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Knowledge Planet
+            </span>
+            <span class="sidebar-tag-name" data-tags="Essays">
+                <span class="iconfont-archer">&#xe606;</span>
+                Essays
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="AOSP">
+                <span class="iconfont-archer">&#xe606;</span>
+                AOSP
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="AIW">
+                <span class="iconfont-archer">&#xe606;</span>
+                AIW
+            </span>
+            <span class="sidebar-tag-name" data-tags="Open Source">
+                <span class="iconfont-archer">&#xe606;</span>
+                Open Source
+            </span>
+            <span class="sidebar-tag-name" data-tags="Agent OS">
+                <span class="iconfont-archer">&#xe606;</span>
+                Agent OS
+            </span>
+            <span class="sidebar-tag-name" data-tags="AI">
+                <span class="iconfont-archer">&#xe606;</span>
+                AI
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenAI">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenAI
+            </span>
+            <span class="sidebar-tag-name" data-tags="Mobile OS">
+                <span class="iconfont-archer">&#xe606;</span>
+                Mobile OS
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Thread Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Thread Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Battery Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Battery Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR Analysis">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR Analysis
+            </span>
+            <span class="sidebar-tag-name" data-tags="Page Response">
+                <span class="iconfont-archer">&#xe606;</span>
+                Page Response
+            </span>
+            <span class="sidebar-tag-name" data-tags="Trace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Trace
+            </span>
+            <span class="sidebar-tag-name" data-tags="DataFlow">
+                <span class="iconfont-archer">&#xe606;</span>
+                DataFlow
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="Locking">
+                <span class="iconfont-archer">&#xe606;</span>
+                Locking
+            </span>
+            <span class="sidebar-tag-name" data-tags="Scheduling">
+                <span class="iconfont-archer">&#xe606;</span>
+                Scheduling
+            </span>
+            <span class="sidebar-tag-name" data-tags="heapprofd">
+                <span class="iconfont-archer">&#xe606;</span>
+                heapprofd
+            </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
+            <span class="sidebar-tag-name" data-tags="SQL">
+                <span class="iconfont-archer">&#xe606;</span>
+                SQL
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceProcessor">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceProcessor
+            </span>
+            <span class="sidebar-tag-name" data-tags="GPU">
+                <span class="iconfont-archer">&#xe606;</span>
+                GPU
+            </span>
+            <span class="sidebar-tag-name" data-tags="Power">
+                <span class="iconfont-archer">&#xe606;</span>
+                Power
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="Input">
+                <span class="iconfont-archer">&#xe606;</span>
+                Input
+            </span>
+            <span class="sidebar-tag-name" data-tags="Latency">
+                <span class="iconfont-archer">&#xe606;</span>
+                Latency
+            </span>
+            <span class="sidebar-tag-name" data-tags="Camera">
+                <span class="iconfont-archer">&#xe606;</span>
+                Camera
+            </span>
+            <span class="sidebar-tag-name" data-tags="Audio">
+                <span class="iconfont-archer">&#xe606;</span>
+                Audio
+            </span>
+            <span class="sidebar-tag-name" data-tags="SDK">
+                <span class="iconfont-archer">&#xe606;</span>
+                SDK
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceEvent">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceEvent
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="Annual Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Annual Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenClaw">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenClaw
+            </span>
+            <span class="sidebar-tag-name" data-tags="AI Agent">
+                <span class="iconfont-archer">&#xe606;</span>
+                AI Agent
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Local Models">
+                <span class="iconfont-archer">&#xe606;</span>
+                Local Models
+            </span>
+            <span class="sidebar-tag-name" data-tags="Sharp Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Sharp Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity
+            </span>
+            <span class="sidebar-tag-name" data-tags="SmartPerfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                SmartPerfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="MCP">
+                <span class="iconfont-archer">&#xe606;</span>
+                MCP
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Specs">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Specs
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Kotlin">
+                <span class="iconfont-archer">&#xe606;</span>
+                Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="Stutter">
+                <span class="iconfont-archer">&#xe606;</span>
+                Stutter
+            </span>
+            <span class="sidebar-tag-name" data-tags="Overdraw">
+                <span class="iconfont-archer">&#xe606;</span>
+                Overdraw
+            </span>
+            <span class="sidebar-tag-name" data-tags="Programmer">
+                <span class="iconfont-archer">&#xe606;</span>
+                Programmer
+            </span>
+            <span class="sidebar-tag-name" data-tags="Reading Notes">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading Notes
+            </span>
+            <span class="sidebar-tag-name" data-tags="The Programmer's Apprenticeship">
+                <span class="iconfont-archer">&#xe606;</span>
+                The Programmer's Apprenticeship
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Principles">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Principles
+            </span>
+            <span class="sidebar-tag-name" data-tags="Internet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Internet
+            </span>
+            <span class="sidebar-tag-name" data-tags="User Experience">
+                <span class="iconfont-archer">&#xe606;</span>
+                User Experience
+            </span>
+            <span class="sidebar-tag-name" data-tags="Game Programming">
+                <span class="iconfont-archer">&#xe606;</span>
+                Game Programming
+            </span>
+            <span class="sidebar-tag-name" data-tags="Testing">
+                <span class="iconfont-archer">&#xe606;</span>
+                Testing
+            </span>
+            <span class="sidebar-tag-name" data-tags="Reading">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading
+            </span>
+            <span class="sidebar-tag-name" data-tags="Liqi">
+                <span class="iconfont-archer">&#xe606;</span>
+                Liqi
+            </span>
+            <span class="sidebar-tag-name" data-tags="Community">
+                <span class="iconfont-archer">&#xe606;</span>
+                Community
+            </span>
+            <span class="sidebar-tag-name" data-tags="Smooth">
+                <span class="iconfont-archer">&#xe606;</span>
+                Smooth
+            </span>
+            <span class="sidebar-tag-name" data-tags="Experience Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Experience Optimization
+            </span>
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+        缺失模块，请参考主题文档进行安装配置：https://github.com/fi3ework/hexo-theme-archer#%E5%AE%89%E8%A3%85%E4%B8%BB%E9%A2%98
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="Essays">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Essays
+        </span>
+        <span class="sidebar-category-name" data-categories="Casual Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Casual Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Reading Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Reading Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Android">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android
+        </span>
+        <span class="sidebar-category-name" data-categories="AI">
+            <span class="iconfont-archer">&#xe60a;</span>
+            AI
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
+        </span>
+        <span class="sidebar-category-name" data-categories="Android Performance Optimization">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android Performance Optimization
+        </span>
+        <span class="sidebar-category-name" data-categories="SmartPerfetto">
+            <span class="iconfont-archer">&#xe60a;</span>
+            SmartPerfetto
+        </span>
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+
+    </div>
+</div>
+
+        <!-- site-meta -->
+        <script>
+    var siteMetaRoot = "/en/"
+    if (siteMetaRoot === "undefined") {
+        siteMetaRoot = '/'
+    }
+    var siteMeta = {
+        url: "https://androidperformance.com/en",
+        root: siteMetaRoot,
+        author: "Gracker"
+    }
+</script>
+
+        <!-- import experimental options here -->
+        <!-- Custom Font -->
+
+        <!-- jquery (must load before main.js) -->
+        <script src="/en/lib/jquery.min.js" defer></script>
+        <!-- main func (depends on jQuery) -->
+        <script src="/en/scripts/main.js" defer></script>
+        <script>
+    (function () {
+      function scheduleAfterLoad(task, delay, idleTimeout) {
+        function run() {
+          window.setTimeout(function () {
+            if (window.requestIdleCallback) {
+              window.requestIdleCallback(task, { timeout: idleTimeout || 3000 })
+            } else {
+              task()
+            }
+          }, delay || 0)
+        }
+
+        if (document.readyState === 'complete') {
+          run()
+        } else {
+          window.addEventListener('load', run, { once: true })
+        }
+      }
+
+      function loadScript(src, options) {
+        options = options || {}
+        if (options.id && document.getElementById(options.id)) return
+
+        var done = false
+        var script = document.createElement('script')
+        script.src = src
+        script.async = true
+        if (options.id) script.id = options.id
+        if (options.crossOrigin) script.crossOrigin = options.crossOrigin
+        if (options.referrerPolicy) script.referrerPolicy = options.referrerPolicy
+        script.onload = function () {
+          done = true
+          if (options.onload) options.onload()
+        }
+        script.onerror = function () {
+          done = true
+          if (script.parentNode) script.parentNode.removeChild(script)
+        }
+        if (options.timeout) {
+          window.setTimeout(function () {
+            if (done) return
+            script.onload = null
+            script.onerror = null
+            if (script.parentNode) script.parentNode.removeChild(script)
+          }, options.timeout)
+        }
+        document.head.appendChild(script)
+      }
+
+      function loadStyle(href, id) {
+        if (id && document.getElementById(id)) return
+        var link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = href
+        if (id) link.id = id
+        document.head.appendChild(link)
+      }
+
+      scheduleAfterLoad(function () {
+        if (!document.querySelector('[data-fancybox]')) return
+        loadStyle('/en/lib/fancybox/fancybox.css', 'fancybox-css')
+        loadScript('/en/lib/fancybox/fancybox.umd.js', {
+          id: 'fancybox-js',
+          timeout: 4000,
+          onload: function () {
+            if (window.Fancybox) window.Fancybox.bind('[data-fancybox]')
+          },
+        })
+      }, 1000, 3000)
+
+
+
+
+      scheduleAfterLoad(function () {
+        window.dataLayer = window.dataLayer || []
+        window.gtag = window.gtag || function () { window.dataLayer.push(arguments) }
+        window.gtag('js', new Date())
+        loadScript('https://www.googletagmanager.com/gtag/js?id=UA-50993302-2', {
+          id: 'gtag-js',
+          timeout: 4000,
+          onload: function () {
+            window.gtag('config', 'UA-50993302-2')
+          },
+        })
+      }, 4000, 3000)
+    })();
+</script>
+
+        <!-- search -->
+            <div class="site-search site-search-loading local-search-shell">
+    <div class="algolia-popup popup local-search-popup" role="dialog" aria-modal="true" aria-label="Search posts">
+        <div class="algolia-search local-search-header">
+            <div class="algolia-search-input-icon">
+                <i class="iconfont-archer">&#xe627;</i>
+            </div>
+            <div class="algolia-search-input local-search-input">
+                <input id="local-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search for Posts">
+            </div>
+            <button class="popup-btn-close local-search-close" type="button" aria-label="Close search">
+                <i class="iconfont-archer" aria-hidden="true">&#xe609;</i>
+            </button>
+        </div>
+
+        <div class="algolia-results local-search-results">
+            <div
+                id="local-search-config"
+                data-path="/en/search.xml"
+                data-per-page="10"
+                data-empty="We did not find any results for: ${query}"
+                data-stats="${hits} results found"
+                data-loading="Loading search index..."
+                data-error="Failed to load the search index. Please try again later."></div>
+            <div id="local-search-stats" class="algolia-stats"></div>
+            <div id="local-search-hits"></div>
+        </div>
+    </div>
+</div>
+
+            <script src="/en/scripts/local-search.js" async></script>
+        <!-- async load share.js on first click -->
+            <script>
+                (function(){
+                  var loaded = false
+                  function loadShare(){
+                    if (loaded) return
+                    loaded = true
+                    var s = document.createElement('script')
+                    s.src = '/en/scripts/share.js'
+                    s.async = true
+                    document.head.appendChild(s)
+                  }
+                  document.addEventListener('click', function(e){
+                    var t = e.target
+                    if (!t) return
+                    if (t.closest && t.closest('.share-wrapper')) { loadShare() }
+                    else if (t.classList && t.classList.contains('share-wrapper')) { loadShare() }
+                  }, true)
+                })();
+            </script>
+        <!-- mermaid -->
+    </body>
+</html>

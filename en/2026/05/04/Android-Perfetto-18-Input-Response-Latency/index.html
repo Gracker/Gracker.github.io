@@ -1,0 +1,2140 @@
+<!DOCTYPE html>
+<html lang="en">
+    <!-- title -->
+            <!-- keywords -->
+
+                  <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <meta name="author" content="Gracker">
+                    <meta name="renderer" content="webkit">
+                    <meta name="copyright" content="Gracker">
+                      <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,Optimization,Startup,Perfetto,Systrace,RenderThread,Java,Responsiveness,Smoothness">
+                          <meta name="description" content="Technical blog about Android system performance optimization">
+                          <meta name="description" content="This article addresses a topic easily overshadowed by startup speed and smoothness: first-frame interaction response. It asks how long the screen takes to provide the first frame of feedback after a u">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Android Perfetto Series 18: Response Latency in Practice, from Input Events to First-Frame Feedback">
+<meta property="og:url" content="https://androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/index.html">
+<meta property="og:site_name" content="Android Performance">
+<meta property="og:description" content="This article addresses a topic easily overshadowed by startup speed and smoothness: first-frame interaction response. It asks how long the screen takes to provide the first frame of feedback after a u">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://androidperformance.com/en/images/Perfetto-11-18-Diagrams/09-input-to-present.png">
+<meta property="og:image" content="https://androidperformance.com/en/images/Perfetto-11-18-Diagrams/10-scroll-response.png">
+<meta property="article:published_time" content="2026-05-04T02:18:00.000Z">
+<meta property="article:modified_time" content="2026-09-19T16:52:22.728Z">
+<meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Android">
+<meta property="article:tag" content="Perfetto">
+<meta property="article:tag" content="Performance">
+<meta property="article:tag" content="Input">
+<meta property="article:tag" content="Latency">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://androidperformance.com/en/images/Perfetto-11-18-Diagrams/09-input-to-present.png">
+                            <meta http-equiv="Cache-control" content="no-cache">
+                            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+                            <link rel="icon" href="/en/assets/favicon.ico">
+                                <title>
+                                  Android Perfetto Series 18: Response Latency in Practice, from Input Events to First-Frame Feedback · Android Performance
+                                </title>
+                                
+<link rel="canonical" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">
+                                  <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/en/font/Oswald-Regular.woff2") format('woff2'),
+             url("/en/font/Oswald-Regular.ttf") format('truetype');
+        font-display: swap;
+    }
+
+    body {
+        margin: 0;
+    }
+
+    /* Removed initial hide to show content immediately */
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(
+            -45deg,
+            #444 0,
+            #444 80px,
+            #333 80px,
+            #333 160px
+        );
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+</style>
+
+                                    <link id="stylesheet-base" rel="stylesheet" href="/en/css/style.css">
+                                    <link id="stylesheet-mobile" rel="stylesheet" href="/en/css/mobile.css" media="screen and (max-width: 960px)">
+                                    <link id="stylesheet-theme-dark" rel="stylesheet" href="/en/css/dark.css">
+                                    <link id="stylesheet-custom" rel="stylesheet" href="/en/css/custom.css">
+                                    <link rel="preload" href="/en/lib/jquery.min.js" as="script">
+                                    <link rel="preload" href="/en/scripts/main.js" as="script">
+                                    <!-- algolia -->
+                                                    <!-- Hreflang Tags -->
+                                                    
+                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2026/05/04/Android-Perfetto-18-Input-Response-Latency/" />
+                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/" />
+                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/" />
+                  <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/en/atom.xml" title="Android Performance" type="application/atom+xml">
+</head>
+
+        <body class="post-body">
+        <!-- header -->
+        <header class="header header-mobile">
+    <!-- top read progress line -->
+    <div class="header-element">
+        <div class="read-progress"></div>
+    </div>
+    <!-- sidebar menu button -->
+    <div class="header-element">
+        <div
+            class="header-sidebar-menu">
+                    <div style="padding-left: 1px;">&#xe775;</div>
+        </div>
+    </div>
+    <!-- header actions -->
+    <div class="header-actions">
+        <!-- search button -->
+            <span class="header-search-btn header-element popup-trigger" role="button" aria-label="Search" data-tooltip="Search">
+                <span class="iconfont-archer search-icon" aria-hidden="true">&#xe627;</span>
+            </span>
+        <!-- theme mode switch button -->
+        <span class="header-theme-btn header-element" role="button" aria-label="Theme" data-tooltip="Theme">
+            <span aria-hidden="true">&#9680;</span>
+        </span>
+        <!-- language transition button -->
+        <span class="header-lang-btn header-element" data-tooltip="Language">
+            <a href="javascript:void(0)" onclick="toggleLanguage()" class="lang-text" aria-label="Language">EN</a>
+            <script>
+                // Update language button text based on current path
+                (function() {
+                    var path = window.location.pathname;
+                    var isEn = /^\/en(\/|$)/.test(path);
+                    var langBtn = document.querySelector('.header-lang-btn .lang-text');
+                    if (langBtn) {
+                        langBtn.textContent = isEn ? 'CN' : 'EN';
+                    }
+                })();
+                
+                function toggleLanguage() {
+                    var path = window.location.pathname;
+                    var isEn = /^\/en(\/|$)/.test(path);
+
+                    if (isEn) {
+                        var newPath = path.replace(/^\/en(\/|$)/, '/');
+                        if (newPath === '') newPath = '/';
+                        window.location.href = newPath;
+                    } else {
+                        var suffix = path;
+                        if (suffix === '/') suffix = '';
+                        window.location.href = '/en' + suffix;
+                    }
+                }
+            </script>
+        </span>
+        <!-- home button -->
+        <span class="home-link header-element">
+            <a href="/en/" aria-label="Home" data-tooltip="Home">
+                <svg class="home-icon" aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="m3 10.5 9-7 9 7"></path>
+                    <path d="M5 9.5V21h14V9.5"></path>
+                    <path d="M10 21v-6h4v6"></path>
+                </svg>
+            </a>
+        </span>
+    </div>
+    <!-- toggle banner -->
+                <div class="banner">
+                        <div class="blog-title header-element">
+                            <a href="/en/">
+                                Android Performance
+                            </a>
+                        </div>
+                        <div class="post-title header-element">
+                            <a href="#" class="post-name">Android Perfetto Series 18: Response Latency in Practice, from Input Events to First-Frame Feedback</a>
+                        </div>
+                </div>
+</header>
+
+        <!-- fixed footer -->
+        <footer class="footer-fixed">
+    <!-- donate button -->
+    <div class="donate-popup donate-popup--hidden">
+    <div class="donate-popup__title">Buy Me A Coffee</div>
+    <div class="donate-popup__content">
+        <div class="donate-popup__content-description">If you find this article helpful, consider buying me a coffee.</div>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Wechat"
+            alt="Wechat"
+            src="/en/assets/donate-wechat.webp"
+        ></img>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Alipay"
+            alt="Alipay"
+            src="/en/assets/donate-alipay.png"
+        ></img>
+    </div>
+</div>
+
+    <div
+        title="Donate to the author"
+        class="footer-fixed-btn footer-fixed-btn--hidden donate-btn"
+    >
+        <span aria-hidden="true">&#165;</span>
+    </div>
+
+    <!-- back to top button -->
+    <div class="footer-fixed-btn footer-fixed-btn--hidden back-top">
+        <div>&#xe639;</div>
+    </div>
+</footer>
+
+        <!-- wrapper -->
+        <div class="wrapper">
+            <div class="site-intro" style="    height:50vh;
+">
+    <!-- 主页  -->
+    <!-- 404页  -->
+    <div class="site-intro-placeholder"></div>
+    <picture>
+            <source type="image/webp" srcset="/en/intro/post-bg.webp">
+        <img class="site-intro-img"
+             src="/en/intro/post-bg.jpg"
+             alt=""
+loading="lazy"             decoding="async"
+             fetchpriority="auto"
+             sizes="100vw">
+    </picture>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+                Android Perfetto Series 18: Response Latency in Practice, from Input Events t...
+            <!-- 404 -->
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            <!-- 404 -->
+        </p>
+        <!-- 文章页 meta -->
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                    <div class="post-intro-tags" >
+        <span class="post-category" data-categories="Android">
+            <span class="iconfont-archer post-category-icon" aria-hidden="true">&#xe666;</span>
+            <span class="post-category-text">
+                Android
+            </span>
+        </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Input">Input</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Latency">Latency</a>
+</div>
+
+                <!-- 文章字数统计 -->
+                    <div class="post-intro-read">
+                        <span>Word count: <span class="post-count word-count">6.5k</span>Reading time: <span class="post-count reading-time">40 min</span></span>
+                    </div>
+                <div class="post-intro-meta">
+                    <!-- 撰写日期 -->
+                    <span class="iconfont-archer post-intro-calander">&#xe676;</span>
+                    <span class="post-intro-time">2026/05/04</span>
+                    <!-- 文章分享 -->
+                    <span class="share-wrapper">
+                        <span class="iconfont-archer share-icon">&#xe71d;</span>
+                        <span class="share-text">Share</span>
+                        <ul class="share-list">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+    </div>
+</div>
+
+            
+            <script>
+  (function () {
+    var done = false
+
+    function fontLoaded() {
+      if (done) return
+      done = true
+
+      var introTitle = document.getElementsByClassName('intro-title')[0]
+      var introSubtitle = document.getElementsByClassName('intro-subtitle')[0]
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+
+      if (introTitle) introTitle.classList.add('intro-fade-in')
+      if (introSubtitle) introSubtitle.classList.add('intro-fade-in')
+      if (postIntros) postIntros.classList.add('post-fade-in')
+    }
+
+    function waitForLocalFont() {
+      if (document.fonts && document.fonts.load) {
+        Promise.race([
+          document.fonts.load('1em Oswald-Regular'),
+          new Promise(function (resolve) { setTimeout(resolve, 1000) })
+        ]).then(fontLoaded, fontLoaded)
+      } else {
+        fontLoaded()
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', waitForLocalFont, false)
+    } else {
+      waitForLocalFont()
+    }
+  })()
+</script>
+
+            <img class="loading" src="/en/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" alt="loading">
+            <div class="container container-unloaded">
+                <main class="main post-page">
+    <article class="article-entry">
+        <p>This article addresses a topic easily overshadowed by startup speed and smoothness: first-frame interaction response. It asks how long the screen takes to provide the first frame of feedback after a user action. Complete page loading and stability later in an animation require other metrics.</p>
+<p>After tapping a button, how long until its pressed state appears? After tapping a WeChat conversation, how long until the first frame of the conversation page starts moving? After swiping a list, how long until its content follows the finger? These questions relate to slow startup and dropped frames, but need their own measurement definitions.</p>
+<p>We use Perfetto to break down this interval: from InputReader <code>read_time</code>, through the App receiving the event, to the first frame’s present. The primary metric, <code>input_to_present_ms</code>, measures only input read to the associated frame’s present. It does not cover touch IC latency, delays before driver reporting, display scanning, or panel response. By the end, you should be able to define a start, endpoint, capture configuration, SQL metrics, and supplementary App markers for a tap or scroll scenario.</p>
+<p>The article examines response latency through four independent measurements—read&#x2F;dispatch, handling, ACK→first frame, and scroll responsiveness. Each comes with capture configuration, the first tracks to inspect in the UI, and SQL. It then covers five common attribution paths and the respective boundaries of high-speed cameras and Perfetto.</p>
+<span id="more"></span>
+
+<p><a id="series"></a></p>
+<h2 id="Perfetto-Series-Catalog"><a href="#Perfetto-Series-Catalog" class="headerlink" title="Perfetto Series Catalog"></a>Perfetto Series Catalog</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/03/27/Android-Perfetto-101/">Android Perfetto Series Catalog</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto Series 1: Introduction to Perfetto</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto Series 4: Opening Large Traces via Command Line</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Choreographer-based Rendering Flow</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto Series 6: Why 120Hz? Advantages and Challenges</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto Series 7: MainThread and RenderThread Deep Dive</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto Series 8: Understanding Vsync and Performance Analysis</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto Series 9: Interpreting CPU Information</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto Series 10: Binder Scheduling and Lock Contention</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-11-PerfettoSQL-TraceProcessor-Automation/">Android Perfetto Series 11: PerfettoSQL, Trace Processor and Regression Detection</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">Android Perfetto Series 12: Trace Dataflow and Data Loss</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event and App Field Traces</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto Series 14: heapprofd and Memory Profiling</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces and Long-running Field Tracing</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters and Hardware Bottlenecks</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-17-Engineering-Domain-And-Platform-Tracing/">Android Perfetto Series 17: Scenario Automation and Platform Tracing</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto Series 18: Input Response Latency</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV1oi82efE4D/?vd_source=0c6d2191e785de0a36dc21a9da7e664e">Video (Bilibili) - Android Perfetto Basics and Case Studies</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV17A6bBLECu/">Video (Bilibili) - Android Perfetto: Trace Graph Types - AOSP, WebView, Flutter + OEM System Optimization</a></li>
+</ol>
+<h2 id="This-Article-Covers-Only-the-First-Frame-After-an-Interaction"><a href="#This-Article-Covers-Only-the-First-Frame-After-an-Interaction" class="headerlink" title="This Article Covers Only the First Frame After an Interaction"></a>This Article Covers Only the First Frame After an Interaction</h2><p>The earlier Systrace response-speed series covered response latency more broadly: startup, navigation, screen on&#x2F;off, unlocking, a busy system, Binder, and other scenarios. The smoothness series covered the stability of consecutive frames. Parts 07 and 08 of the Perfetto series also broke down the frame path through MainThread, RenderThread, Vsync, and SurfaceFlinger.</p>
+<p>This article adds just one segment:</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">User input</span><br><span class="line">  -&gt; InputReader reads the event</span><br><span class="line">  -&gt; InputDispatcher dispatches it to the target window</span><br><span class="line">  -&gt; The App main thread receives input</span><br><span class="line">  -&gt; The App handles input and requests the next frame</span><br><span class="line">  -&gt; RenderThread submits a buffer</span><br><span class="line">  -&gt; SurfaceFlinger composites and presents</span><br><span class="line">  -&gt; The user sees the first frame of feedback</span><br></pre></td></tr></table></figure>
+
+<p>We consistently call the primary metric <code>input_to_present_ms</code>: from <code>android_input_events.read_time</code> to the associated frame’s present, represented by <code>end_to_end_latency_dur</code> in SQL. It answers “how long after the tap does the first frame of feedback appear?”, rather than “how long until the whole page loads?” or “does the animation drop frames?” The standard library’s present is a candidate association: <code>is_speculative_frame=false</code> means only that an input-handling slice overlaps a doFrame on the same thread. It proves neither business causality nor a visual change on the target layer. Queries below therefore output <code>estimated_input_to_present_ms</code>. Only after separately checking the target layer, frame token, actual present, and business state can it be promoted to confirmed <code>input_to_present_ms</code>.</p>
+<p>If you start from <code>event_time</code> or a business marker, report a separate field; do not mix it with <code>input_to_present_ms</code> for comparisons.</p>
+<p><img src="/en/images/Perfetto-11-18-Diagrams/09-input-to-present.png" alt="Timeline from input to candidate present"></p>
+<p><em>Illustration: ACK and frame display are different stages. A candidate present still needs confirmation against the layer and business state; it cannot directly stand for the first user-visible frame.</em></p>
+<h2 id="Break-Response-Latency-into-Four-Metrics"><a href="#Break-Response-Latency-into-Four-Metrics" class="headerlink" title="Break Response Latency into Four Metrics"></a>Break Response Latency into Four Metrics</h2><p>Discussions of slow response often mix different concepts. Before analyzing an interaction, separate it into four metrics.</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Start</th>
+<th>End</th>
+<th>Question it answers</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Dispatch latency</td>
+<td>InputDispatcher sends the event</td>
+<td>App receives the event</td>
+<td>Are system dispatch and InputChannel slow?</td>
+</tr>
+<tr>
+<td>Handling latency</td>
+<td>App receives the event</td>
+<td>App sends ACK</td>
+<td>Is App input handling slow?</td>
+</tr>
+<tr>
+<td><code>input_to_present_ms</code></td>
+<td>Input read (<code>read_time</code>)</td>
+<td>Associated frame present</td>
+<td>How soon does the user see the first frame of feedback?</td>
+</tr>
+<tr>
+<td>Completion latency</td>
+<td>Business trigger</td>
+<td>Page or animation becomes stable</td>
+<td>How long does the entire operation take?</td>
+</tr>
+</tbody></table>
+<p>Users are especially sensitive to <code>input_to_present_ms</code>. Fast initial feedback followed by content arriving in stages feels responsive. Slow initial feedback can feel like “nothing happened when I tapped,” even if the subsequent animation is stable.</p>
+<p>Taps and scrolls also have different endpoints:</p>
+<ul>
+<li>Button tap: the endpoint may be the pressed-state present, the first popup frame’s present, or the first page-transition frame’s present.</li>
+<li>Conversation tap: it may be the first frame of the conversation page’s entry animation, or completion of drawing the first message’s content.</li>
+<li>Finger scroll: it should be the present at which content first visibly moves.</li>
+</ul>
+<p>Perfetto helps locate internal system timing, but whether the first frame actually contains a visual change often needs calibration with App markers or external visual tools.</p>
+<p>Also distinguish three “input times”:</p>
+<ul>
+<li><code>event_time</code>: when the input event occurred. Earlier than <code>read_time</code>, but still not the touch firmware, electrical signal, or an externally visible starting point.</li>
+<li><code>read_time</code>: when InputReader reads the event. The end-to-end field in <code>android_input_events</code> measures from here to present.</li>
+<li><code>dispatch_ts</code> &#x2F; <code>receive_ts</code>: when InputDispatcher sends the event and the App receives it, used to separate system dispatch from App handling.</li>
+</ul>
+<p>Do not label all of these “from the tap” in reports. If measurement starts at <code>read_time</code>, say input read; if it starts at a business click handler, say App marker. Numbers with different starting points are not directly comparable.</p>
+<p>Before writing SQL, establish the scenario’s object dictionary. At minimum, include the target package, InputChannel, target window, target layer, business markers, and expected endpoint:</p>
+<figure class="highlight yaml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="attr">scenario_id:</span> <span class="string">conversation_click</span></span><br><span class="line"><span class="attr">process_name:</span> <span class="string">com.example.app</span></span><br><span class="line"><span class="attr">input_channel:</span> <span class="string">com.example.app/com.example.ChatActivity</span></span><br><span class="line"><span class="attr">target_window:</span> <span class="string">ChatActivity</span></span><br><span class="line"><span class="attr">target_layer:</span> <span class="string">TX</span> <span class="bullet">-</span> <span class="string">com.example.app/com.example.ChatActivity#0</span></span><br><span class="line"><span class="attr">business_markers:</span></span><br><span class="line">  <span class="attr">click:</span> <span class="string">Conversation#Click</span></span><br><span class="line">  <span class="attr">transition_start:</span> <span class="string">Conversation#TransitionStart</span></span><br><span class="line">  <span class="attr">first_content_drawn:</span> <span class="string">Conversation#FirstContentDrawn</span></span><br><span class="line"><span class="attr">expected_endpoint:</span> <span class="string">transition_first_presented_frame</span></span><br><span class="line"><span class="attr">owner_confirmed:</span> <span class="literal">true</span></span><br></pre></td></tr></table></figure>
+
+<p>Automation can first generate candidate objects from package and window names, but reports should use only manually confirmed objects. Otherwise, when a trace contains multiple windows, popups, SurfaceViews, or overlays, SQL can easily associate an input event with the wrong layer.</p>
+<p>Handle multiple displays and foldables explicitly in the dictionary. Input events are dispatched by display: external monitors, multi-display automotive systems, and a foldable’s inner and outer displays can contain windows and channels with identical names at the same time. <code>android_motion_events</code> &#x2F; <code>android_key_events</code> have a <code>display_id</code> column, allowing event IDs to identify the destination display. The round-trip table, <code>android_input_events</code>, has no display column. When raw inputevent data is available, normalize the event ID representation before cross-checking those two tables. ATrace string IDs may be hexadecimal, whereas raw <code>event_id</code> values are integers; do not directly join the columns as equal strings. Folding and unfolding can also trigger display switches and window recreation, replacing layer and channel names. Do not combine different postures into one baseline. Record posture (folded&#x2F;unfolded) as a separate dimension in the scenario dictionary, and compare runs only within the same posture.</p>
+<p>Version interaction scenarios as schemas too. A minimal contract for a tap scenario can look like this:</p>
+<figure class="highlight yaml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br></pre></td><td class="code"><pre><span class="line"><span class="attr">schema_version:</span> <span class="string">input_response_v1</span></span><br><span class="line"><span class="attr">scenario_id:</span> <span class="string">conversation_click</span></span><br><span class="line"><span class="attr">interaction_type:</span> <span class="string">click</span></span><br><span class="line"><span class="attr">start_event_policy:</span></span><br><span class="line">  <span class="attr">preferred:</span> <span class="string">ACTION_UP</span></span><br><span class="line">  <span class="attr">fallback:</span> <span class="string">Conversation#Click</span></span><br><span class="line"><span class="attr">endpoint_policy:</span></span><br><span class="line">  <span class="attr">visual_endpoint:</span> <span class="string">transition_first_presented_frame</span></span><br><span class="line">  <span class="attr">business_state_marker:</span> <span class="string">Conversation#FirstContentDrawn</span></span><br><span class="line"><span class="attr">process_name:</span> <span class="string">com.example.app</span></span><br><span class="line"><span class="attr">input_channel:</span> <span class="string">com.example.app/com.example.ChatActivity</span></span><br><span class="line"><span class="attr">target_layer:</span> <span class="string">TX</span> <span class="bullet">-</span> <span class="string">com.example.app/com.example.ChatActivity#0</span></span><br><span class="line"><span class="attr">required_markers:</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">Conversation#Click</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">Conversation#TransitionStart</span></span><br><span class="line"><span class="attr">required_counters:</span> []</span><br><span class="line"><span class="attr">association_method:</span></span><br><span class="line">  <span class="attr">primary:</span> <span class="string">android_input_events.frame_id</span></span><br><span class="line">  <span class="attr">fallback:</span> <span class="string">target_layer_present_after_marker</span></span><br><span class="line"><span class="attr">fallback_policy:</span></span><br><span class="line">  <span class="attr">missing_inputevent:</span> <span class="string">app_marker_plus_frametimeline</span></span><br><span class="line">  <span class="attr">missing_frametimeline:</span> <span class="string">app_marker_plus_external_video</span></span><br><span class="line"><span class="attr">evidence_grade_rules:</span></span><br><span class="line">  <span class="attr">confirmed:</span> <span class="string">verified_target_layer_present_and_business_state</span></span><br><span class="line">  <span class="attr">likely:</span> <span class="string">frame_associated_but_no_external_video</span></span><br><span class="line">  <span class="attr">degraded:</span> <span class="string">missing_inputevent_or_frametimeline</span></span><br><span class="line"><span class="attr">privacy_notes:</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">do_not_log_conversation_id</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">channel_and_layer_name_allowed</span></span><br></pre></td></tr></table></figure>
+
+<p>For scrolling, refine the endpoint from “frame present” to “the present where content first visibly moves”:</p>
+<figure class="highlight yaml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line"><span class="attr">schema_version:</span> <span class="string">input_response_v1</span></span><br><span class="line"><span class="attr">scenario_id:</span> <span class="string">feed_first_scroll</span></span><br><span class="line"><span class="attr">interaction_type:</span> <span class="string">scroll</span></span><br><span class="line"><span class="attr">start_event_policy:</span></span><br><span class="line">  <span class="attr">preferred:</span> <span class="string">first_effective_ACTION_MOVE</span></span><br><span class="line">  <span class="attr">touch_slop_px:</span> <span class="string">device_scaled_touch_slop</span>  <span class="comment"># Read from ViewConfiguration; do not hardcode 8px across devices</span></span><br><span class="line"><span class="attr">endpoint_policy:</span></span><br><span class="line">  <span class="attr">visual_endpoint:</span> <span class="string">first_scroll_offset_change_present</span></span><br><span class="line"><span class="attr">required_counters:</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">Feed#ScrollOffsetY</span></span><br><span class="line"><span class="attr">sample_policy:</span></span><br><span class="line">  <span class="attr">scroll_offset_counter:</span> <span class="string">each_nonzero_consumed_scroll_delta</span></span><br><span class="line"><span class="attr">report_fields:</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">first_effective_move_ts</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">first_offset_change_ts</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">offset_delta_px</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">move_to_offset_change_ms</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">offset_change_to_present_ms</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="Trace-Capture-Configuration"><a href="#Trace-Capture-Configuration" class="headerlink" title="Trace Capture Configuration"></a>Trace Capture Configuration</h2><p>Capture has two tiers:</p>
+<table>
+<thead>
+<tr>
+<th>Preset</th>
+<th>Build&#x2F;scenario</th>
+<th>Data sources</th>
+<th>Reporting scope</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>lab_input_debug</code></td>
+<td>userdebug&#x2F;eng, short laboratory window</td>
+<td>input&#x2F;view&#x2F;gfx ATrace, FrameTimeline, sched, App markers, plus raw <code>android.input.inputevent</code></td>
+<td>Round trip + candidate input-to-present; visual endpoint confirmed separately</td>
+</tr>
+<tr>
+<td><code>field_input_response_low_overhead</code></td>
+<td>user&#x2F;field, platform-controlled capture</td>
+<td>App markers, FrameTimeline&#x2F;sched, input&#x2F;view ATrace where available by version, trigger metadata</td>
+<td>Round trip when ATrace is complete; otherwise fall back to App-marker measurement</td>
+</tr>
+</tbody></table>
+<p>Local or laboratory analysis can enable the more complete input data source. This short-trace configuration reproduces tap&#x2F;scroll response, with particular attention to <code>android.input.inputevent</code> and <code>atrace_categories: &quot;input&quot;</code>:</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br></pre></td><td class="code"><pre><span class="line">buffers &#123;</span><br><span class="line">  size_kb: <span class="number">98304</span></span><br><span class="line">  fill_policy: RING_BUFFER</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">duration_ms: <span class="number">10000</span></span><br><span class="line">flush_period_ms: <span class="number">5000</span></span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_wakeup_new&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/cpu_frequency&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;power/cpu_idle&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;input&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;view&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;gfx&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;wm&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;am&quot;</span></span><br><span class="line">      atrace_categories: <span class="string">&quot;binder_driver&quot;</span></span><br><span class="line">      atrace_apps: <span class="string">&quot;com.example.app&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;android.surfaceflinger.frametimeline&quot;</span></span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    process_stats_config &#123;</span><br><span class="line">      scan_all_processes_on_start: <span class="literal">true</span></span><br><span class="line">      proc_stats_poll_ms: <span class="number">1000</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.sys_stats&quot;</span></span><br><span class="line">    sys_stats_config &#123;</span><br><span class="line">      cpufreq_period_ms: <span class="number">1000</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.system_info&quot;</span></span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;android.input.inputevent&quot;</span></span><br><span class="line">    android_input_event_config &#123;</span><br><span class="line">      mode: TRACE_MODE_TRACE_ALL</span><br><span class="line">      trace_dispatcher_input_events: <span class="literal">true</span></span><br><span class="line">      trace_dispatcher_window_dispatch: <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p><code>android.input.inputevent</code> targets debuggable system builds—controlled environments such as userdebug&#x2F;eng. <code>TRACE_MODE_TRACE_ALL</code> records input events handled by the system and is suitable only for local devices and testing.</p>
+<p>Do not depend on <code>android.input.inputevent</code> on field&#x2F;user builds. To reduce privacy exposure even in a debuggable, controlled environment, use <code>TRACE_MODE_USE_RULES</code>, strict matching rules, review of secure&#x2F;IME&#x2F;spy windows, and access controls. Rules mode does not turn it into an ordinary production-capture capability. Input events may be delivered to the foreground window, SystemUI, IME, or spy windows simultaneously; poorly designed <code>match_any_packages</code> &#x2F; <code>match_all_packages</code> rules can broaden collection scope.</p>
+<p>Field presets must include secure windows, IME, spy windows, multi-target dispatch, redaction, retention periods, and access controls in their review criteria.</p>
+<p>An ordinary App cannot start system ftrace, FrameTimeline, or <code>android.input.inputevent</code> sessions itself. <code>&lt;profileable android:shell=&quot;true&quot; /&gt;</code> is useful for allowing local profiling of release builds with CPU&#x2F;memory profilers. App tracing is available by default for all Apps on Android 12+; on Android 11 and earlier, <code>android.os.Trace</code> still requires attention to profileable&#x2F;debuggable boundaries.</p>
+<p>It does not, however, grant an ordinary App on a user build permission to start system inputevent, ftrace, or SurfaceFlinger sessions itself.</p>
+<p><code>android.input</code> includes two different sources. <code>android_key_events/android_motion_events</code> come from raw <code>android.input.inputevent</code>. In contrast, <code>android_input_events</code> reconstructs round trips and frame associations from ATrace slices such as <code>sendMessage/receiveMessage</code>, <code>deliverInputEvent</code>, and <code>UnwantedInteractionBlocker::notifyMotion</code>. Do not conflate them. Round trips may exist without raw inputevent enabled; enabling only raw inputevent without ATrace does not automatically produce round trips. Actual availability depends on the system version, the presence of these instrumentation points, and whether categories such as input&#x2F;view&#x2F;gfx were captured.</p>
+<p>Define fallbacks in advance:</p>
+<table>
+<thead>
+<tr>
+<th>Missing signal</th>
+<th>What can still be reported</th>
+<th>What cannot be reported</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Raw <code>android.input.inputevent</code> missing</td>
+<td>Complete ATrace can still reconstruct round trips and candidate frame associations</td>
+<td>Raw motion&#x2F;key details and display information</td>
+</tr>
+<tr>
+<td>Input ATrace send&#x2F;receive or ACK slices missing</td>
+<td>App markers, FrameTimeline&#x2F;scheduling context</td>
+<td>Complete round trips; raw inputevent tables cannot directly replace them</td>
+</tr>
+<tr>
+<td>FrameTimeline missing</td>
+<td>Input round trips, App markers, thread and SurfaceFlinger clues</td>
+<td>Associated frame, <code>input_to_present_ms</code></td>
+</tr>
+<tr>
+<td>SurfaceView&#x2F;games&#x2F;video</td>
+<td>App markers, layers, external video, vendor tools</td>
+<td>First visible change established solely through FrameTimeline</td>
+</tr>
+<tr>
+<td>Data loss &#x2F; clock sync anomalies</td>
+<td>Local observations from surviving evidence</td>
+<td>Strong conclusions and precise cross-source durations</td>
+</tr>
+</tbody></table>
+<p>State FrameTimeline’s limits too: it requires Android 12 or later. The official documentation currently says SurfaceView is unsupported, so video, games, and maps cannot rely on FrameTimeline alone to identify the first visible frame change. Calibrate with layers, App markers, external video, or vendor graphics tools.</p>
+<p><code>input_to_present_ms</code> shows only that an input event was associated with a frame’s present. Whether this was the target UI’s first visible change still needs confirmation through the target layer, business markers, scroll counters, screenshots&#x2F;video, or domain tools. A populated <code>frame_id</code> is not sufficient proof of visual change either.</p>
+<p>For deeper local investigation, Winscope’s SurfaceFlinger layers&#x2F;transactions sources can help inspect window and layer state. These sources can be heavy, particularly <code>MODE_ACTIVE</code> and buffer&#x2F;HWC trace flags, which substantially increase data volume. Reserve them for short laboratory traces.</p>
+<p>Field investigations still rely on the controlled presets, triggers, business markers, and privacy rules from Parts 13, 15, and 17.</p>
+<p>Run data-quality checks immediately after capture. Input analysis depends heavily on timing order and FrameTimeline associations; ftrace or central-buffer data loss requires downgrading the report:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> <span class="keyword">value</span> <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line">  <span class="keyword">AND</span> (</span><br><span class="line">    severity <span class="keyword">IN</span> (<span class="string">&#x27;error&#x27;</span>, <span class="string">&#x27;data_loss&#x27;</span>)</span><br><span class="line">    <span class="keyword">OR</span> name GLOB <span class="string">&#x27;ftrace_cpu_*overrun*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name GLOB <span class="string">&#x27;ftrace_cpu_*dropped*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name GLOB <span class="string">&#x27;traced_buf_*packet_loss&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name <span class="keyword">IN</span> (</span><br><span class="line">      <span class="string">&#x27;ftrace_setup_errors&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;ftrace_cpu_has_data_loss&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_buf_trace_writer_packet_loss&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_buf_chunks_overwritten&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_buf_chunks_discarded&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_buf_patches_failed&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_flushes_failed&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_final_flush_failed&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;android_input_event_parse_errors&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;frame_timeline_event_parser_errors&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;frame_timeline_unpaired_end_event&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;graphics_frame_event_parser_errors&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;clock_sync_failure&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;invalid_clock_snapshots&#x27;</span></span><br><span class="line">    )</span><br><span class="line">  )</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> name, idx;</span><br></pre></td></tr></table></figure>
+
+<p>Group these anomalies under <code>inputevent</code>, <code>FrameTimeline</code>, <code>ftrace/sched</code>, <code>central_buffer</code>, and <code>clock_sync</code>. An anomaly in any critical group must lower the evidence grade for <code>input_to_present_ms</code>.</p>
+<p><code>linux.sys_stats</code> adds CPU frequency samples, but frequency assessment still needs idle state, cluster&#x2F;cpuset, uclamp, thermal conditions, the frequency state immediately before the window, and whether the target thread actually ran on the relevant CPU&#x2F;cluster. This preset does not enable IRQ, softirq, or workqueue events by default. If you suspect hardirq, kworker, or softirq interference, use a separate short-window specialist preset.</p>
+<p>Keep IRQ&#x2F;softirq&#x2F;workqueue events in that short-window preset only: <code>irq/irq_handler_entry</code>, <code>irq/irq_handler_exit</code>, <code>irq/softirq_entry</code>, <code>irq/softirq_exit</code>, <code>irq/softirq_raise</code>, <code>workqueue/workqueue_execute_start</code>, and <code>workqueue/workqueue_execute_end</code>. Check ftrace overrun&#x2F;dropped after capture; do not put these events in the default field preset.</p>
+<h2 id="Which-Tracks-to-Inspect-First-in-Perfetto-UI"><a href="#Which-Tracks-to-Inspect-First-in-Perfetto-UI" class="headerlink" title="Which Tracks to Inspect First in Perfetto UI"></a>Which Tracks to Inspect First in Perfetto UI</h2><p>For a tap or scroll response, inspect in this order:</p>
+<ol>
+<li>InputReader &#x2F; InputDispatcher: verify that the event was read and dispatched to the target window.</li>
+<li>App main thread: verify arrival and whether the thread became Running promptly.</li>
+<li><code>Choreographer#doFrame</code>: determine whether the state change advances into the next frame through <code>Input</code>, <code>Insets Animation</code>, <code>Animation</code>, <code>Traversal</code>, or <code>Commit</code>. Input receive&#x2F;ACK need not occur inside doFrame; batched input may also be consumed through <code>CALLBACK_INPUT</code>.</li>
+<li>RenderThread: after the UI thread submits work, check for stalls in stages such as <code>syncFrameState</code>, <code>DrawFrame</code>, <code>dequeueBuffer</code>, and <code>queueBuffer</code>.</li>
+<li>FrameTimeline: check the associated frame’s expected&#x2F;actual timelines, token, <code>layer_name</code>, and association method.</li>
+<li>SurfaceFlinger: check timely buffer latching and whether HWC&#x2F;GPU composition, acquire&#x2F;release&#x2F;present fences, or other layers affect final presentation.</li>
+<li>CPU scheduling&#x2F;frequency: check the main thread, RenderThread, and InputDispatcher for Runnable waits, insufficient frequency, or abnormal CPU migration.</li>
+</ol>
+<p>Do not start by guessing from the longest slice. Connect the input event to the first frame of feedback, then determine where the time went.</p>
+<h2 id="Tap-Scenarios-From-DOWN-x2F-UP-to-the-First-Frame"><a href="#Tap-Scenarios-From-DOWN-x2F-UP-to-the-First-Frame" class="headerlink" title="Tap Scenarios: From DOWN&#x2F;UP to the First Frame"></a>Tap Scenarios: From DOWN&#x2F;UP to the First Frame</h2><p>Choose the starting point first. Products define “tap response” differently.</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Recommended start</th>
+<th>Recommended end</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Button pressed state</td>
+<td>ACTION_DOWN or input read</td>
+<td>First pressed-state frame present</td>
+</tr>
+<tr>
+<td>Tap confirmation</td>
+<td>ACTION_UP or click handler</td>
+<td>Target UI’s first frame present</td>
+</tr>
+<tr>
+<td>Page navigation</td>
+<td>Click handler &#x2F; business marker</td>
+<td>First transition frame present</td>
+</tr>
+<tr>
+<td>Content available</td>
+<td>Click handler &#x2F; business marker</td>
+<td>First-screen content marker</td>
+</tr>
+</tbody></table>
+<p>For “tap a conversation to enter the chat page,” inspect Perfetto in these steps:</p>
+<ol>
+<li>Find the corresponding ACTION_UP in <code>android_input_events</code> or on the InputDispatcher track.</li>
+<li>Measure dispatch to App receive to determine whether system dispatch is slow.</li>
+<li>Check whether the App main thread is scheduled promptly after receiving the event.</li>
+<li>Check the click handler for Binder, IO, lock waits, synchronous layout, and image decoding.</li>
+<li>Look for waits introduced by the <code>startActivity</code> Binder call, Activity launch, window creation, focus changes, starting window, transition, and target-layer visibility.</li>
+<li>Check whether the next <code>Choreographer#doFrame</code> advances state through <code>Animation</code>, <code>Traversal</code>, or <code>Commit</code>.</li>
+<li>Inspect RenderThread, FrameTimeline, and SurfaceFlinger to confirm the associated frame actually presents.</li>
+<li>Return to App markers and the object dictionary to confirm that this is the conversation page’s first user-visible frame.</li>
+</ol>
+<p>The easiest mistake here is that Perfetto can show an App drawing a frame that contains no visual change. The end of the App actual timeline means the App completed and submitted the frame; it does not mean the user has seen it.</p>
+<p>To confirm first-frame feedback, return to the frame associated with <code>android_input_events.end_to_end_latency_dur</code>, the SurfaceFlinger actual&#x2F;display frame, <code>layer_name</code>, token&#x2F;flow, and external evidence. Without business markers, the analyst must judge from UI screenshots, layer names, or external video.</p>
+<p>Specify the event contract before implementing it:</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Type</th>
+<th>Thread</th>
+<th>Meaning</th>
+<th>Report fields</th>
+<th>Privacy</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Conversation#Click</code></td>
+<td>slice</td>
+<td>UI thread</td>
+<td>Click-handler execution window</td>
+<td><code>business_marker_ts</code>, <code>click_handler_dur</code></td>
+<td>No conversation ID</td>
+</tr>
+<tr>
+<td><code>Conversation#TransitionStart</code></td>
+<td>short slice milestone</td>
+<td>UI thread</td>
+<td>Business-defined transition start</td>
+<td><code>transition_marker_ts</code></td>
+<td>No page parameters</td>
+</tr>
+<tr>
+<td><code>Conversation#FirstContentDrawn</code></td>
+<td>short slice milestone</td>
+<td>UI thread &#x2F; render callback</td>
+<td>Candidate business completion of first-screen content</td>
+<td><code>content_marker_ts</code>, <code>content_marker_seen</code></td>
+<td>No content text</td>
+</tr>
+<tr>
+<td><code>Feed#ScrollOffsetY</code></td>
+<td>counter</td>
+<td>UI thread</td>
+<td>Visible list displacement</td>
+<td><code>first_offset_change_ts</code>, <code>offset_delta_px</code></td>
+<td>Numeric values only</td>
+</tr>
+</tbody></table>
+<p><code>Conversation#FirstContentDrawn</code> is a <code>business_state_marker</code>, not a <code>visual_endpoint</code>. The final report must include <code>present_ts</code>, <code>associated_frame_id</code>, <code>layer_name</code>, and <code>association_method</code>. Without a present association, report only <code>content_marker_seen=true</code>; do not output <code>input_to_present_ms</code>.</p>
+<p>The following code adds three business markers to the conversation-tap scenario. Pay attention to naming: event names are fixed, and dynamic IDs do not enter trace sections.</p>
+<figure class="highlight kotlin"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">fun</span> <span class="title">onConversationClick</span><span class="params">(conversationId: <span class="type">String</span>)</span></span> &#123;</span><br><span class="line">    Trace.beginSection(<span class="string">&quot;Conversation#Click&quot;</span>)</span><br><span class="line">    <span class="keyword">try</span> &#123;</span><br><span class="line">        openConversation(conversationId)</span><br><span class="line">    &#125; <span class="keyword">finally</span> &#123;</span><br><span class="line">        Trace.endSection()</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">fun</span> <span class="title">onConversationTransitionStart</span><span class="params">()</span></span> &#123;</span><br><span class="line">    Trace.beginSection(<span class="string">&quot;Conversation#TransitionStart&quot;</span>)</span><br><span class="line">    Trace.endSection()</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">fun</span> <span class="title">onConversationFirstContentDrawn</span><span class="params">()</span></span> &#123;</span><br><span class="line">    Trace.beginSection(<span class="string">&quot;Conversation#FirstContentDrawn&quot;</span>)</span><br><span class="line">    Trace.endSection()</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>These markers represent click handling, transition start, and first-screen content completion. The latter two are milestone-style short slices: reports use only their <code>ts</code>, not <code>dur</code> as business duration. Use Perfetto SDK Track Event when you need strict instants, arguments, or flows. Perfetto supplies system timing; markers supply business meaning. The endpoint remains the associated frame’s present.</p>
+<p><code>android.os.Trace</code> &#x2F; ATrace work well for stable slice names and counters. Do not concatenate dynamic conversation IDs, page IDs, or experiment groups into section names. For arguments, flows, or cross-thread tracks, use Perfetto SDK Track Event from Part 13, or put business metadata in the same case package.</p>
+<p>A marker represents business state only; present time comes from the associated frame. Report <code>business_marker_ts</code>, <code>associated_frame_id</code>, <code>present_ts</code>, and <code>association_method</code> separately.</p>
+<h2 id="Scroll-Scenarios-From-the-First-Effective-MOVE-to-Content-Displacement"><a href="#Scroll-Scenarios-From-the-First-Effective-MOVE-to-Content-Displacement" class="headerlink" title="Scroll Scenarios: From the First Effective MOVE to Content Displacement"></a>Scroll Scenarios: From the First Effective MOVE to Content Displacement</h2><p>Scroll response is easier to misinterpret than tap response. When a finger first moves, the system receives many MOVE events, but the App may not yet have crossed touch slop. Event coalescing, sampling, and Vsync cadence may also mean that only a later frame produces actual content displacement.</p>
+<p>The recommended definition is:</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">First ACTION_MOVE considered effective by business logic -&gt; Present where content first visibly moves</span><br></pre></td></tr></table></figure>
+
+<p>Analysis steps:</p>
+<ol>
+<li>Find the MOVE sequence after ACTION_DOWN.</li>
+<li>Exclude small MOVE events within touch slop and select the MOVE that the business logic treats as the start of scrolling.</li>
+<li>Check whether the App main thread receives this MOVE and ACKs promptly.</li>
+<li>Check whether the <code>Input</code> stage of <code>Choreographer#doFrame</code> updates the scroll offset.</li>
+<li>Check whether the next frame is submitted to RenderThread.</li>
+<li>Check the FrameTimeline present time.</li>
+<li>Confirm content displacement with an App counter or external video.</li>
+</ol>
+<p>Perfetto cannot always tell “how far the content moved.” Apps you control can add a lightweight counter. The following records each nonzero consumed displacement, preserving the first change’s timestamp. If updates must be coalesced per frame, add frame-level scheduling separately and record the resulting sampling delay; do not assume <code>onScrolled</code> is called only once per frame. Report <code>first_effective_move_ts</code>, <code>first_offset_change_ts</code>, <code>offset_delta_px</code>, <code>touch_slop_px</code>, and <code>sample_policy</code> together.</p>
+<figure class="highlight kotlin"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">var</span> gestureScrollY = <span class="number">0L</span> <span class="comment">// Reset at the start of a new gesture and record a baseline counter.</span></span><br><span class="line">recyclerView.addOnScrollListener(<span class="keyword">object</span> : RecyclerView.OnScrollListener() &#123;</span><br><span class="line">    <span class="keyword">override</span> <span class="function"><span class="keyword">fun</span> <span class="title">onScrolled</span><span class="params">(rv: <span class="type">RecyclerView</span>, dx: <span class="type">Int</span>, dy: <span class="type">Int</span>)</span></span> &#123;</span><br><span class="line">        <span class="keyword">if</span> (dy == <span class="number">0</span>) <span class="keyword">return</span></span><br><span class="line">        gestureScrollY += dy.toLong()</span><br><span class="line">        <span class="keyword">if</span> (Build.VERSION.SDK_INT &gt;= Build.VERSION_CODES.Q) &#123;</span><br><span class="line">            Trace.setCounter(<span class="string">&quot;Feed#ScrollOffsetY&quot;</span>, gestureScrollY)</span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            <span class="comment">// AndroidX accepts int; split long scrolls into segments or use an SDK counter.</span></span><br><span class="line">            androidx.tracing.Trace.setCounter(<span class="string">&quot;Feed#ScrollOffsetY&quot;</span>, gestureScrollY.toInt())</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;)</span><br></pre></td></tr></table></figure>
+
+<p><code>android.os.Trace.setCounter(String, long)</code> is available from API 29. Projects with a lower minSdk need AndroidX tracing or their own version guard. For a large scroll-offset range, use an SDK Track Event counter or bucketed values. Do not flood the trace with counters for every layout detail. Record only user-visible state such as scroll offset, player position, or the current scene ID.</p>
+<p><code>computeVerticalScrollOffset()</code> is a scrollbar estimate whose units depend on the LayoutManager; it should not be treated directly as exact displacement in pixels. Here, accumulating <code>dy</code> gives the content displacement consumed by this gesture. It still does not prove that the screen has moved. Item animation, nested scrolling, and data refresh need separate calibration. First calculate <code>move_to_offset_change_ms</code>, then verify the frame that actually carries that state and its present. Do not arbitrarily use “the next frame” as the visual endpoint.</p>
+<p><img src="/en/images/Perfetto-11-18-Diagrams/10-scroll-response.png" alt="From effective MOVE to displacement feedback"></p>
+<p><em>Illustration: first measure effective MOVE to scroll-state change, then verify the frame carrying that state and its present. A counter update does not prove that the screen has moved.</em></p>
+<h2 id="Quantifying-Input-Latency-with-SQL"><a href="#Quantifying-Input-Latency-with-SQL" class="headerlink" title="Quantifying Input Latency with SQL"></a>Quantifying Input Latency with SQL</h2><p>First <code>INCLUDE PERFETTO MODULE android.input</code>, then check whether input ATrace can form send → receive → finish → ACK. The current implementation inner-joins these four stages. If any stage is missing, the entire event row may disappear; in particular, this cannot rule out an ANR involving a missing ACK. <code>read_time</code> and frame association are additional information and may be null. Round trips can still exist without FrameTimeline.</p>
+<p>This article does not use Chrome <code>EventLatency</code>. Android App analysis uses <code>android.input</code> &#x2F; <code>android_input_events</code> and FrameTimeline; analyze WebView&#x2F;Chrome scenarios separately with Chrome modules.</p>
+<p>Choose the target input event first, so DOWN&#x2F;MOVE&#x2F;UP events, IME, overlays, or multiple windows within the same process are not mixed together.</p>
+<p>Before proceeding, inspect how actions actually appear in this trace rather than copying Android constant names. <code>event_action</code> is extracted from slice names in the trace. Perfetto’s own test data uses values such as <code>HOVER_MOVE</code> and <code>SCROLL</code> without an <code>ACTION_</code> prefix. <code>event_type</code> may be <code>MOTION</code> or a raw value such as <code>0x1</code>, depending on the system version’s InputTransport ATrace naming. It cannot tell you whether the raw inputevent data source was enabled:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.input;</span><br><span class="line"></span><br><span class="line"><span class="keyword">SELECT</span> event_type, event_action, <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> n</span><br><span class="line"><span class="keyword">FROM</span> android_input_events</span><br><span class="line"><span class="keyword">WHERE</span> process_name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> event_type, event_action</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> n <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure>
+
+<p>After confirming the values, match them exactly. <code>*UP</code> also matches <code>POINTER_UP</code>, so it cannot select single-finger taps. The following selects <code>UP</code> according to the current slice naming and fixes the click marker to the target process. The marker and input channel must correspond to the source window receiving the tap, which is not necessarily the destination Activity after navigation:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.input;</span><br><span class="line"></span><br><span class="line"><span class="keyword">WITH</span> marker <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> s.ts <span class="keyword">AS</span> marker_ts, th.upid</span><br><span class="line">  <span class="keyword">FROM</span> slice s</span><br><span class="line">  <span class="keyword">JOIN</span> thread_track tt <span class="keyword">ON</span> s.track_id <span class="operator">=</span> tt.id</span><br><span class="line">  <span class="keyword">JOIN</span> thread th <span class="keyword">USING</span> (utid)</span><br><span class="line">  <span class="keyword">JOIN</span> process p <span class="keyword">USING</span> (upid)</span><br><span class="line">  <span class="keyword">WHERE</span> s.name <span class="operator">=</span> <span class="string">&#x27;Conversation#Click&#x27;</span> <span class="keyword">AND</span> p.name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">    <span class="keyword">AND</span> s.ts <span class="operator">&gt;=</span> <span class="number">120000000000</span> <span class="keyword">AND</span> s.ts <span class="operator">&lt;</span> <span class="number">123000000000</span></span><br><span class="line">  <span class="keyword">ORDER</span> <span class="keyword">BY</span> s.ts</span><br><span class="line">  LIMIT <span class="number">1</span></span><br><span class="line">),</span><br><span class="line">candidate_events <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span></span><br><span class="line">    input_event_id,</span><br><span class="line">    event_seq,</span><br><span class="line">    event_action,</span><br><span class="line">    event_channel,</span><br><span class="line">    normalized_event_channel,</span><br><span class="line">    read_time,</span><br><span class="line">    <span class="built_in">ABS</span>(read_time <span class="operator">-</span> marker_ts) <span class="keyword">AS</span> marker_delta_ns</span><br><span class="line">  <span class="keyword">FROM</span> android_input_events</span><br><span class="line">  <span class="keyword">CROSS</span> <span class="keyword">JOIN</span> marker</span><br><span class="line">  <span class="keyword">WHERE</span> process_name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">    <span class="keyword">AND</span> android_input_events.upid <span class="operator">=</span> marker.upid</span><br><span class="line">    <span class="keyword">AND</span> event_action <span class="operator">=</span> <span class="string">&#x27;UP&#x27;</span></span><br><span class="line">    <span class="keyword">AND</span> normalized_event_channel <span class="keyword">LIKE</span> <span class="string">&#x27;%ChatActivity%&#x27;</span></span><br><span class="line">    <span class="keyword">AND</span> read_time <span class="keyword">BETWEEN</span> marker_ts <span class="operator">-</span> <span class="number">500000000</span> <span class="keyword">AND</span> marker_ts <span class="operator">+</span> <span class="number">500000000</span></span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  input_event_id,</span><br><span class="line">  event_seq,</span><br><span class="line">  event_action,</span><br><span class="line">  event_channel,</span><br><span class="line">  normalized_event_channel,</span><br><span class="line">  read_time <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> read_ts_s,</span><br><span class="line">  marker_delta_ns <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> matched_marker_delta_ms,</span><br><span class="line">  <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">OVER</span> () <span class="keyword">AS</span> candidate_count,</span><br><span class="line">  <span class="string">&#x27;nearest Conversation#Click marker on confirmed channel&#x27;</span> <span class="keyword">AS</span> selection_reason</span><br><span class="line"><span class="keyword">FROM</span> candidate_events</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> marker_delta_ns</span><br><span class="line">LIMIT <span class="number">1</span>;</span><br></pre></td></tr></table></figure>
+
+<p>Once the target event is selected, inspect the input round trip. Focus on dispatch, handling, ACK, and input-to-present:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.input;</span><br><span class="line"></span><br><span class="line"><span class="keyword">WITH</span> target_window <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> <span class="number">120e9</span> <span class="keyword">AS</span> start_ts, <span class="number">123e9</span> <span class="keyword">AS</span> end_ts</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  input_event_id,</span><br><span class="line">  process_name,</span><br><span class="line">  thread_name,</span><br><span class="line">  event_channel,</span><br><span class="line">  normalized_event_channel,</span><br><span class="line">  event_type,</span><br><span class="line">  event_action,</span><br><span class="line">  read_time <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">as</span> read_ts_s,</span><br><span class="line">  dispatch_ts <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">as</span> dispatch_ts_s,</span><br><span class="line">  receive_ts <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">as</span> receive_ts_s,</span><br><span class="line">  (dispatch_ts <span class="operator">-</span> read_time) <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">as</span> read_to_dispatch_ms,</span><br><span class="line">  dispatch_latency_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">as</span> dispatch_ms,</span><br><span class="line">  handling_latency_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">as</span> handling_ms,</span><br><span class="line">  ack_latency_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">as</span> ack_ms,</span><br><span class="line">  total_latency_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">as</span> total_ms,</span><br><span class="line">  end_to_end_latency_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">as</span> estimated_input_to_present_ms,</span><br><span class="line">  (read_time <span class="operator">+</span> end_to_end_latency_dur) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">as</span> candidate_present_ts_s,</span><br><span class="line">  frame_id,</span><br><span class="line">  is_speculative_frame</span><br><span class="line"><span class="keyword">FROM</span> android_input_events</span><br><span class="line"><span class="keyword">CROSS</span> <span class="keyword">JOIN</span> target_window</span><br><span class="line"><span class="keyword">WHERE</span> process_name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">  <span class="keyword">AND</span> normalized_event_channel <span class="keyword">LIKE</span> <span class="string">&#x27;%ChatActivity%&#x27;</span></span><br><span class="line">  <span class="keyword">AND</span> <span class="built_in">COALESCE</span>(read_time, dispatch_ts) <span class="operator">&gt;=</span> start_ts</span><br><span class="line">  <span class="keyword">AND</span> <span class="built_in">COALESCE</span>(read_time, dispatch_ts) <span class="operator">&lt;</span> end_ts</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> read_time;</span><br></pre></td></tr></table></figure>
+
+<p>The fields mean:</p>
+<ul>
+<li><code>dispatch_latency_dur</code>: InputDispatcher sending the event to the App receiving it.</li>
+<li><code>read_to_dispatch_ms</code>: InputReader reading the event to InputDispatcher sending it. This can expose pre-dispatch queuing, policy&#x2F;interception, or waits before dispatch.</li>
+<li><code>handling_latency_dur</code>: the framework interval from the App input channel receiving the event to finish&#x2F;ACK. This is not exclusively click-handler time. To locate business handling, split it further using ViewRootImpl&#x2F;InputStage slices, App markers, or click-handler sections.</li>
+<li><code>ack_latency_dur</code>: the App sending ACK to the system receiving ACK.</li>
+<li><code>total_latency_dur</code>: dispatch to ACK completion.</li>
+<li><code>end_to_end_latency_dur</code>: the difference between input read and the standard library’s candidate present; <code>NULL</code> when association fails. It needs additional checks of the target layer, frame token, frame ordering, and nonnegative duration.</li>
+<li><code>is_speculative_frame</code>: true means a future doFrame on the same thread was selected; false means input handling overlaps doFrame in time. It does not verify visual changes on the target layer. The current implementation then looks for present through subsequent non-dropped frames in the same process. Do not treat this as a strict causal chain from input to a specific surface token.</li>
+</ul>
+<p>A <code>NULL</code> <code>end_to_end_latency_dur</code> does not necessarily mean no visual feedback occurred. The event may not have been associated with a FrameTimeline frame, or feedback may have occurred on a SurfaceView, game engine, or another layer. Return to App markers, SurfaceFlinger, external video, or domain tools in these cases; do not translate <code>NULL</code> into “nothing was drawn.”</p>
+<p>When investigating slow input, first query slow round-trip events without filtering <code>end_to_end_latency_dur</code>:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> android.input;</span><br><span class="line"></span><br><span class="line"><span class="keyword">WITH</span> target_window <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> <span class="number">120e9</span> <span class="keyword">AS</span> start_ts, <span class="number">123e9</span> <span class="keyword">AS</span> end_ts</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  input_event_id,</span><br><span class="line">  process_name,</span><br><span class="line">  event_action,</span><br><span class="line">  event_channel,</span><br><span class="line">  read_time <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">as</span> read_ts_s,</span><br><span class="line">  dispatch_ts <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">as</span> dispatch_ts_s,</span><br><span class="line">  receive_ts <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">as</span> receive_ts_s,</span><br><span class="line">  (dispatch_ts <span class="operator">-</span> read_time) <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">as</span> read_to_dispatch_ms,</span><br><span class="line">  end_to_end_latency_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">as</span> estimated_input_to_present_ms,</span><br><span class="line">  <span class="keyword">CASE</span></span><br><span class="line">    <span class="keyword">WHEN</span> end_to_end_latency_dur <span class="keyword">IS</span> <span class="keyword">NULL</span> <span class="keyword">THEN</span> <span class="string">&#x27;frame_unassociated&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> is_speculative_frame <span class="keyword">THEN</span> <span class="string">&#x27;speculative_frame&#x27;</span></span><br><span class="line">    <span class="keyword">ELSE</span> <span class="string">&#x27;associated&#x27;</span></span><br><span class="line">  <span class="keyword">END</span> <span class="keyword">AS</span> association_status,</span><br><span class="line">  (read_time <span class="operator">+</span> end_to_end_latency_dur) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">as</span> candidate_present_ts_s,</span><br><span class="line">  dispatch_latency_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">as</span> dispatch_ms,</span><br><span class="line">  handling_latency_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">as</span> handling_ms,</span><br><span class="line">  ack_latency_dur <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">as</span> ack_ms,</span><br><span class="line">  frame_id,</span><br><span class="line">  is_speculative_frame,</span><br><span class="line">  read_time</span><br><span class="line"><span class="keyword">FROM</span> android_input_events</span><br><span class="line"><span class="keyword">CROSS</span> <span class="keyword">JOIN</span> target_window</span><br><span class="line"><span class="keyword">WHERE</span> process_name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">  <span class="keyword">AND</span> normalized_event_channel <span class="keyword">LIKE</span> <span class="string">&#x27;%ChatActivity%&#x27;</span></span><br><span class="line">  <span class="keyword">AND</span> <span class="built_in">COALESCE</span>(read_time, dispatch_ts) <span class="operator">&gt;=</span> start_ts</span><br><span class="line">  <span class="keyword">AND</span> <span class="built_in">COALESCE</span>(read_time, dispatch_ts) <span class="operator">&lt;</span> end_ts</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> <span class="built_in">COALESCE</span>(end_to_end_latency_dur, total_latency_dur) <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">50</span>;</span><br></pre></td></tr></table></figure>
+
+<p>The round-trip query selects the window with <code>COALESCE(read_time, dispatch_ts)</code> so events that retain dispatch&#x2F;ACK are not filtered out when <code>read_time</code> is missing. Require <code>end_to_end_latency_dur &gt;= 0</code> additionally only when ranking candidate input-to-present durations. Association flags, the target layer, and actual present still need review.</p>
+<p>If <code>read_to_dispatch_ms</code> is high, first inspect InputDispatcher state, window targets, policy&#x2F;interception, focused-window waits, and IME&#x2F;spy&#x2F;secure windows, then <code>system_server</code> scheduling. Do not jump directly from high read-to-dispatch to a CPU&#x2F;frequency conclusion. If <code>handling_ms</code> is high, return first to the App main thread and inspect ViewRootImpl&#x2F;InputStage, the click handler, Binder, locks, and IO.</p>
+<p>If <code>handling_ms</code> is low but <code>input_to_present_ms</code> is high, prioritize post-ACK App&#x2F;Framework asynchronous paths, Activity&#x2F;Fragment transactions, data callbacks, next-frame production, RenderThread, FrameTimeline, SurfaceFlinger, and scheduling.</p>
+<p>Separate Running from Runnable in scheduling analysis. The prerequisites are complete <code>sched_switch</code> and wakeup&#x2F;waking events, with no <code>ftrace_cpu_has_data_loss</code>, overrun&#x2F;dropped, or <code>ftrace_setup_errors</code>. Otherwise, say only “Runnable&#x2F;Running appears in the surviving evidence,” not “there was no scheduling wait.”</p>
+<p>This example covers App main, RenderThread, InputReader&#x2F;InputDispatcher in <code>system_server</code>, WindowManager-related threads, and SurfaceFlinger. In production engineering, drive selection through <code>scenario_objects</code> with <code>role in (&#39;input_reader&#39;,&#39;input_dispatcher&#39;,&#39;window_manager&#39;,&#39;app_main&#39;,&#39;render_thread&#39;,&#39;surfaceflinger&#39;)</code>; thread names should be candidates only:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> target_window <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> <span class="number">120000000000</span> <span class="keyword">AS</span> start_ts, <span class="number">123000000000</span> <span class="keyword">AS</span> end_ts</span><br><span class="line">),</span><br><span class="line">target_threads <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> th.utid, p.name <span class="keyword">AS</span> process_name, th.name <span class="keyword">AS</span> thread_name</span><br><span class="line">  <span class="keyword">FROM</span> thread th</span><br><span class="line">  <span class="keyword">JOIN</span> process p <span class="keyword">USING</span> (upid)</span><br><span class="line">  <span class="keyword">WHERE</span> (</span><br><span class="line">    p.name <span class="operator">=</span> <span class="string">&#x27;com.example.app&#x27;</span></span><br><span class="line">    <span class="keyword">AND</span> (th.is_main_thread <span class="keyword">OR</span> th.name <span class="operator">=</span> <span class="string">&#x27;RenderThread&#x27;</span>)</span><br><span class="line">  ) <span class="keyword">OR</span> (</span><br><span class="line">    p.name <span class="operator">=</span> <span class="string">&#x27;system_server&#x27;</span></span><br><span class="line">    <span class="keyword">AND</span> (</span><br><span class="line">      th.name <span class="keyword">IN</span> (<span class="string">&#x27;InputReader&#x27;</span>, <span class="string">&#x27;InputDispatcher&#x27;</span>)</span><br><span class="line">      <span class="keyword">OR</span> <span class="built_in">LOWER</span>(th.name) <span class="keyword">LIKE</span> <span class="string">&#x27;%window%&#x27;</span></span><br><span class="line">    )</span><br><span class="line">  ) <span class="keyword">OR</span> (</span><br><span class="line">    p.name <span class="keyword">IN</span> (<span class="string">&#x27;surfaceflinger&#x27;</span>, <span class="string">&#x27;/system/bin/surfaceflinger&#x27;</span>)</span><br><span class="line">  )</span><br><span class="line">),</span><br><span class="line">state_totals <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">SELECT</span> s.utid,</span><br><span class="line">    <span class="built_in">SUM</span>(<span class="built_in">MIN</span>(s.ts <span class="operator">+</span> s.dur, w.end_ts) <span class="operator">-</span> <span class="built_in">MAX</span>(s.ts, w.start_ts)) <span class="keyword">AS</span> covered_ns,</span><br><span class="line">    <span class="built_in">SUM</span>(<span class="keyword">CASE</span> <span class="keyword">WHEN</span> s.state <span class="operator">=</span> <span class="string">&#x27;Running&#x27;</span></span><br><span class="line">      <span class="keyword">THEN</span> <span class="built_in">MIN</span>(s.ts <span class="operator">+</span> s.dur, w.end_ts) <span class="operator">-</span> <span class="built_in">MAX</span>(s.ts, w.start_ts) <span class="keyword">ELSE</span> <span class="number">0</span> <span class="keyword">END</span>) <span class="keyword">AS</span> running_ns,</span><br><span class="line">    <span class="built_in">SUM</span>(<span class="keyword">CASE</span> <span class="keyword">WHEN</span> s.state <span class="keyword">IN</span> (<span class="string">&#x27;R&#x27;</span>, <span class="string">&#x27;R+&#x27;</span>)</span><br><span class="line">      <span class="keyword">THEN</span> <span class="built_in">MIN</span>(s.ts <span class="operator">+</span> s.dur, w.end_ts) <span class="operator">-</span> <span class="built_in">MAX</span>(s.ts, w.start_ts) <span class="keyword">ELSE</span> <span class="number">0</span> <span class="keyword">END</span>) <span class="keyword">AS</span> runnable_ns</span><br><span class="line">  <span class="keyword">FROM</span> thread_state s</span><br><span class="line">  <span class="keyword">CROSS</span> <span class="keyword">JOIN</span> target_window w</span><br><span class="line">  <span class="keyword">WHERE</span> s.dur <span class="operator">&gt;</span> <span class="number">0</span> <span class="keyword">AND</span> s.ts <span class="operator">&lt;</span> w.end_ts <span class="keyword">AND</span> s.ts <span class="operator">+</span> s.dur <span class="operator">&gt;</span> w.start_ts</span><br><span class="line">  <span class="keyword">GROUP</span> <span class="keyword">BY</span> s.utid</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  t.utid, t.process_name, t.thread_name,</span><br><span class="line">  <span class="keyword">CASE</span> <span class="keyword">WHEN</span> s.covered_ns <span class="operator">=</span> w.end_ts <span class="operator">-</span> w.start_ts <span class="keyword">THEN</span> <span class="string">&#x27;full&#x27;</span></span><br><span class="line">       <span class="keyword">WHEN</span> s.covered_ns <span class="keyword">IS</span> <span class="keyword">NULL</span> <span class="keyword">THEN</span> <span class="string">&#x27;missing&#x27;</span> <span class="keyword">ELSE</span> <span class="string">&#x27;partial&#x27;</span> <span class="keyword">END</span> <span class="keyword">AS</span> sched_coverage,</span><br><span class="line">  <span class="keyword">CASE</span> <span class="keyword">WHEN</span> s.covered_ns <span class="operator">=</span> w.end_ts <span class="operator">-</span> w.start_ts <span class="keyword">THEN</span> s.running_ns <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">END</span> <span class="keyword">AS</span> running_ms,</span><br><span class="line">  <span class="keyword">CASE</span> <span class="keyword">WHEN</span> s.covered_ns <span class="operator">=</span> w.end_ts <span class="operator">-</span> w.start_ts <span class="keyword">THEN</span> s.runnable_ns <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">END</span> <span class="keyword">AS</span> runnable_ms</span><br><span class="line"><span class="keyword">FROM</span> target_threads t</span><br><span class="line"><span class="keyword">CROSS</span> <span class="keyword">JOIN</span> target_window w</span><br><span class="line"><span class="keyword">LEFT</span> <span class="keyword">JOIN</span> state_totals s <span class="keyword">USING</span> (utid)</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> runnable_ms <span class="keyword">DESC</span>, running_ms <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure>
+
+<p>This uses the Running&#x2F;Runnable states in <code>thread_state</code> for consistent aggregation, leaving durations blank when records are missing or cover only part of the window. <code>full</code> means interval coverage only and does not replace stats checks. If a thread lives for only part of the window, narrow the window before calculating.</p>
+<p>High Runnable time means the thread wants to run but has not obtained CPU time. First inspect other runnable tasks, RT tasks, cgroup&#x2F;cpuset, uclamp&#x2F;capacity, thermal conditions, CPU migration, and frequency. High Running time means the thread is already consuming CPU time; then inspect function-level hotspots, Binder, locks, or layout&#x2F;drawing. To understand wakeup direction, inspect wakeup information in <code>thread_state</code>, IRQ context, or adjacent ftrace events. A busy CPU alone is not enough for a conclusion.</p>
+<h2 id="Common-Attribution-Paths"><a href="#Common-Attribution-Paths" class="headerlink" title="Common Attribution Paths"></a>Common Attribution Paths</h2><h3 id="Slow-Read-x2F-Dispatch"><a href="#Slow-Read-x2F-Dispatch" class="headerlink" title="Slow Read&#x2F;Dispatch"></a>Slow Read&#x2F;Dispatch</h3><p>This usually appears as high <code>read_to_dispatch_ms</code> or <code>dispatch_latency_dur</code>. Check:</p>
+<ul>
+<li>Queuing between InputReader and InputDispatcher.</li>
+<li>Whether InputDispatcher is busy.</li>
+<li>Whether system_server is waiting in Runnable state.</li>
+<li>Abnormal window focus, target-window, or InputChannel state.</li>
+<li>Policy&#x2F;interception, IME, overlays, focused-window waits, or WindowManager state transitions.</li>
+<li>CPU impact from other runnable tasks, RT tasks, cgroup&#x2F;cpuset&#x2F;uclamp, thermal conditions, or migration policy.</li>
+</ul>
+<p>These issues tend to be platform-side; the App can supply page and interaction context.</p>
+<h3 id="Slow-Handling"><a href="#Slow-Handling" class="headerlink" title="Slow Handling"></a>Slow Handling</h3><p>This usually appears as high <code>handling_latency_dur</code>. Check:</p>
+<ul>
+<li>Whether the App main thread remains Running for a long time after receiving input.</li>
+<li>Heavy computation during the <code>Input</code> stage.</li>
+<li>Synchronous Binder calls, file reads, lock waits, or waits for network callbacks in the click handler.</li>
+<li>Synchronous layout, image decoding, complex Compose recomposition, or extensive RecyclerView binding.</li>
+</ul>
+<p>App markers and main-thread slices can locate most of these issues.</p>
+<h3 id="Fast-ACK-Slow-First-Frame"><a href="#Fast-ACK-Slow-First-Frame" class="headerlink" title="Fast ACK, Slow First Frame"></a>Fast ACK, Slow First Frame</h3><p>This is common: the App ACKs input quickly, but feedback still feels slow. Check:</p>
+<ul>
+<li>Whether the App failed to request the next frame or requested it too late.</li>
+<li>Whether it waits after ACK for a Binder callback, Activity&#x2F;Fragment transaction, data callback, or window switch.</li>
+<li>Whether <code>Animation</code> &#x2F; <code>Traversal</code> is scheduled for a later Vsync.</li>
+<li>Whether RenderThread CPU work stalls in <code>syncFrameState</code> or <code>DrawFrame</code>.</li>
+<li>Whether <code>dequeueBuffer</code> &#x2F; <code>queueBuffer</code> indicates BufferQueue backpressure.</li>
+<li>Whether App GPU completion, acquire&#x2F;release fences, or present fences hold up the frame.</li>
+<li>Whether SurfaceFlinger&#x2F;HWC&#x2F;GPU composition makes the display frame later than expected.</li>
+<li>Whether the main thread or RenderThread waits for CPU in Runnable state.</li>
+</ul>
+<p>Analyze the input round trip and frame production separately. A fast ACK means only that the App has finished handling the input; it does not mean the first frame has appeared.</p>
+<h3 id="ANRs-and-Sub-ANR-Delays"><a href="#ANRs-and-Sub-ANR-Delays" class="headerlink" title="ANRs and Sub-ANR Delays"></a>ANRs and Sub-ANR Delays</h3><p>Most slow interaction responses are sub-ANR problems: the user already notices the delay, but it has not reached the system’s ANR threshold. Examine input ANRs in two main categories:</p>
+<ul>
+<li>The event was sent to a connection, but the App does not ACK for a long time. This usually appears as abnormal <code>handling_latency_dur</code> or ACK-related timing.</li>
+<li>A focused event keeps waiting for a focused window. Inspect WindowManager &#x2F; ActivityTaskManager, window creation, focus changes, and InputDispatcher state.</li>
+</ul>
+<p>“Fast ACK, slow first frame” generally does not trigger an input ANR because the input event has already been handled. It is more likely a first-frame production or window-visibility issue.</p>
+<h3 id="Scrolling-Does-Not-Follow-the-Finger"><a href="#Scrolling-Does-Not-Follow-the-Finger" class="headerlink" title="Scrolling Does Not Follow the Finger"></a>Scrolling Does Not Follow the Finger</h3><p>This often appears as delayed displacement in the first frame, followed by stable subsequent frames. Check:</p>
+<ul>
+<li>Time from the first effective MOVE to a scroll-offset counter change.</li>
+<li>Time from the scroll-offset change to present.</li>
+<li>Whether MOVE events were coalesced, or the App waited until the next Vsync to handle them.</li>
+<li>Whether a Runnable wait on the main thread made the first frame miss the current Vsync.</li>
+<li>Whether subsequent FrameTimeline frames are stable. If so, the main problem is initial latency.</li>
+</ul>
+<p>Avoid looking only at jank count. When users say scrolling “does not follow my finger,” they often mean input-to-first-frame delay.</p>
+<h2 id="Boundaries-of-High-Speed-Cameras-and-Perfetto"><a href="#Boundaries-of-High-Speed-Cameras-and-Perfetto" class="headerlink" title="Boundaries of High-Speed Cameras and Perfetto"></a>Boundaries of High-Speed Cameras and Perfetto</h2><p>Perfetto records internal system timing. What the user sees also includes touch sampling, touch firmware processing, display scanning, panel response, and error from external recording. External visual measurement remains necessary for competitor comparisons, acceptance testing, or comparisons across vendors.</p>
+<p>The recommended combination is:</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">High-speed camera / robotic touch actuator:</span><br><span class="line">  Measure user-visible latency and define external start and end points</span><br><span class="line"></span><br><span class="line">Perfetto:</span><br><span class="line">  Break down internal latency to locate delays in Input, App, RenderThread, SurfaceFlinger, or CPU/GPU</span><br><span class="line"></span><br><span class="line">App marker:</span><br><span class="line">  Mark business clicks, transition start, first-screen content completion, and scroll-offset changes</span><br></pre></td></tr></table></figure>
+
+<p>External measurement provides the result, Perfetto provides the cause, and App markers provide business meaning. Together they move response analysis beyond “it feels slow.”</p>
+<p>A minimal walkthrough should look like this: locate the <code>input_event_id</code> for <code>ACTION_UP</code>; observe <code>handling_ms = 18</code>, <code>read_to_dispatch_ms = 3</code>, and <code>dispatch_ms = 4</code>; then see that the candidate frame arrives 50ms after the system receives ACK. Within that interval, the App main thread is Runnable for 21ms before doFrame, and FrameTimeline shows the associated frame missed one vsync.</p>
+<p>This evidence supports “App main-thread scheduling wait likely delayed the first frame by one refresh interval.” But if <code>is_speculative_frame = true</code> or no external video exists, it cannot support “confirmed user-visible latency of 76ms.”</p>
+<p>A response-latency report can use this fixed format:</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br></pre></td><td class="code"><pre><span class="line">scenario: conversation click</span><br><span class="line">trace_id: camera-free-chat-click-run03</span><br><span class="line">config_version: input_response_lab_v2</span><br><span class="line">query_id: input_to_present_v3</span><br><span class="line">collection:</span><br><span class="line">  mode: lab</span><br><span class="line">  build_type: userdebug</span><br><span class="line">  input_trace_mode: TRACE_MODE_TRACE_ALL</span><br><span class="line">  raw_trace_upload: local_only</span><br><span class="line">  consent: lab_device</span><br><span class="line">data_quality:</span><br><span class="line">  stats: clean</span><br><span class="line">  required_signals:</span><br><span class="line">    android.input.inputevent: present</span><br><span class="line">    FrameTimeline: present</span><br><span class="line">    sched: present</span><br><span class="line">scenario_objects:</span><br><span class="line">  process_name: com.example.app</span><br><span class="line">  input_channel: com.example.app/com.example.ChatActivity</span><br><span class="line">target_layer: TX - com.example.app/com.example.ChatActivity#0</span><br><span class="line">endpoint_definition: transition_first_presented_frame</span><br><span class="line">measurement_window: read_time..present_ts</span><br><span class="line">start_clock: read_time</span><br><span class="line">end_clock: present</span><br><span class="line">input_event:</span><br><span class="line">  input_event_id: &quot;21847&quot;</span><br><span class="line">  event_seq: 77</span><br><span class="line">  event_action: UP</span><br><span class="line">  event_time: 12.342s</span><br><span class="line">  read_time: 12.345s</span><br><span class="line">  dispatch_ts: 12.348s</span><br><span class="line">  receive_ts: 12.352s</span><br><span class="line">  event_channel: com.example.app/com.example.ChatActivity</span><br><span class="line">  normalized_event_channel: com.example.app/com.example.ChatActivity</span><br><span class="line">  selection_reason: nearest Conversation#Click marker on confirmed channel</span><br><span class="line">  candidate_count: 1</span><br><span class="line">business_marker:</span><br><span class="line">  name: Conversation#TransitionStart</span><br><span class="line">  ts: 12.371s</span><br><span class="line">associated_frame:</span><br><span class="line">  frame_id: 912344</span><br><span class="line">  association_method: doframe_interval_overlap_then_present_candidate</span><br><span class="line">  speculative: false</span><br><span class="line">  present_ts: 12.421s</span><br><span class="line">internal_input_read_to_present_ms: 76</span><br><span class="line">user_visible_latency_ms: null</span><br><span class="line">breakdown:</span><br><span class="line">  read_to_dispatch: 3ms</span><br><span class="line">  dispatch: 4ms</span><br><span class="line">  handling: 18ms</span><br><span class="line">  ack: 1ms</span><br><span class="line">  frame_after_ack: 50ms</span><br><span class="line">evidence:</span><br><span class="line">  - App main thread Runnable 21ms before doFrame</span><br><span class="line">  - RenderThread DrawFrame 7ms</span><br><span class="line">  - FrameTimeline actual present missed expected by 1 vsync</span><br><span class="line">review_points:</span><br><span class="line">  - ts=12.345s track=android_input_events input_event_id=21847</span><br><span class="line">  - ts=12.389s process=com.example.app thread=main state=Runnable dur=21ms</span><br><span class="line">  - ts=12.421s frame_id=912344 layer=ChatActivity</span><br><span class="line">evidence_grade: likely</span><br><span class="line">boundary:</span><br><span class="line">  fallback_used: none</span><br><span class="line">  missing_signals: []</span><br><span class="line">  external_measurement:</span><br><span class="line">    video: not_captured</span><br><span class="line">    touch_actuator: none</span><br><span class="line">    video_fps: none</span><br><span class="line">    display_refresh: 120hz</span><br><span class="line">    sync_method: none</span><br><span class="line">    error_bound_ms: unknown</span><br><span class="line">owner_hint: App UI + platform scheduling review</span><br><span class="line">owner_reason: Runnable identifies the waiting thread, not the party responsible for CPU contention</span><br></pre></td></tr></table></figure>
+
+<p>This format requires the report to state its start, end, breakdown, evidence, and boundaries together. Evidence grades are fixed as confirmed, likely, excluded, degraded, and unknown; use these English values consistently in report fields. <code>is_speculative_frame = true</code>, missing FrameTimeline, missing external video, data loss, and fallback paths all lower the grade. A response-latency report cannot provide only a total duration: the total describes the delay perceived by the user, while the breakdown identifies where engineers should investigate. Without external measurement, report only internal system latency, not absolute user-visible latency.</p>
+<h2 id="Bringing-It-Together"><a href="#Bringing-It-Together" class="headerlink" title="Bringing It Together"></a>Bringing It Together</h2><p>The analysis sequence for first-frame interaction response can be standardized:</p>
+<ol>
+<li>Define the start: DOWN, UP, effective MOVE, or business click.</li>
+<li>Define the end: first pressed-state frame, first transition frame, first content displacement, or first-screen content completion.</li>
+<li>Use <code>android_input_events</code> to separate <code>read_to_dispatch</code>, dispatch, handling, ACK, and <code>input_to_present_ms</code>.</li>
+<li>Use App markers to describe business state and the associated frame’s present as the screen endpoint.</li>
+<li>Use FrameTimeline, RenderThread, SurfaceFlinger, and CPU scheduling to explain why the first frame is early or late.</li>
+<li>Calibrate user-visible latency with a high-speed camera.</li>
+</ol>
+<p>Startup speed covers a long scenario, smoothness covers stability across consecutive frames, and first-frame interaction response covers the first feedback after a user action. Keeping them separate makes the Perfetto evidence clear.</p>
+<h2 id="References"><a href="#References" class="headerlink" title="References"></a>References</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/analysis/stdlib-docs">PerfettoSQL standard library - android.input</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/reference/trace-config-proto#AndroidInputEventConfig">TraceConfig reference - AndroidInputEventConfig</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/frametimeline">Android Jank detection with FrameTimeline</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/atrace">ATrace: Android system and app trace events</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/instrumentation/track-events">Track events</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/concepts/config">Trace configuration</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/cpu-scheduling">CPU Scheduling events</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/concepts/buffers">Buffers and dataflow</a></li>
+<li><a target="_blank" rel="noopener" href="https://source.android.com/docs/core/graphics/winscope/capture/adb">Capture traces with adb commands - Input</a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.android.com/guide/topics/manifest/profileable-element">Android <code>&lt;profileable&gt;</code> manifest element</a></li>
+<li><a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/native/+/2d2150edc2/services/inputflinger/docs/anr.md">ANR detection in InputDispatcher</a></li>
+<li><a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/view/ViewRootImpl.java">ViewRootImpl input pipeline</a></li>
+</ol>
+<p>Source revision checked: <code>b23c67be1159e3f0b0657bd97be9e139e0d8ee2c</code> (2026-09-19).</p>
+<ul>
+<li><a target="_blank" rel="noopener" href="https://github.com/google/perfetto/blob/b23c67be1159e3f0b0657bd97be9e139e0d8ee2c/src/trace_processor/perfetto_sql/stdlib/android/input.sql">ATrace parsing and frame association in android.input</a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/google/perfetto/blob/b23c67be1159e3f0b0657bd97be9e139e0d8ee2c/test/trace_processor/diff_tests/stdlib/android/tests.py">Official input round-trip tests</a></li>
+</ul>
+<h2 id="About-Me-and-the-Blog"><a href="#About-Me-and-the-Blog" class="headerlink" title="About Me and the Blog"></a>About Me and the Blog</h2><p>Follow <a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/">Android Performance</a>.</p>
+
+    </article>
+    <!-- license -->
+        <div class="license-wrapper">
+            <p>Author：<a href="https://androidperformance.com/en">Gracker</a>
+            <p>Link：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">https://androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/</a>
+            <p>Publish date：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">May 4th 2026, 10:18:00 am</a>
+            <p>Update date：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">September 20th 2026, 12:52:22 am</a>
+            <p>License：This work is licensed under <a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a></p>
+        </div>
+    <!-- paginator -->
+    <ul class="post-paginator">
+        <li class="next">
+                <div class="nextSlogan">Next Post</div>
+                <a href="/en/2026/05/17/SmartPerfetto-Two-Week-Update/" title="SmartPerfetto v1.0.7 Release Notes">
+                    <div class="nextTitle">SmartPerfetto v1.0.7 Release Notes</div>
+                </a>
+        </li>
+        <li class="previous">
+                <div class="prevSlogan">Previous Post</div>
+                <a href="/en/2026/05/04/Android-Perfetto-17-Engineering-Domain-And-Platform-Tracing/" title="Android Perfetto Series 17: Domain Automation, Issue Checklists, and Platform Infrastructure">
+                    <div class="prevTitle">Android Perfetto Series 17: Domain Automation, Issue Checklists, and Platform Infrastructure</div>
+                </a>
+        </li>
+    </ul>
+    <!-- comment -->
+        <div class="post-comment">
+            <!-- 来必力 City 版安装代码 -->
+
+            
+            
+            
+            <!-- utteranc评论 -->
+
+            <!-- partial('_partial/comment/changyan') -->
+            <!--PC版-->
+
+            
+            
+            
+        </div>
+    <!-- timeliness note -->
+    <!-- idea from: https://hexo.fluid-dev.com/posts/hexo-injector/#%E6%96%87%E7%AB%A0%E6%97%B6%E6%95%88%E6%80%A7%E6%8F%90%E7%A4%BA -->
+    <!-- Mathjax -->
+</main>
+
+                <!-- profile -->
+            </div>
+            <footer class="footer footer-unloaded">
+    <!-- social  -->
+        <div class="social">
+                            <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title="email" ></a>
+                <a href="https://github.com/gracker" class="iconfont-archer github" target="_blank" title="github"></a>
+                <span class="iconfont-archer wechat" title="wechat">
+                        <img class="profile-qr" src="/en/assets/Wechat.jpeg" />
+                </span>
+                <span class="iconfont-archer qq" title="qq: 553000664">
+                </span>
+                <a href="https://weibo.com/gracker520" class="iconfont-archer weibo" target="_blank" title="weibo"></a>
+                <a href="https://www.zhihu.com/people/gracker" class="iconfont-archer zhihu" target="_blank" title="zhihu"></a>
+                <a href="https://twitter.com/Gracker_Gao" class="iconfont-archer twitter" target="_blank" title="twitter"></a>
+                <a href="https://juejin.im/user/557b0590e4b052e031453d76" class="iconfont-archer juejin" target="_blank" title="juejin"></a>
+                <a href="https://www.youtube.com/@grackers" class="iconfont-archer youtube" target="_blank" title="youtube"></a>
+                <a href="/en/atom.xml" class="iconfont-archer rss" target="_blank" title="rss"></a>
+
+        </div>
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- website approve for Chinese user -->
+        <div class="website-approve">
+                <span id="icp-approve" class="icp-approve">
+                    <a href="https://beian.miit.gov.cn/" target="_blank">蜀 ICP 备 20016190 号</a>
+                </span>
+        </div>
+</footer>
+
+        </div>
+        <!-- toc -->
+            <div class="toc-wrapper toc-wrapper-loding" style=    top:50vh;
+>
+                <div class="toc-catalog">
+                    <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+                </div>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-Series-Catalog"><span class="toc-number">1.</span> <span class="toc-text">Perfetto Series Catalog</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#This-Article-Covers-Only-the-First-Frame-After-an-Interaction"><span class="toc-number">2.</span> <span class="toc-text">This Article Covers Only the First Frame After an Interaction</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Break-Response-Latency-into-Four-Metrics"><span class="toc-number">3.</span> <span class="toc-text">Break Response Latency into Four Metrics</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Trace-Capture-Configuration"><span class="toc-number">4.</span> <span class="toc-text">Trace Capture Configuration</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Which-Tracks-to-Inspect-First-in-Perfetto-UI"><span class="toc-number">5.</span> <span class="toc-text">Which Tracks to Inspect First in Perfetto UI</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Tap-Scenarios-From-DOWN-x2F-UP-to-the-First-Frame"><span class="toc-number">6.</span> <span class="toc-text">Tap Scenarios: From DOWN&#x2F;UP to the First Frame</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Scroll-Scenarios-From-the-First-Effective-MOVE-to-Content-Displacement"><span class="toc-number">7.</span> <span class="toc-text">Scroll Scenarios: From the First Effective MOVE to Content Displacement</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Quantifying-Input-Latency-with-SQL"><span class="toc-number">8.</span> <span class="toc-text">Quantifying Input Latency with SQL</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Common-Attribution-Paths"><span class="toc-number">9.</span> <span class="toc-text">Common Attribution Paths</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Slow-Read-x2F-Dispatch"><span class="toc-number">9.1.</span> <span class="toc-text">Slow Read&#x2F;Dispatch</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Slow-Handling"><span class="toc-number">9.2.</span> <span class="toc-text">Slow Handling</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Fast-ACK-Slow-First-Frame"><span class="toc-number">9.3.</span> <span class="toc-text">Fast ACK, Slow First Frame</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#ANRs-and-Sub-ANR-Delays"><span class="toc-number">9.4.</span> <span class="toc-text">ANRs and Sub-ANR Delays</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Scrolling-Does-Not-Follow-the-Finger"><span class="toc-number">9.5.</span> <span class="toc-text">Scrolling Does Not Follow the Finger</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Boundaries-of-High-Speed-Cameras-and-Perfetto"><span class="toc-number">10.</span> <span class="toc-text">Boundaries of High-Speed Cameras and Perfetto</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Bringing-It-Together"><span class="toc-number">11.</span> <span class="toc-text">Bringing It Together</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#References"><span class="toc-number">12.</span> <span class="toc-text">References</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#About-Me-and-the-Blog"><span class="toc-number">13.</span> <span class="toc-text">About Me and the Blog</span></a></li></ol>
+            </div>
+        <!-- sidebar -->
+        <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+        <div class="sidebar-panel-archives">
+    <!-- 在 ejs 中将 archive 按照时间排序 -->
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 140
+        </div>
+    </div>
+    <div class="post-archive">
+            <div class="archive-year"> 2026 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2026/09/19/SmartPerfetto-v1.12.0-Release-Notes/">SmartPerfetto v1.12.0 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2026/09/19/AIW-Open-Source-Android-Internals-Wiki/">Half a Year in the Making: Open-Sourcing an Android Internals Ebook</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/en/2026/08/21/SmartPerfetto-Five-Week-Update/">SmartPerfetto v1.7.0 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/17</span>
+            <a class="archive-post-title" href="/en/2026/07/17/SmartPerfetto-Six-Week-Update/">SmartPerfetto v1.1.1 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/04</span>
+            <a class="archive-post-title" href="/en/2026/06/04/SmartPerfetto-Three-Week-Update/">SmartPerfetto v1.0.28 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/17</span>
+            <a class="archive-post-title" href="/en/2026/05/17/SmartPerfetto-Two-Week-Update/">SmartPerfetto v1.0.7 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">Android Perfetto Series 12: Trace Dataflow and Data Loss Troubleshooting</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto Series 14: heapprofd and Memory Profiling</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-11-PerfettoSQL-TraceProcessor-Automation/">Android Perfetto Series 11: PerfettoSQL, Trace Processor, and Regression Detection</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto Series 18: Response Latency in Practice, from Input Events to First-Frame Feedback</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-17-Engineering-Domain-And-Platform-Tracing/">Android Perfetto Series 17: Domain Automation, Issue Checklists, and Platform Infrastructure</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/29</span>
+            <a class="archive-post-title" href="/en/2026/04/29/SmartPerfetto-Open-Source-Perfetto-AI-Assistant/">SmartPerfetto Is Open Source: A Perfetto AI Assistant for Android Trace Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/28</span>
+            <a class="archive-post-title" href="/en/2026/04/28/Agent-OS-Task-Entry/">Long-form Forecast: Phones May No Longer Start from Apps: How Agent OS Takes Over the Task Entry Point</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/10</span>
+            <a class="archive-post-title" href="/en/2026/04/10/SmartPerfetto-Architecture-Deep-Dive-QA/">SmartPerfetto Architecture Q&A: 8 In-Depth Technical Questions</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/10</span>
+            <a class="archive-post-title" href="/en/2026/04/10/SmartPerfetto-Architecture-Deep-Dive/">From Trace to Insight: Harness Engineering in SmartPerfetto AI Agent</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/10</span>
+            <a class="archive-post-title" href="/en/2026/03/10/OpenClaw-FAQ/">OpenClaw FAQ: Token Costs, Use Cases, Local Models, Privacy, and Day-to-Day Experience</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/08</span>
+            <a class="archive-post-title" href="/en/2026/03/08/OpenClaw-Local-Practice/">After Running OpenClaw Locally for Three Weeks, I Realized It's Not a Chatbot</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2025 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/16</span>
+            <a class="archive-post-title" href="/en/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto Series 10: Binder Scheduling and Lock Contention</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/en/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto Series 9: CPU Information Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/en/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto Series 8: Understanding Vsync Mechanism and Performance Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/02</span>
+            <a class="archive-post-title" href="/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto Series 7: MainThread and RenderThread Deep Dive</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/26</span>
+            <a class="archive-post-title" href="/en/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto Series 6: Why 120Hz? Advantages and Challenges</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/26</span>
+            <a class="archive-post-title" href="/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Choreographer-based Rendering Flow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto Series 4: Opening Large Traces via Command Line</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-01-ANR-Design/">Android ANR Series 1: Understanding Android ANR Design Philosophy</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2024 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto Series 1: Introduction to Perfetto</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/en/2024/03/27/Android-Perfetto-101/">Android Perfetto Series Catalog</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/01</span>
+            <a class="archive-post-title" href="/en/2024/01/01/2023-review/">Reflections on 2023: Health, Career, and the Future</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2023 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/en/2023/08/21/the-performance-design-of-os/">Performance Considerations in Operating System Design</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/en/2023/05/14/bad-android-app-with-system-permissions/">Can an App Really Do Whatever It Wants With System Permissions?</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2022 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/en/2022/03/27/the-performance-tea-part-01/">The Performance Community Tea Talk - Episode 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-sleep/">Systrace Thread CPU State Analysis Tips - Sleep and Uninterruptible Sleep</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-running/">Systrace Thread CPU State Analysis Tips - Running</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2022/01/21/android-systrace-cpu-state-runnable/">Systrace Thread CPU State Analysis Tips - Runnable</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/en/2022/01/07/The-Performace-1-Performance-Tools/">Android Performance Optimization: Techniques, Methods, and Tools</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/en/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/03</span>
+            <a class="archive-post-title" href="/en/2022/01/03/2021-Review/">2021 Year in Review: Baby, Career, and Growth</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2021 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/27</span>
+            <a class="archive-post-title" href="/en/2021/10/27/if-i-write-a-book-about-performance/">What Should Be in a Book About Android Smoothness?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/26</span>
+            <a class="archive-post-title" href="/en/2021/10/26/build-android-12/">Android System Development Series (1): Downloading, Compiling, and Flashing Android 12</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace Responsiveness in Action 3 - Extended Knowledge on Responsiveness</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace Responsiveness in Action 1 - Understanding Responsiveness Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace Responsiveness in Action 2 - Responsiveness Analysis - Using App Startup as an Example</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace Smoothness in Action 3 - FAQs During Jank Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2020 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span>
+            <a class="archive-post-title" href="/en/2020/08/20/weibo-imageload-opt-on-huawei/">Why is the Weibo Experience Better on Huawei? A Technical Analysis and Reflection</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/en/2020/05/26/samsung_crash/">An Incident Caused by a 'Leap' Month - Analysis of Samsung System Reboots</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/en/2020/05/07/Android-App-Chain-Wakeup/">Analysis of Android App Chain Wakeups</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/14</span>
+            <a class="archive-post-title" href="/en/2020/02/14/Android-Systrace-SurfaceFlinger/">Android Systrace Basics - SurfaceFlinger Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/03</span>
+            <a class="archive-post-title" href="/en/2020/02/03/android-development-learning-path-2020-edition/">Android Developer Learning Path (2020 Edition)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span>
+            <a class="archive-post-title" href="/en/2020/01/28/2020-read/">My 2020 Reading List</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2019 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/21</span>
+            <a class="archive-post-title" href="/en/2019/12/21/Android-Systrace-CPU/">Android Systrace Basics - CPU Info Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/15</span>
+            <a class="archive-post-title" href="/en/2019/12/15/Android-Systrace-Triple-Buffer/">Android Systrace Basics - Triple Buffer Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/06</span>
+            <a class="archive-post-title" href="/en/2019/12/06/Android-Systrace-Binder/">Android Systrace Basics - Binder and Lock Contention Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/en/2019/12/01/BlogMap/">[Sticky] Blog Article Directory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/en/2019/12/01/Android-Systrace-Vsync/">Android Systrace Basics - Vsync Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/06</span>
+            <a class="archive-post-title" href="/en/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Android Systrace Basics - MainThread and RenderThread Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/04</span>
+            <a class="archive-post-title" href="/en/2019/11/04/Android-Systrace-Input/">Android Systrace Basics - Input Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/24</span>
+            <a class="archive-post-title" href="/en/2019/10/24/Android-Background-Animation/">Analysis of 'Zombie Animations' in the Android Background</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/22</span>
+            <a class="archive-post-title" href="/en/2019/10/22/Android-Choreographer/">Detailed Explanation of Android Rendering Mechanism Based on Choreographer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/en/2019/09/18/Android-Jank-Due-To-Low-Memory/">Overview of Jank and Frame Drops in Android - Low Memory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/17</span>
+            <a class="archive-post-title" href="/en/2019/09/17/Android-Kill-Background-App-Debug/">Case Study: Debugging the Android Launcher Kill Problem</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Debug/">Overview of Jank and Frame Drops in Android - Methodology</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/en/2019/09/01/Android-Activity-Lunch-Mode/">A Detailed Guide to Activity Launch Modes in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/en/2019/07/27/Android-Hardware-Layer/">A Deep Dive into Hardware Layers in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/en/2019/07/27/Android-Hardware-Layer-NEW/">Detailed Explanation of Hardware Layer in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/23</span>
+            <a class="archive-post-title" href="/en/2019/07/23/Android-Systrace-Pre/">Android Systrace Basics - Prerequisites for Analyzing Systrace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/29</span>
+            <a class="archive-post-title" href="/en/2019/06/29/Android-Systrace-SystemServer/">Android Systrace Basics - SystemServer Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/en/2019/05/28/Android-Systrace-About/">Android Systrace Basics - Introduction to Systrace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/27</span>
+            <a class="archive-post-title" href="/en/2019/05/27/why-60-fps/">Android Systrace Basics - Why 60 FPS?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/en/2019/05/26/Android_Systrace_0/">Android Systrace -- Series Article Index</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/15</span>
+            <a class="archive-post-title" href="/en/2019/05/15/90hz-on-android/">A New Era of Smoothness: Thoughts on 90Hz on Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/en/2019/04/07/Sharp-Tools/">Sharp Tools - Efficient Tool Recommendations</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/en/2019/04/07/liqi/">Liqi - High-Efficiency Tools Recommendation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2019/01/21/android-performance-case-jank-accessbility/">Case Analysis of System-wide Stutter Caused by Android Accessibility Service</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/12</span>
+            <a class="archive-post-title" href="/en/2019/01/12/recommend-of-2018/">2018 Best Items Recommendations - A Reward for Your Hard Work</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2018 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span>
+            <a class="archive-post-title" href="/en/2018/11/01/android-system-develop-0/">Setting Up the Android System Development Environment</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/25</span>
+            <a class="archive-post-title" href="/en/2018/10/25/How-do-engineers-count-well/">Lu Qi: Besides Good Code, What Makes an Engineer Excellent?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/01</span>
+            <a class="archive-post-title" href="/en/2018/10/01/how-to-stop-sucking-and-be-awesome-instead-8/">The Programmer's Apprenticeship - 08: The Beauty of Reading</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/30</span>
+            <a class="archive-post-title" href="/en/2018/09/30/how-to-stop-sucking-and-be-awesome-instead-7/">The Programmer's Apprenticeship - 07: Games and Programming</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/29</span>
+            <a class="archive-post-title" href="/en/2018/09/29/how-to-stop-sucking-and-be-awesome-instead-6/">The Programmer's Apprenticeship - 06: All About the Internet</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/28</span>
+            <a class="archive-post-title" href="/en/2018/09/28/how-to-stop-sucking-and-be-awesome-instead-5/">The Programmer's Apprenticeship - 05: Know Your Users</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/27</span>
+            <a class="archive-post-title" href="/en/2018/09/27/how-to-stop-sucking-and-be-awesome-instead-4/">The Programmer's Apprenticeship - 04: Reflections on Testing</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/26</span>
+            <a class="archive-post-title" href="/en/2018/09/26/how-to-stop-sucking-and-be-awesome-instead-3/">The Programmer's Apprenticeship - 03: Web Design Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/20</span>
+            <a class="archive-post-title" href="/en/2018/09/20/how-to-stop-sucking-and-be-awesome-instead-2/">The Programmer's Apprenticeship - 02: The Way of Programming</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2018/09/19/how-to-stop-sucking-and-be-awesome-instead-1/">The Programmer's Apprenticeship - 01: The Art of Fighting Back</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2018/09/13/android-memory/">Does the Android System Not Release Memory?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/13</span>
+            <a class="archive-post-title" href="/en/2018/08/13/Some-Thoughts-on-the-Fluency-of-Android/">Some Thoughts on Android System Fluency</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/20</span>
+            <a class="archive-post-title" href="/en/2018/05/20/zhihu-startingwindow/">Zhihu: Save Your StartingWindow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/en/2018/05/07/Android-performance-optimization-skills-and-tools/">[Sticky] Android Performance Optimization: Must-Know Skills and Tools</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/en/2018/01/06/2017-most-recommended/">2017 Best Recommendations - A Reward for Hard-Working Self</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/en/2018/01/06/Most-Recommended-of-2017/">2017 Annual Best Recommendations - Reward Yourself for Hard Work</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2017 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/23</span>
+            <a class="archive-post-title" href="/en/2017/04/23/About-work/">Reflections on Work and Growth (2017)</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2016 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/en/2016/04/05/android-bottom-bar-2/">Android Bottom Navigation Spec Part 2: Style, Behavior, and Dimensions</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/en/2016/04/05/android-bottom-bar-1/">Android Bottom Navigation Spec Part 1: Usage</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2015 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/31</span>
+            <a class="archive-post-title" href="/en/2015/12/31/How-to-calculation-android-app-lunch-time/">How to Calculate App Startup Time in Android?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/29</span>
+            <a class="archive-post-title" href="/en/2015/12/29/Android-App-Launch-Optimization-DelayLoad-Part-2/">Android App Launch Optimization: Implementation and Principles of DelayLoad (Part 2)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2015/11/18/Android-app-lunch-optimize-delay-load/">Android App Startup Optimization - DelayLoad Implementation and Principles (Part 1)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/12</span>
+            <a class="archive-post-title" href="/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/">RenderThread Workflow in Android hwui</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/en/2015/08/05/HashMap/">Java 7 HashMap Source Code Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-onTrimMemory/">Android Code Memory Optimization Suggestions - OnTrimMemory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-AndroidResource/">Android Code Memory Optimization Suggestions - Android Resources</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/29</span>
+            <a class="archive-post-title" href="/en/2015/05/29/Nexus6-with-Android-M/">Enabling Multi-Window Mode on Nexus 6 with Android M</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/06</span>
+            <a class="archive-post-title" href="/en/2015/05/06/Java-Singleton/">A Detailed Guide to Java Singleton Pattern</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-3/">Android Performance Patterns: Understanding VSYNC</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-2/">Android Performance Patterns: Understanding Overdraw</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-4/">Android Performance Patterns: Profile GPU Rendering</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-1/">Android Performance Patterns: Render Performance</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns/">Overview of Android Performance Patterns</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/">Android Memory Optimization (3) - Viewing Original Bitmaps in MAT</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/31</span>
+            <a class="archive-post-title" href="/en/2015/03/31/android-performance-case-study-follow-up/">Android Performance Case Study Follow-up</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-3/">Android Tips Round-Up, Part 3</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-4/">Android Tips Round-Up, Part 4</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/04</span>
+            <a class="archive-post-title" href="/en/2015/02/04/build-rom-for-nexus5/">Compiling Android Lollipop Firmware for Nexus 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/30</span>
+            <a class="archive-post-title" href="/en/2015/01/30/android-performance-tools-systrace-1/">Android Performance Optimization - Introduction to Systrace (Part 1)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/16</span>
+            <a class="archive-post-title" href="/en/2015/01/16/view-android-source-code-with-androidstudio/">Viewing Android Lollipop Source Code with Android Studio</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/13</span>
+            <a class="archive-post-title" href="/en/2015/01/13/android-performance-optimization-overdraw-2/">Android Performance Optimization: Overdraw - Practical Application</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2014 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/en/2014/10/20/android-performance-optimization-overdraw-1/">Android Performance Optimization: Overdraw - Theory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/03</span>
+            <a class="archive-post-title" href="/en/2014/06/03/android-edittext-do-not-auto-get-focus/">Android Tips: How to Prevent EditText from Automatically Getting Focus</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/31</span>
+            <a class="archive-post-title" href="/en/2014/05/31/android-tips-round-up-2/">Android Tips Round-Up, Part 2</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/en/2014/05/28/android-tips-round-up-1/">Android Tips Round-Up, Part 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/02</span>
+            <a class="archive-post-title" href="/en/2014/05/02/android_log_to_file/">Android Tools - Log2File</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/25</span>
+            <a class="archive-post-title" href="/en/2014/03/25/ubuntu-adb-can-not-find-devices/">Ubuntu: Adb Command Cannot Find Device</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/17</span>
+            <a class="archive-post-title" href="/en/2014/03/17/android-build-your-own-android-notification-service-app/">Android Service: Building Your Own Notification Center (1) - Introduction to Accessibility Service</a>
+        </li>
+            </ul>
+    </div>
+</div>
+
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Yearly Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Yearly Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
+            </span>
+            <span class="sidebar-tag-name" data-tags="Year in Review">
+                <span class="iconfont-archer">&#xe606;</span>
+                Year in Review
+            </span>
+            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Knowledge Planet
+            </span>
+            <span class="sidebar-tag-name" data-tags="Essays">
+                <span class="iconfont-archer">&#xe606;</span>
+                Essays
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="AOSP">
+                <span class="iconfont-archer">&#xe606;</span>
+                AOSP
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="AIW">
+                <span class="iconfont-archer">&#xe606;</span>
+                AIW
+            </span>
+            <span class="sidebar-tag-name" data-tags="Open Source">
+                <span class="iconfont-archer">&#xe606;</span>
+                Open Source
+            </span>
+            <span class="sidebar-tag-name" data-tags="Agent OS">
+                <span class="iconfont-archer">&#xe606;</span>
+                Agent OS
+            </span>
+            <span class="sidebar-tag-name" data-tags="AI">
+                <span class="iconfont-archer">&#xe606;</span>
+                AI
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenAI">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenAI
+            </span>
+            <span class="sidebar-tag-name" data-tags="Mobile OS">
+                <span class="iconfont-archer">&#xe606;</span>
+                Mobile OS
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Thread Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Thread Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Battery Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Battery Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR Analysis">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR Analysis
+            </span>
+            <span class="sidebar-tag-name" data-tags="Page Response">
+                <span class="iconfont-archer">&#xe606;</span>
+                Page Response
+            </span>
+            <span class="sidebar-tag-name" data-tags="Trace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Trace
+            </span>
+            <span class="sidebar-tag-name" data-tags="DataFlow">
+                <span class="iconfont-archer">&#xe606;</span>
+                DataFlow
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="Locking">
+                <span class="iconfont-archer">&#xe606;</span>
+                Locking
+            </span>
+            <span class="sidebar-tag-name" data-tags="Scheduling">
+                <span class="iconfont-archer">&#xe606;</span>
+                Scheduling
+            </span>
+            <span class="sidebar-tag-name" data-tags="heapprofd">
+                <span class="iconfont-archer">&#xe606;</span>
+                heapprofd
+            </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
+            <span class="sidebar-tag-name" data-tags="SQL">
+                <span class="iconfont-archer">&#xe606;</span>
+                SQL
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceProcessor">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceProcessor
+            </span>
+            <span class="sidebar-tag-name" data-tags="GPU">
+                <span class="iconfont-archer">&#xe606;</span>
+                GPU
+            </span>
+            <span class="sidebar-tag-name" data-tags="Power">
+                <span class="iconfont-archer">&#xe606;</span>
+                Power
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="Input">
+                <span class="iconfont-archer">&#xe606;</span>
+                Input
+            </span>
+            <span class="sidebar-tag-name" data-tags="Latency">
+                <span class="iconfont-archer">&#xe606;</span>
+                Latency
+            </span>
+            <span class="sidebar-tag-name" data-tags="Camera">
+                <span class="iconfont-archer">&#xe606;</span>
+                Camera
+            </span>
+            <span class="sidebar-tag-name" data-tags="Audio">
+                <span class="iconfont-archer">&#xe606;</span>
+                Audio
+            </span>
+            <span class="sidebar-tag-name" data-tags="SDK">
+                <span class="iconfont-archer">&#xe606;</span>
+                SDK
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceEvent">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceEvent
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="Annual Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Annual Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenClaw">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenClaw
+            </span>
+            <span class="sidebar-tag-name" data-tags="AI Agent">
+                <span class="iconfont-archer">&#xe606;</span>
+                AI Agent
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Local Models">
+                <span class="iconfont-archer">&#xe606;</span>
+                Local Models
+            </span>
+            <span class="sidebar-tag-name" data-tags="Sharp Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Sharp Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity
+            </span>
+            <span class="sidebar-tag-name" data-tags="SmartPerfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                SmartPerfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="MCP">
+                <span class="iconfont-archer">&#xe606;</span>
+                MCP
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Specs">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Specs
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Kotlin">
+                <span class="iconfont-archer">&#xe606;</span>
+                Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="Stutter">
+                <span class="iconfont-archer">&#xe606;</span>
+                Stutter
+            </span>
+            <span class="sidebar-tag-name" data-tags="Overdraw">
+                <span class="iconfont-archer">&#xe606;</span>
+                Overdraw
+            </span>
+            <span class="sidebar-tag-name" data-tags="Programmer">
+                <span class="iconfont-archer">&#xe606;</span>
+                Programmer
+            </span>
+            <span class="sidebar-tag-name" data-tags="Reading Notes">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading Notes
+            </span>
+            <span class="sidebar-tag-name" data-tags="The Programmer's Apprenticeship">
+                <span class="iconfont-archer">&#xe606;</span>
+                The Programmer's Apprenticeship
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Principles">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Principles
+            </span>
+            <span class="sidebar-tag-name" data-tags="Internet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Internet
+            </span>
+            <span class="sidebar-tag-name" data-tags="User Experience">
+                <span class="iconfont-archer">&#xe606;</span>
+                User Experience
+            </span>
+            <span class="sidebar-tag-name" data-tags="Game Programming">
+                <span class="iconfont-archer">&#xe606;</span>
+                Game Programming
+            </span>
+            <span class="sidebar-tag-name" data-tags="Testing">
+                <span class="iconfont-archer">&#xe606;</span>
+                Testing
+            </span>
+            <span class="sidebar-tag-name" data-tags="Reading">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading
+            </span>
+            <span class="sidebar-tag-name" data-tags="Liqi">
+                <span class="iconfont-archer">&#xe606;</span>
+                Liqi
+            </span>
+            <span class="sidebar-tag-name" data-tags="Community">
+                <span class="iconfont-archer">&#xe606;</span>
+                Community
+            </span>
+            <span class="sidebar-tag-name" data-tags="Smooth">
+                <span class="iconfont-archer">&#xe606;</span>
+                Smooth
+            </span>
+            <span class="sidebar-tag-name" data-tags="Experience Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Experience Optimization
+            </span>
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+        缺失模块，请参考主题文档进行安装配置：https://github.com/fi3ework/hexo-theme-archer#%E5%AE%89%E8%A3%85%E4%B8%BB%E9%A2%98
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="Essays">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Essays
+        </span>
+        <span class="sidebar-category-name" data-categories="Casual Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Casual Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Reading Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Reading Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Android">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android
+        </span>
+        <span class="sidebar-category-name" data-categories="AI">
+            <span class="iconfont-archer">&#xe60a;</span>
+            AI
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
+        </span>
+        <span class="sidebar-category-name" data-categories="Android Performance Optimization">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android Performance Optimization
+        </span>
+        <span class="sidebar-category-name" data-categories="SmartPerfetto">
+            <span class="iconfont-archer">&#xe60a;</span>
+            SmartPerfetto
+        </span>
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+
+    </div>
+</div>
+
+        <!-- site-meta -->
+        <script>
+    var siteMetaRoot = "/en/"
+    if (siteMetaRoot === "undefined") {
+        siteMetaRoot = '/'
+    }
+    var siteMeta = {
+        url: "https://androidperformance.com/en",
+        root: siteMetaRoot,
+        author: "Gracker"
+    }
+</script>
+
+        <!-- import experimental options here -->
+        <!-- Custom Font -->
+
+        <!-- jquery (must load before main.js) -->
+        <script src="/en/lib/jquery.min.js" defer></script>
+        <!-- main func (depends on jQuery) -->
+        <script src="/en/scripts/main.js" defer></script>
+        <script>
+    (function () {
+      function scheduleAfterLoad(task, delay, idleTimeout) {
+        function run() {
+          window.setTimeout(function () {
+            if (window.requestIdleCallback) {
+              window.requestIdleCallback(task, { timeout: idleTimeout || 3000 })
+            } else {
+              task()
+            }
+          }, delay || 0)
+        }
+
+        if (document.readyState === 'complete') {
+          run()
+        } else {
+          window.addEventListener('load', run, { once: true })
+        }
+      }
+
+      function loadScript(src, options) {
+        options = options || {}
+        if (options.id && document.getElementById(options.id)) return
+
+        var done = false
+        var script = document.createElement('script')
+        script.src = src
+        script.async = true
+        if (options.id) script.id = options.id
+        if (options.crossOrigin) script.crossOrigin = options.crossOrigin
+        if (options.referrerPolicy) script.referrerPolicy = options.referrerPolicy
+        script.onload = function () {
+          done = true
+          if (options.onload) options.onload()
+        }
+        script.onerror = function () {
+          done = true
+          if (script.parentNode) script.parentNode.removeChild(script)
+        }
+        if (options.timeout) {
+          window.setTimeout(function () {
+            if (done) return
+            script.onload = null
+            script.onerror = null
+            if (script.parentNode) script.parentNode.removeChild(script)
+          }, options.timeout)
+        }
+        document.head.appendChild(script)
+      }
+
+      function loadStyle(href, id) {
+        if (id && document.getElementById(id)) return
+        var link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = href
+        if (id) link.id = id
+        document.head.appendChild(link)
+      }
+
+      scheduleAfterLoad(function () {
+        if (!document.querySelector('[data-fancybox]')) return
+        loadStyle('/en/lib/fancybox/fancybox.css', 'fancybox-css')
+        loadScript('/en/lib/fancybox/fancybox.umd.js', {
+          id: 'fancybox-js',
+          timeout: 4000,
+          onload: function () {
+            if (window.Fancybox) window.Fancybox.bind('[data-fancybox]')
+          },
+        })
+      }, 1000, 3000)
+
+
+
+
+      scheduleAfterLoad(function () {
+        window.dataLayer = window.dataLayer || []
+        window.gtag = window.gtag || function () { window.dataLayer.push(arguments) }
+        window.gtag('js', new Date())
+        loadScript('https://www.googletagmanager.com/gtag/js?id=UA-50993302-2', {
+          id: 'gtag-js',
+          timeout: 4000,
+          onload: function () {
+            window.gtag('config', 'UA-50993302-2')
+          },
+        })
+      }, 4000, 3000)
+    })();
+</script>
+
+        <!-- search -->
+            <div class="site-search site-search-loading local-search-shell">
+    <div class="algolia-popup popup local-search-popup" role="dialog" aria-modal="true" aria-label="Search posts">
+        <div class="algolia-search local-search-header">
+            <div class="algolia-search-input-icon">
+                <i class="iconfont-archer">&#xe627;</i>
+            </div>
+            <div class="algolia-search-input local-search-input">
+                <input id="local-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search for Posts">
+            </div>
+            <button class="popup-btn-close local-search-close" type="button" aria-label="Close search">
+                <i class="iconfont-archer" aria-hidden="true">&#xe609;</i>
+            </button>
+        </div>
+
+        <div class="algolia-results local-search-results">
+            <div
+                id="local-search-config"
+                data-path="/en/search.xml"
+                data-per-page="10"
+                data-empty="We did not find any results for: ${query}"
+                data-stats="${hits} results found"
+                data-loading="Loading search index..."
+                data-error="Failed to load the search index. Please try again later."></div>
+            <div id="local-search-stats" class="algolia-stats"></div>
+            <div id="local-search-hits"></div>
+        </div>
+    </div>
+</div>
+
+            <script src="/en/scripts/local-search.js" async></script>
+        <!-- async load share.js on first click -->
+            <script>
+                (function(){
+                  var loaded = false
+                  function loadShare(){
+                    if (loaded) return
+                    loaded = true
+                    var s = document.createElement('script')
+                    s.src = '/en/scripts/share.js'
+                    s.async = true
+                    document.head.appendChild(s)
+                  }
+                  document.addEventListener('click', function(e){
+                    var t = e.target
+                    if (!t) return
+                    if (t.closest && t.closest('.share-wrapper')) { loadShare() }
+                    else if (t.classList && t.classList.contains('share-wrapper')) { loadShare() }
+                  }, true)
+                })();
+            </script>
+        <!-- mermaid -->
+    </body>
+</html>

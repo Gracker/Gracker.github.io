@@ -18,8 +18,9 @@
 <meta property="og:site_name" content="Android Performance">
 <meta property="og:description" content="打开一份 Trace 后，最麻烦的情况是：文件里看起来有数据，但中间丢过。UI 里还能看到轨道，SQL 也能查出一些行，可线程状态少了一段、进程名对不上、某些 Track Event 消失了。继续分析下去，结论会越来越像猜。 SQL 只能分析 Trace 里还存在的证据。这个问题不处理好，后面的查询写得再漂亮，也只是把一份缺证据的 Trace 包装成表格。 第 02 篇已经讲过怎么抓，第 11 篇">
 <meta property="og:locale">
+<meta property="og:image" content="https://androidperformance.com/images/Perfetto-11-18-Diagrams/02-trace-dataflow.png">
 <meta property="article:published_time" content="2026-05-04T02:12:00.000Z">
-<meta property="article:modified_time" content="2026-07-18T05:54:54.228Z">
+<meta property="article:modified_time" content="2026-09-19T16:49:52.588Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Android">
 <meta property="article:tag" content="Perfetto">
@@ -27,12 +28,13 @@
 <meta property="article:tag" content="Trace">
 <meta property="article:tag" content="DataFlow">
 <meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://androidperformance.com/images/Perfetto-11-18-Diagrams/02-trace-dataflow.png">
                             <meta http-equiv="Cache-control" content="no-cache">
                             <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
                             <link rel="icon" href="/assets/favicon.ico">
                                 <title>
                                   Android Perfetto 系列 12：Trace 数据流与丢失排查 · Android Performance
-                                </title><meta name="robots" content="noindex">
+                                </title>
                                 
 <link rel="canonical" href="https://androidperformance.com/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">
                                   <style type="text/css">
@@ -261,7 +263,7 @@ loading="lazy"             decoding="async"
 
                 <!-- 文章字数统计 -->
                     <div class="post-intro-read">
-                        <span>Word count: <span class="post-count word-count">6k</span>Reading time: <span class="post-count reading-time">24 min</span></span>
+                        <span>Word count: <span class="post-count word-count">7k</span>Reading time: <span class="post-count reading-time">28 min</span></span>
                     </div>
                 <div class="post-intro-meta">
                     <!-- 撰写日期 -->
@@ -333,13 +335,37 @@ loading="lazy"             decoding="async"
 <p>文章顺着数据从内核走到 Trace 文件的链路，逐段定位丢点：ftrace、producer 共享内存、central buffer、增量状态、flush。每一段的丢法不一样，补救方式也不一样。最后给一个在分析报告里写“这份 Trace 还能信多少”的模板。</p>
 <span id="more"></span>
 
+<p><a id="series"></a></p>
+<h2 id="Perfetto-系列文章"><a href="#Perfetto-系列文章" class="headerlink" title="Perfetto 系列文章"></a>Perfetto 系列文章</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/03/27/Android-Perfetto-101/">Android Perfetto 系列目录</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto 系列 1：Perfetto 工具简介</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto 系列 2：Perfetto Trace 抓取</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto 系列 3：熟悉 Perfetto View</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto 系列 4：使用命令行在本地打开超大 Trace</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto 系列 5：Android App 基于 Choreographer 的渲染流程</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto 系列 7：MainThread 和 RenderThread 解读</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto 系列 9：CPU 信息解读</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto 系列 10：Binder 调度与锁竞争</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2026/05/04/Android-Perfetto-11-PerfettoSQL-TraceProcessor-Automation/">Android Perfetto 系列 11：PerfettoSQL、Trace Processor 与回归检测</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">Android Perfetto 系列 12：Trace 数据流与丢失排查</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto 系列 13：Perfetto SDK、Track Event 与 App 现场 Trace</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto 系列 14：heapprofd 与内存 Profiling</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto 系列 15：Boot Trace、长时间现场 Trace 与偶发问题抓取</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto 系列 16：GPU、Power Counters 与硬件瓶颈分析</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2026/05/04/Android-Perfetto-17-Engineering-Domain-And-Platform-Tracing/">Android Perfetto 系列 17：专项场景自动化、问题清单与平台体系</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto 系列 18：响应速度实战，从输入事件到首帧反馈</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV1oi82efE4D/?vd_source=0c6d2191e785de0a36dc21a9da7e664e">视频(B站) - Android Perfetto 基础和案例分享</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV17A6bBLECu/">视频(B站) - Android Perfetto 分享 - 出图类型分享：AOSP、WebView、Flutter + OEM 系统优化分享</a></li>
+</ol>
 <h2 id="Trace-有数据，不代表证据完整"><a href="#Trace-有数据，不代表证据完整" class="headerlink" title="Trace 有数据，不代表证据完整"></a>Trace 有数据，不代表证据完整</h2><p>Perfetto 不是无损录像机。它的写入路径为了低开销做了异步化：producer 先写自己的共享内存；共享内存页满、Trace 结束或 flush 时，再提交给 <code>traced</code> 的 central buffer；之后在 Trace 结束、streaming 或周期写文件时落到输出文件。</p>
 <p>任意一段跟不上，都会产生 data loss。flush 做的只是让 producer 把未提交的数据交给 tracing service，并不等同于直接写进文件。</p>
 <p>分析 Trace 前，建议固定做一次“验收”：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">打开 Trace</span><br><span class="line">  -&gt; 查 stats</span><br><span class="line">  -&gt; 定位丢失在 ftrace、central buffer 还是解析阶段</span><br><span class="line">  -&gt; 标记哪些指标只能参考</span><br><span class="line">  -&gt; 决定这份 Trace 能回答哪些问题</span><br><span class="line">  -&gt; 修改下一次抓取配置</span><br></pre></td></tr></table></figure>
 
-<!-- DIAGRAM_SLOT: Perfetto producer -> shared memory -> traced central buffer -> trace file 的数据流图 -->
-
+<p><img src="/images/Perfetto-11-18-Diagrams/02-trace-dataflow.png" alt="Trace 从事件写入到文件"></p>
+<p><em>示意图：ftrace 内核缓冲、producer 共享内存与中央缓冲是不同环节；flush 不等于文件落盘。</em></p>
 <p>这一步不花太多时间，却能避免后面半小时都在分析一份有缺口的 Trace。</p>
 <p>一个常见现场是这样的：Perfetto UI 里能找到卡顿帧，也能看到主线程切片，但 <code>stats</code> 里同时出现 <code>ftrace_cpu_has_data_loss</code>。这时要先分清证据来源。</p>
 <p>Android 12+ 且启用 <code>android.surfaceflinger.frametimeline</code> 时，如果目标窗口内 expected&#x2F;actual FrameTimeline slices 存在，并且没有 parser&#x2F;pairing 异常，FrameTimeline 仍可作为入口。App SDK Track Event 也可能仍能帮助定位业务阶段。</p>
@@ -377,16 +403,18 @@ loading="lazy"             decoding="async"
 <p>增量状态是跨阶段问题，不是独立传输路径。Track Event 的 track descriptor、interned strings，以及进程&#x2F;线程元数据这类上下文 packet 一旦被覆盖或缺包，后续事件可能只剩 ID，或者被 Trace Processor 跳过。</p>
 <p><code>linux.ftrace</code> 还多一段内核 per-CPU buffer。内核事件先进入每个 CPU 的 ftrace per-CPU buffer，再由 <code>traced_probes</code> 周期读取。打开 <code>sched_switch</code>、<code>sched_waking</code>、Binder、IRQ 这类 ftrace tracepoint，以及部分 Camera&#x2F;GPU vendor ftrace 事件后，这一段最容易出问题。</p>
 <p>Binder 证据需要显式启用 <code>binder_driver</code> 或对应 binder ftrace events，并核对 <code>ftrace_setup_errors</code>；可用 category 和事件会随 Android&#x2F;内核版本变化。</p>
-<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> <span class="operator">*</span></span><br><span class="line"><span class="keyword">FROM</span> metadata</span><br><span class="line"><span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;ftrace_setup_errors&#x27;</span>;</span><br></pre></td></tr></table></figure>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;ftrace_setup_errors&#x27;</span>;</span><br></pre></td></tr></table></figure>
 
+<p><code>ftrace_setup_errors</code> 的计数在 <code>stats</code>；详情入口与 severity 要按解析器版本区分：v57.2 是 <code>info</code>，失败详情可见于 <code>metadata</code> 的同名项；v58.2 是 <code>notice</code>，详情进入 trace import logs。两版都不能只按 <code>error</code>&#x2F;<code>data_loss</code> 过滤，跨版本查询应按名称保留该计数。</p>
 <p>Buffers and dataflow 文档里有一句很实用的估算：如果总写入速率是 2 MB&#x2F;s，16 MB central buffer 大约只能保留 8 秒。抓 30 秒、60 秒甚至几分钟时，单靠一个小 central buffer 不够。</p>
-<p>这也是很多“偶现问题 Trace 只有前半段能用”的来源。录制时间写了 60 秒，不代表每个 buffer 都保存了 60 秒数据。Trace 文件里的时间轴长度、buffer 能保留的窗口、某类数据源的实际覆盖范围，是三件不同的事。</p>
+<p>这也是很多“录了很久但目标窗口不在 Trace 里”的来源：Ring 覆盖旧数据，Discard 丢弃后续新数据。录制时间写了 60 秒，不代表每个 buffer 都保存了 60 秒数据。Trace 文件里的时间轴长度、buffer 能保留的窗口、某类数据源的实际覆盖范围，是三件不同的事。</p>
 <p>这三件事可以直接用一条 SQL 验收。对每类高频表看最早和最晚事件时间，再和 trace 边界比一比：</p>
 <figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> <span class="string">&#x27;trace&#x27;</span> <span class="keyword">AS</span> source, trace_start() <span class="keyword">AS</span> min_ts, trace_end() <span class="keyword">AS</span> max_ts</span><br><span class="line"><span class="keyword">UNION</span> <span class="keyword">ALL</span></span><br><span class="line"><span class="keyword">SELECT</span> <span class="string">&#x27;sched&#x27;</span>, <span class="built_in">MIN</span>(ts), <span class="built_in">MAX</span>(ts <span class="operator">+</span> dur) <span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">UNION</span> <span class="keyword">ALL</span></span><br><span class="line"><span class="keyword">SELECT</span> <span class="string">&#x27;slice&#x27;</span>, <span class="built_in">MIN</span>(ts), <span class="built_in">MAX</span>(ts <span class="operator">+</span> dur) <span class="keyword">FROM</span> slice</span><br><span class="line"><span class="keyword">UNION</span> <span class="keyword">ALL</span></span><br><span class="line"><span class="keyword">SELECT</span> <span class="string">&#x27;counter&#x27;</span>, <span class="built_in">MIN</span>(ts), <span class="built_in">MAX</span>(ts) <span class="keyword">FROM</span> counter;</span><br></pre></td></tr></table></figure>
 
-<p><code>RING_BUFFER</code> 下，高频数据源的 <code>min_ts</code> 往往明显晚于 <code>trace_start()</code>：中间差的那段就是已经被覆盖掉的窗口。目标问题如果落在这段里，这份 Trace 再大也回答不了；报告要写清每类证据的实际覆盖起点，而不是只写 trace 总时长。</p>
+<p><code>min_ts</code> 晚于 <code>trace_start()</code> 只能说明这类数据的首条已观测事件更晚，不能单凭差值认定发生过覆盖：数据源晚启动、线程尚未创建、期间没有事件也会如此。要结合 <code>traced_buf_chunks_overwritten</code>、buffer 映射、数据源启停与场景 marker 判断；首尾时间也不能排除中间缺段。报告应写已观测范围及覆盖证据，而不是把 trace 总时长当成每个源的完整覆盖时长。</p>
 <h2 id="用-stats-给-Trace-做体检"><a href="#用-stats-给-Trace-做体检" class="headerlink" title="用 stats 给 Trace 做体检"></a>用 stats 给 Trace 做体检</h2><p>第 11 篇已经讲过 Trace Processor。这里直接用它跑一条 SQL。这条 SQL 适合放进每个分析脚本的开头，它不只查 <code>error</code> &#x2F; <code>data_loss</code>，也把 central buffer、ftrace setup、FrameTimeline parser&#x2F;pairing、flush&#x2F;clock 这类会影响结论的 <code>info</code> 项一起拉出来。</p>
-<p>注意：官方 stats 参考表里的类型写作 <code>kError</code>、<code>kDataLoss</code>、<code>kInfo</code>，但 SQL 里的 <code>severity</code> 值是小写的 <code>error</code>、<code>data_loss</code>、<code>info</code>：</p>
+<p>先分清 <code>stats</code> 的行与统计项定义：它不是完整的能力注册表。<code>kSingle</code> 项可以预置值为 0 的行，<code>kIndexed</code> 项则按本次 Trace 实际写入的 CPU&#x2F;PID&#x2F;buffer 索引出现。因此，<code>COUNT(*) = 0</code> 既不能证明该项不受当前版本支持，也不能独立证明采集完整。<code>ftrace_cpu_has_data_loss</code> 和多项 <code>heapprofd_*</code> 在 v57.2、v58.2 都已定义，但没有触发对应记录时可以没有行。判断版本支持应对照 <code>trace_processor --version</code> 对应源码；判断本次数据质量还要结合数据源是否采到和目标窗口覆盖。</p>
+<p>注意：官方 stats 参考表里的类型写作 <code>kError</code>、<code>kDataLoss</code>、<code>kNotice</code>、<code>kInfo</code>，但 SQL 里的 <code>severity</code> 值是小写的 <code>error</code>、<code>data_loss</code>、<code>notice</code>、<code>info</code>。v58.2 的 <code>ftrace_setup_errors</code> 在 <code>notice</code> 档，v57.2 则为 <code>info</code>；下面按名称保留它，不依赖该项的 severity：</p>
 <figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br></pre></td><td class="code"><pre><span class="line">./trace_processor query trace.perfetto-trace <span class="string">&quot;</span></span><br><span class="line"><span class="string">SELECT</span></span><br><span class="line"><span class="string">  name,</span></span><br><span class="line"><span class="string">  idx,</span></span><br><span class="line"><span class="string">  severity,</span></span><br><span class="line"><span class="string">  source,</span></span><br><span class="line"><span class="string">  value</span></span><br><span class="line"><span class="string">FROM stats</span></span><br><span class="line"><span class="string">WHERE value != 0</span></span><br><span class="line"><span class="string">  AND (</span></span><br><span class="line"><span class="string">    severity IN (&#x27;error&#x27;, &#x27;data_loss&#x27;)</span></span><br><span class="line"><span class="string">    OR name IN (</span></span><br><span class="line"><span class="string">      &#x27;traced_buf_chunks_overwritten&#x27;,</span></span><br><span class="line"><span class="string">      &#x27;traced_buf_chunks_discarded&#x27;,</span></span><br><span class="line"><span class="string">      &#x27;ftrace_setup_errors&#x27;,</span></span><br><span class="line"><span class="string">      &#x27;frame_timeline_event_parser_errors&#x27;,</span></span><br><span class="line"><span class="string">      &#x27;frame_timeline_unpaired_end_event&#x27;,</span></span><br><span class="line"><span class="string">      &#x27;config_write_into_file_no_flush&#x27;,</span></span><br><span class="line"><span class="string">      &#x27;config_write_into_file_discard&#x27;,</span></span><br><span class="line"><span class="string">      &#x27;traced_flushes_failed&#x27;,</span></span><br><span class="line"><span class="string">      &#x27;traced_final_flush_failed&#x27;</span></span><br><span class="line"><span class="string">    )</span></span><br><span class="line"><span class="string">    OR name GLOB &#x27;clock_sync_failure*&#x27;</span></span><br><span class="line"><span class="string">    OR name GLOB &#x27;perf_*&#x27;</span></span><br><span class="line"><span class="string">    OR name GLOB &#x27;heapprofd_*&#x27;</span></span><br><span class="line"><span class="string">    OR name GLOB &#x27;meminfo_*&#x27;</span></span><br><span class="line"><span class="string">    OR name GLOB &#x27;rss_stat_*&#x27;</span></span><br><span class="line"><span class="string">    OR name GLOB &#x27;proc_stat_*&#x27;</span></span><br><span class="line"><span class="string">    OR name GLOB &#x27;memory_snapshot_*&#x27;</span></span><br><span class="line"><span class="string">  )</span></span><br><span class="line"><span class="string">ORDER BY name, idx;</span></span><br><span class="line"><span class="string">&quot;</span></span><br></pre></td></tr></table></figure>
 
 <p>读结果时不要只看“有没有非零”。先把常见项映射到处置决策：</p>
@@ -445,11 +473,11 @@ loading="lazy"             decoding="async"
 <p>如果要确认帧指标能不能用，再查 FrameTimeline。它不是 ftrace 的直接产物，但也会受 data source 是否启用、Android 版本、central buffer 覆盖和 parser&#x2F;pairing 异常影响：</p>
 <figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> <span class="string">&#x27;actual&#x27;</span> <span class="keyword">AS</span> table_name, <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> row_count</span><br><span class="line"><span class="keyword">FROM</span> actual_frame_timeline_slice</span><br><span class="line"><span class="keyword">UNION</span> <span class="keyword">ALL</span></span><br><span class="line"><span class="keyword">SELECT</span> <span class="string">&#x27;expected&#x27;</span> <span class="keyword">AS</span> table_name, <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> row_count</span><br><span class="line"><span class="keyword">FROM</span> expected_frame_timeline_slice;</span><br></pre></td></tr></table></figure>
 
-<p>只查全表行数还不够。目标窗口里 expected&#x2F;actual 都有覆盖，min&#x2F;max ts 能包住窗口，且 FrameTimeline 所在数据源没有命中同源 buffer loss，才能写“帧事实可信”。如果只是全表有行，报告应写“FrameTimeline 可作为入口，但目标窗口完整性仍需确认”。</p>
+<p>只查全表行数还不够。帧记录本来就不是连续信号，静止页面可能没有新帧；min&#x2F;max 包住窗口既不能证明中间无丢帧记录，也不是完整采集的必要条件。应按目标 <code>upid</code>、layer、frame token 核对 expected&#x2F;actual 配对、未闭合或 dropped frame、采集启停和同源 buffer loss。下面只列出窗口内已观测帧的范围，不能据此自动判定完整。</p>
 <figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> time.conversion;</span><br><span class="line"></span><br><span class="line"><span class="keyword">WITH</span> target_window(start_ts, end_ts) <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">VALUES</span> (<span class="number">123000000000</span>, <span class="number">123500000000</span>)</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  <span class="string">&#x27;actual&#x27;</span> <span class="keyword">AS</span> table_name,</span><br><span class="line">  <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> row_count,</span><br><span class="line">  time_to_ms(<span class="built_in">MIN</span>(a.ts)) <span class="keyword">AS</span> min_ts_ms,</span><br><span class="line">  time_to_ms(<span class="built_in">MAX</span>(a.ts <span class="operator">+</span> a.dur)) <span class="keyword">AS</span> max_end_ms</span><br><span class="line"><span class="keyword">FROM</span> actual_frame_timeline_slice a</span><br><span class="line"><span class="keyword">JOIN</span> target_window w</span><br><span class="line"><span class="keyword">WHERE</span> a.ts <span class="operator">&lt;</span> w.end_ts</span><br><span class="line">  <span class="keyword">AND</span> a.ts <span class="operator">+</span> a.dur <span class="operator">&gt;</span> w.start_ts</span><br><span class="line"><span class="keyword">UNION</span> <span class="keyword">ALL</span></span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  <span class="string">&#x27;expected&#x27;</span> <span class="keyword">AS</span> table_name,</span><br><span class="line">  <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> row_count,</span><br><span class="line">  time_to_ms(<span class="built_in">MIN</span>(e.ts)) <span class="keyword">AS</span> min_ts_ms,</span><br><span class="line">  time_to_ms(<span class="built_in">MAX</span>(e.ts <span class="operator">+</span> e.dur)) <span class="keyword">AS</span> max_end_ms</span><br><span class="line"><span class="keyword">FROM</span> expected_frame_timeline_slice e</span><br><span class="line"><span class="keyword">JOIN</span> target_window w</span><br><span class="line"><span class="keyword">WHERE</span> e.ts <span class="operator">&lt;</span> w.end_ts</span><br><span class="line">  <span class="keyword">AND</span> e.ts <span class="operator">+</span> e.dur <span class="operator">&gt;</span> w.start_ts;</span><br></pre></td></tr></table></figure>
 
 <p>如果要做更宽的采集配置复盘，可以再看所有非零统计项：</p>
-<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> <span class="keyword">value</span> <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> severity <span class="keyword">DESC</span>, name, idx;</span><br></pre></td></tr></table></figure>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> <span class="keyword">value</span> <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> <span class="keyword">CASE</span> severity</span><br><span class="line">  <span class="keyword">WHEN</span> <span class="string">&#x27;data_loss&#x27;</span> <span class="keyword">THEN</span> <span class="number">0</span></span><br><span class="line">  <span class="keyword">WHEN</span> <span class="string">&#x27;error&#x27;</span> <span class="keyword">THEN</span> <span class="number">1</span></span><br><span class="line">  <span class="keyword">WHEN</span> <span class="string">&#x27;notice&#x27;</span> <span class="keyword">THEN</span> <span class="number">2</span></span><br><span class="line">  <span class="keyword">ELSE</span> <span class="number">3</span></span><br><span class="line"><span class="keyword">END</span>, name, idx;</span><br></pre></td></tr></table></figure>
 
 <p><code>source</code> 也要看。<code>source = &#39;trace&#39;</code> 通常指采集或 trace 内容本身的问题，优先回到 TraceConfig、producer 或设备能力；<code>source = &#39;analysis&#39;</code> 更偏 Trace Processor 导入、解析、建模阶段，优先看导入参数、解析器版本、producer 写法或 trace 格式问题。看到 parser error 时，不要默认只靠加 buffer 解决。</p>
 <p><code>stats</code> 的读法不要停在“有没有值”。读到非零项后，还要接着追问：</p>
@@ -468,7 +496,7 @@ loading="lazy"             decoding="async"
 <figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    target_buffer: <span class="number">0</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      buffer_size_kb: <span class="number">32768</span>   # 增大内核每 CPU buffer</span><br><span class="line">      drain_period_ms: <span class="number">100</span>    # 更频繁地从内核读取</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
 <p>还要删掉当前问题用不到的 ftrace 事件。不要把所有 checkbox 都打开后再靠 buffer 硬扛。滑动 jank 先保留 <code>sched/sched_switch</code>、<code>sched/sched_waking</code>、FrameTimeline 和 App marker，先删无关 IRQ、Camera、GPU vendor 事件；Binder 慢才打开 binder events；Camera open 才加 Camera&#x2F;GPU 相关事件。高频 ftrace 事件会挤掉同一层 ftrace per-CPU buffer 里的低频 kernel tracepoints；process stats、log、power、FrameTimeline 这类数据被挤掉，则属于后面的 central buffer 混放问题。</p>
-<p><code>buffer_size_kb</code> 和 <code>drain_period_ms</code> 属于本地调参项，官方参考也提醒它们在并发 ftrace session 下不保证完全按配置生效。</p>
+<p>示例的 32768 KiB 是每 CPU 的 buffer，8 核设备仅这一层就可能占约 256 MiB；它是需要测量后选择的高占用值，不能直接当线上默认。<code>buffer_size_kb</code> 和 <code>drain_period_ms</code> 属于本地调参项，官方参考也提醒它们在并发 ftrace session 下不保证完全按配置生效。</p>
 <p>公开 preset 先减事件。只有需要非默认 ftrace buffer，且要兼容不同 Perfetto 版本时，再考虑 <code>buffer_size_kb + buffer_size_lower_bound</code>；Perfetto v43+ 的多数配置可以保持 unset。写公开 preset 时，不要只给一个数字；要同时写清楚设备范围、Android&#x2F;Perfetto 版本、事件集合和文件增长速度。</p>
 <h2 id="producer-x2F-TraceWriter-packet-loss：先定位再归因"><a href="#producer-x2F-TraceWriter-packet-loss：先定位再归因" class="headerlink" title="producer &#x2F; TraceWriter packet loss：先定位再归因"></a>producer &#x2F; TraceWriter packet loss：先定位再归因</h2><p>如果出现 <code>traced_buf_trace_writer_packet_loss</code>，先把它当成 packet loss 总信号，不要直接归因为 producer shared memory。它可能来自 producer 共享内存突发，也可能和 RING_BUFFER 起点前、DISCARD 结束后的 packet loss、sequence 缺包、central buffer policy 有关。归因要结合 <code>traced_buf_chunks_overwritten</code>、<code>traced_buf_chunks_discarded</code>、<code>traced_buf_sequence_packet_loss</code>、<code>traced_buf_patches_failed</code>、buffer <code>idx</code> 和 fill policy。</p>
 <p>Android 常见的 <code>android.os.Trace</code> &#x2F; <code>androidx.tracing</code> 走 atrace&#x2F;ftrace 路径，优先看 ftrace loss 和 <code>ftrace_setup_errors</code>。Perfetto SDK Track Event、自定义 DataSource、大块数据包、heapprofd 采样这类 producer，才更直接对应 shared memory 和 producer 侧写入策略。</p>
@@ -488,11 +516,19 @@ loading="lazy"             decoding="async"
 <li><code>traced_buf_chunks_overwritten</code>：<code>RING_BUFFER</code> 写满后覆盖旧数据。</li>
 <li><code>traced_buf_chunks_discarded</code>：<code>DISCARD</code> 写满后丢掉新数据。</li>
 </ul>
+<p>还应查看 TraceBufferV2 的 <code>traced_buf_data_loss_*</code> 原因细分。这些项在 v57.2&#x2F;v58.2 已存在；是否出现及取值还取决于采集端是否上报相应统计。它们都属于 <code>data_loss</code>，本篇前面的通用查询已覆盖，下面的 <code>traced_buf_*</code> 查询也会列出：</p>
+<ul>
+<li><code>traced_buf_data_loss_overwrite</code>：Ring 回卷覆盖尚未读取的 chunk。</li>
+<li><code>traced_buf_data_loss_smb_full</code>：producer 上报共享内存耗尽；<code>traced_buf_data_loss_writer_abort</code>：writer 中止尚未完成的分片 packet。</li>
+<li><code>traced_buf_data_loss_read_gap</code>、<code>traced_buf_data_loss_chunk_corrupted</code>：读取阶段的 chunk 编号缺口或损坏。</li>
+<li><code>traced_buf_data_loss_orphan_continuation</code>、<code>traced_buf_data_loss_reassembly_gap</code>、<code>traced_buf_data_loss_reassembly_broken_chain</code>：缺起始片段、重组缺口或分片链断裂。</li>
+</ul>
+<p>这组项按 buffer 归因，不能当作内核 per-CPU <code>ftrace_cpu_has_data_loss</code> 的等价替代。尤其 <code>traced_buf_chunks_overwritten</code> 是覆盖计数，而 <code>traced_buf_data_loss_overwrite</code> 表示解析器收到的具体丢失原因；两者都要结合目标窗口和 <code>target_buffer</code> 解释，不能把所有覆盖一律判为事故窗口损坏。</p>
 <p>容量复盘要按 buffer <code>idx</code> 看。<code>idx</code> 对 <code>traced_buf_*</code> 通常是 buffer index，对 ftrace CPU stat 通常是 CPU id；报告里要写清 <code>idx_semantics</code>，否则很容易把 CPU 3 和 buffer 3 混在一起。</p>
 <figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> <span class="keyword">value</span> <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line">  <span class="keyword">AND</span> (</span><br><span class="line">    name GLOB <span class="string">&#x27;traced_buf_*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name <span class="keyword">IN</span> (</span><br><span class="line">      <span class="string">&#x27;traced_buf_chunks_overwritten&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_buf_chunks_discarded&#x27;</span></span><br><span class="line">    )</span><br><span class="line">  )</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> idx, name;</span><br></pre></td></tr></table></figure>
 
 <p>一个 central buffer 装所有数据时，高频 sched 事件可能把 process stats、log、power、FrameTimeline、App Track Event、SurfaceFlinger&#x2F;Winscope 这类低频或关键数据挤出去。结果是 UI 里还能看到大量调度事件，但线程名、进程名、内存采样、log、帧指标只剩很少一部分。</p>
-<p><code>android.log</code> 还要看设备边界。官方 <code>android.log</code> datasource 只支持 userdebug；eng 或内部系统镜像也要按设备能力验证。生产 user build 上不要默认期待 <code>android.log</code> 数据源可用，可将外部 logcat、bugreport 或平台侧脱敏日志放进同一个 case 包。</p>
+<p><code>android.log</code> 还要看设备边界。官方文档将 <code>android.log</code> 的支持范围写为 userdebug；已 root 且 logd&#x2F;SELinux 权限允许的 user 构建也可能采到日志，不能只看 build type 判定不可用。不过 <code>adb root</code> 本身不保证所有设备都支持。未修改的生产 user build 上不要默认期待 <code>android.log</code> 数据源可用，可将外部 logcat、bugreport 或平台侧脱敏日志放进同一个 case 包。</p>
 <p>Trace configuration 文档给过一个很贴近 Android 的例子：scheduler tracing 在普通手机上可能每秒写大约 10000 个事件、约 1MB；而内存统计 5 秒才写一次。两者放进同一个 4MB central buffer，内存快照可能只剩一条，甚至完全被挤掉。这种 Trace 打开后并不会报“内存采样没工作”，它只是没有留下足够证据。</p>
 <h3 id="短-Trace：先解决-buffer-混放"><a href="#短-Trace：先解决-buffer-混放" class="headerlink" title="短 Trace：先解决 buffer 混放"></a>短 Trace：先解决 buffer 混放</h3><p>更稳的做法是把高频和低频数据分开：</p>
 <figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br></pre></td><td class="code"><pre><span class="line">buffers &#123; size_kb: <span class="number">131072</span> fill_policy: RING_BUFFER &#125; # <span class="number">0</span>: 高频 ftrace</span><br><span class="line">buffers &#123; size_kb: <span class="number">32768</span>  fill_policy: RING_BUFFER &#125; # <span class="number">1</span>: 低频元数据和日志</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    target_buffer: <span class="number">0</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    process_stats_config &#123;</span><br><span class="line">      scan_all_processes_on_start: <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
@@ -537,7 +573,7 @@ loading="lazy"             decoding="async"
 <p>如果已经拿到一份没有周期 flush 的长 Trace，导入时又遇到 out-of-order，一次性救急可以让 Trace Processor 用 <code>--full-sort</code> 导入。这会牺牲内存，把更多排序工作放到导入阶段；它适合离线分析，不适合作为采集配置的长期答案。</p>
 <p><code>--full-sort</code> 不能修 clock 问题。看到 <code>clock_sync_failure</code>、<code>clock_sync_failure_unknown_source_clock</code>、<code>clock_sync_mixed_clock_sources</code>、<code>clock_sync_failure_undeferrable_packet_loss</code> 这类统计项时，要先按“时间戳&#x2F;clock 语义不可信”处理，再结合 packet loss、ClockSnapshot、producer 写法和导入排序定位根因；不要只靠 <code>--full-sort</code> 或 flush 解释。</p>
 <h2 id="报告里怎么写可信度"><a href="#报告里怎么写可信度" class="headerlink" title="报告里怎么写可信度"></a>报告里怎么写可信度</h2><p>有 data loss 的 Trace 不一定完全作废，但报告必须写边界。结构化字段先定下来：</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">stat_name,stat_idx,idx_semantics,severity,source,value,affected_evidence,affected_metrics,decision,next_config_action</span><br><span class="line">ftrace_cpu_has_data_loss,3,cpu,data_loss,trace,1,sched/thread_state/wakeup,RunnableNegativeConclusion,degrade_or_recapture,reduce_ftrace_events+increase_ftrace_buffer</span><br><span class="line">traced_buf_chunks_overwritten,0,buffer,data_loss,trace,8,buffer0_data_sources,AppTrackEvent;FrameTimeline,recapture_if_target_window_missing,split_buffers+increase_buffer0</span><br></pre></td></tr></table></figure>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">stat_name,stat_idx,idx_semantics,severity,source,value,affected_evidence,affected_metrics,decision,next_config_action</span><br><span class="line">ftrace_cpu_has_data_loss,3,cpu,data_loss,trace,1,sched/thread_state/wakeup,RunnableNegativeConclusion,degrade_or_recapture,reduce_ftrace_events+increase_ftrace_buffer</span><br><span class="line">traced_buf_chunks_overwritten,0,buffer,info,trace,8,buffer0_data_sources,AppTrackEvent;FrameTimeline,recapture_if_target_window_missing,split_buffers+increase_buffer0</span><br></pre></td></tr></table></figure>
 
 <p>自然语言模板可以这样写：</p>
 <figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">完整性检查：stats 表存在 ftrace_cpu_has_data_loss，CPU 3 value=1；ftrace_cpu_overrun_delta / dropped_events_delta 只作为辅助说明。</span><br><span class="line">影响范围：sched/ftrace 事件可能缺失，线程状态占比和唤醒关系只能作为参考；不能写“没有 Runnable 等待”。</span><br><span class="line">仍可使用：未发现 FrameTimeline parser/pairing 异常，目标窗口内 expected/actual slices 覆盖完整，且未命中同源 buffer loss；App SDK Track Event 未见 packet/sequence/tokenizer/interning/track hierarchy 异常。若这些数据与丢失 buffer 同源，仍需降级。</span><br><span class="line">下一次配置：减少 ftrace 事件，ftrace buffer 调到 32768KB，drain_period_ms 调到 100ms。</span><br></pre></td></tr></table></figure>
@@ -551,22 +587,36 @@ loading="lazy"             decoding="async"
 <li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/analysis/sql-stats">Trace Processor Stats</a></li>
 <li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/getting-started/ftrace">Instrumenting the Linux kernel with ftrace</a></li>
 </ol>
+<p>源码核对版本：<code>b23c67be1159e3f0b0657bd97be9e139e0d8ee2c</code>（2026-09-19）。</p>
+<ul>
+<li><a target="_blank" rel="noopener" href="https://github.com/google/perfetto/blob/b23c67be1159e3f0b0657bd97be9e139e0d8ee2c/src/trace_processor/storage/stats.h">Perfetto stats 定义</a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/google/perfetto/blob/add693d8b338ba9599dbcbc3e300b1ab8c000897/src/trace_processor/storage/stats.h">v58.2 stats 定义（含 indexed 项）</a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/google/perfetto/blob/da1d152cff27890903d158fe96751de3aab883cc/src/trace_processor/storage/stats.h">v57.2 stats 定义</a></li>
+</ul>
 <h2 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h2><p>欢迎关注 <a target="_blank" rel="noopener" href="https://www.androidperformance.com/">Android Performance</a>。</p>
-<!-- flag of hidden posts -->
+
     </article>
     <!-- license -->
         <div class="license-wrapper">
             <p>Author：<a href="https://androidperformance.com">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">https://androidperformance.com/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/</a>
             <p>Publish date：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">May 4th 2026, 10:12:00 am</a>
-            <p>Update date：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">July 18th 2026, 1:54:54 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">September 20th 2026, 12:49:52 am</a>
             <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     <!-- paginator -->
     <ul class="post-paginator">
         <li class="next">
+                <div class="nextSlogan">Next Post</div>
+                <a href="/2026/05/04/Android-Perfetto-13-Track-Event-SDK/" title="Android Perfetto 系列 13：Perfetto SDK、Track Event 与 App 现场 Trace">
+                    <div class="nextTitle">Android Perfetto 系列 13：Perfetto SDK、Track Event 与 App 现场 Trace</div>
+                </a>
         </li>
         <li class="previous">
+                <div class="prevSlogan">Previous Post</div>
+                <a href="/2026/05/04/Android-Perfetto-11-PerfettoSQL-TraceProcessor-Automation/" title="Android Perfetto 系列 11：PerfettoSQL、Trace Processor 与回归检测">
+                    <div class="prevTitle">Android Perfetto 系列 11：PerfettoSQL、Trace Processor 与回归检测</div>
+                </a>
         </li>
     </ul>
     <!-- comment -->
@@ -628,7 +678,7 @@ loading="lazy"             decoding="async"
                 <div class="toc-catalog">
                     <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
                 </div>
-                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Trace-%E6%9C%89%E6%95%B0%E6%8D%AE%EF%BC%8C%E4%B8%8D%E4%BB%A3%E8%A1%A8%E8%AF%81%E6%8D%AE%E5%AE%8C%E6%95%B4"><span class="toc-number">1.</span> <span class="toc-text">Trace 有数据，不代表证据完整</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%95%B0%E6%8D%AE%E4%BB%8E%E5%93%AA%E9%87%8C%E8%B5%B0%E5%88%B0-Trace-%E6%96%87%E4%BB%B6"><span class="toc-number">2.</span> <span class="toc-text">数据从哪里走到 Trace 文件</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%94%A8-stats-%E7%BB%99-Trace-%E5%81%9A%E4%BD%93%E6%A3%80"><span class="toc-number">3.</span> <span class="toc-text">用 stats 给 Trace 做体检</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#ftrace-%E4%B8%A2%E5%A4%B1%EF%BC%9A%E5%86%85%E6%A0%B8%E4%BA%8B%E4%BB%B6%E8%B7%9F%E4%B8%8D%E4%B8%8A"><span class="toc-number">4.</span> <span class="toc-text">ftrace 丢失：内核事件跟不上</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#producer-x2F-TraceWriter-packet-loss%EF%BC%9A%E5%85%88%E5%AE%9A%E4%BD%8D%E5%86%8D%E5%BD%92%E5%9B%A0"><span class="toc-number">5.</span> <span class="toc-text">producer &#x2F; TraceWriter packet loss：先定位再归因</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#central-buffer-%E4%B8%A2%E5%A4%B1%EF%BC%9ARing-%E8%A6%86%E7%9B%96%E6%88%96-Discard-%E4%B8%A2%E6%96%B0%E6%95%B0%E6%8D%AE"><span class="toc-number">6.</span> <span class="toc-text">central buffer 丢失：Ring 覆盖或 Discard 丢新数据</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%9F%AD-Trace%EF%BC%9A%E5%85%88%E8%A7%A3%E5%86%B3-buffer-%E6%B7%B7%E6%94%BE"><span class="toc-number">6.1.</span> <span class="toc-text">短 Trace：先解决 buffer 混放</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%95%BF-Trace%EF%BC%9A%E5%86%8D%E8%A7%A3%E5%86%B3%E5%91%A8%E6%9C%9F%E5%86%99%E6%96%87%E4%BB%B6"><span class="toc-number">6.2.</span> <span class="toc-text">长 Trace：再解决周期写文件</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%A2%9E%E9%87%8F%E7%8A%B6%E6%80%81%E4%B8%A2%E5%A4%B1%EF%BC%9A%E4%BA%8B%E4%BB%B6%E8%BF%98%E5%9C%A8%EF%BC%8C%E5%90%8D%E5%AD%97%E5%92%8C%E4%B8%8A%E4%B8%8B%E6%96%87%E7%BC%BA%E4%BA%86"><span class="toc-number">7.</span> <span class="toc-text">增量状态丢失：事件还在，名字和上下文缺了</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E9%95%BF-Trace-%E8%BF%98%E8%A6%81%E5%85%B3%E6%B3%A8-flush"><span class="toc-number">8.</span> <span class="toc-text">长 Trace 还要关注 flush</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%8A%A5%E5%91%8A%E9%87%8C%E6%80%8E%E4%B9%88%E5%86%99%E5%8F%AF%E4%BF%A1%E5%BA%A6"><span class="toc-number">9.</span> <span class="toc-text">报告里怎么写可信度</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%80%BB%E7%BB%93"><span class="toc-number">10.</span> <span class="toc-text">总结</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E6%96%87%E6%A1%A3"><span class="toc-number">11.</span> <span class="toc-text">参考文档</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number">12.</span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a></li></ol>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0"><span class="toc-number">1.</span> <span class="toc-text">Perfetto 系列文章</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Trace-%E6%9C%89%E6%95%B0%E6%8D%AE%EF%BC%8C%E4%B8%8D%E4%BB%A3%E8%A1%A8%E8%AF%81%E6%8D%AE%E5%AE%8C%E6%95%B4"><span class="toc-number">2.</span> <span class="toc-text">Trace 有数据，不代表证据完整</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%95%B0%E6%8D%AE%E4%BB%8E%E5%93%AA%E9%87%8C%E8%B5%B0%E5%88%B0-Trace-%E6%96%87%E4%BB%B6"><span class="toc-number">3.</span> <span class="toc-text">数据从哪里走到 Trace 文件</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%94%A8-stats-%E7%BB%99-Trace-%E5%81%9A%E4%BD%93%E6%A3%80"><span class="toc-number">4.</span> <span class="toc-text">用 stats 给 Trace 做体检</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#ftrace-%E4%B8%A2%E5%A4%B1%EF%BC%9A%E5%86%85%E6%A0%B8%E4%BA%8B%E4%BB%B6%E8%B7%9F%E4%B8%8D%E4%B8%8A"><span class="toc-number">5.</span> <span class="toc-text">ftrace 丢失：内核事件跟不上</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#producer-x2F-TraceWriter-packet-loss%EF%BC%9A%E5%85%88%E5%AE%9A%E4%BD%8D%E5%86%8D%E5%BD%92%E5%9B%A0"><span class="toc-number">6.</span> <span class="toc-text">producer &#x2F; TraceWriter packet loss：先定位再归因</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#central-buffer-%E4%B8%A2%E5%A4%B1%EF%BC%9ARing-%E8%A6%86%E7%9B%96%E6%88%96-Discard-%E4%B8%A2%E6%96%B0%E6%95%B0%E6%8D%AE"><span class="toc-number">7.</span> <span class="toc-text">central buffer 丢失：Ring 覆盖或 Discard 丢新数据</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%9F%AD-Trace%EF%BC%9A%E5%85%88%E8%A7%A3%E5%86%B3-buffer-%E6%B7%B7%E6%94%BE"><span class="toc-number">7.1.</span> <span class="toc-text">短 Trace：先解决 buffer 混放</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%95%BF-Trace%EF%BC%9A%E5%86%8D%E8%A7%A3%E5%86%B3%E5%91%A8%E6%9C%9F%E5%86%99%E6%96%87%E4%BB%B6"><span class="toc-number">7.2.</span> <span class="toc-text">长 Trace：再解决周期写文件</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%A2%9E%E9%87%8F%E7%8A%B6%E6%80%81%E4%B8%A2%E5%A4%B1%EF%BC%9A%E4%BA%8B%E4%BB%B6%E8%BF%98%E5%9C%A8%EF%BC%8C%E5%90%8D%E5%AD%97%E5%92%8C%E4%B8%8A%E4%B8%8B%E6%96%87%E7%BC%BA%E4%BA%86"><span class="toc-number">8.</span> <span class="toc-text">增量状态丢失：事件还在，名字和上下文缺了</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E9%95%BF-Trace-%E8%BF%98%E8%A6%81%E5%85%B3%E6%B3%A8-flush"><span class="toc-number">9.</span> <span class="toc-text">长 Trace 还要关注 flush</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%8A%A5%E5%91%8A%E9%87%8C%E6%80%8E%E4%B9%88%E5%86%99%E5%8F%AF%E4%BF%A1%E5%BA%A6"><span class="toc-number">10.</span> <span class="toc-text">报告里怎么写可信度</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%80%BB%E7%BB%93"><span class="toc-number">11.</span> <span class="toc-text">总结</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E6%96%87%E6%A1%A3"><span class="toc-number">12.</span> <span class="toc-text">参考文档</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number">13.</span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a></li></ol>
             </div>
         <!-- sidebar -->
         <div class="sidebar sidebar-hide">
@@ -770,33 +820,82 @@ loading="lazy"             decoding="async"
         
         
         
+        
+        
+        
+        
+        
+        
+        
+        
+        
     <div class="total-and-search">
         <div class="total-archive">
-        Total : 130
+        Total : 139
         </div>
     </div>
     <div class="post-archive">
             <div class="archive-year"> 2026 </div>
             <ul class="year-list">
         <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/2026/09/19/SmartPerfetto-v1.12.0-Release-Notes/">SmartPerfetto v1.12.0 更新说明</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/2026/09/19/AIW-Open-Source-Android-Internals-Wiki/">耗时大半年，开源一本 Android 电子书《Android 技术内幕：系统机制、性能优化与工具实战》</a>
+        </li>
+        <li class="archive-post-item">
             <span class="archive-post-date">08/21</span>
-            <a class="archive-post-title" href="/2026/08/21/SmartPerfetto-Five-Week-Update/">SmartPerfetto 2026.07.18-08.21 五周更新复盘：从 v1.2.0 到 v1.7.0</a>
+            <a class="archive-post-title" href="/2026/08/21/SmartPerfetto-Five-Week-Update/">SmartPerfetto v1.7.0 更新说明</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">07/17</span>
-            <a class="archive-post-title" href="/2026/07/17/SmartPerfetto-Six-Week-Update/">SmartPerfetto 2026.06.04-07.17 六周更新复盘：从 v1.0.28 到 v1.1.1</a>
+            <a class="archive-post-title" href="/2026/07/17/SmartPerfetto-Six-Week-Update/">SmartPerfetto v1.1.1 更新说明</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">06/04</span>
-            <a class="archive-post-title" href="/2026/06/04/SmartPerfetto-Three-Week-Update/">SmartPerfetto 2026.05.17-06.04 三周更新：Smart 模式、证据规则和四条 Runtime</a>
+            <a class="archive-post-title" href="/2026/06/04/SmartPerfetto-Three-Week-Update/">SmartPerfetto v1.0.28 更新说明</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/17</span>
-            <a class="archive-post-title" href="/2026/05/17/SmartPerfetto-Two-Week-Update/">SmartPerfetto 2026.04.29-05.17 两周更新：从 Perfetto AI Assistant 到可复用的 Trace 分析平台</a>
+            <a class="archive-post-title" href="/2026/05/17/SmartPerfetto-Two-Week-Update/">SmartPerfetto v1.0.7 更新说明</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/05</span>
-            <a class="archive-post-title" href="/2026/05/05/What-I-Am-Building/">「置顶」我做了什么</a>
+            <a class="archive-post-title" href="/2026/05/05/What-I-Am-Building/">我做了什么</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto 系列 18：响应速度实战，从输入事件到首帧反馈</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/2026/05/04/Android-Perfetto-17-Engineering-Domain-And-Platform-Tracing/">Android Perfetto 系列 17：专项场景自动化、问题清单与平台体系</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto 系列 16：GPU、Power Counters 与硬件瓶颈分析</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto 系列 15：Boot Trace、长时间现场 Trace 与偶发问题抓取</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto 系列 14：heapprofd 与内存 Profiling</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto 系列 13：Perfetto SDK、Track Event 与 App 现场 Trace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">Android Perfetto 系列 12：Trace 数据流与丢失排查</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/2026/05/04/Android-Perfetto-11-PerfettoSQL-TraceProcessor-Automation/">Android Perfetto 系列 11：PerfettoSQL、Trace Processor 与回归检测</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/29</span>
@@ -891,10 +990,6 @@ loading="lazy"             decoding="async"
                 </ul>
             <div class="archive-year"> 2023 </div>
             <ul class="year-list">
-        <li class="archive-post-item">
-            <span class="archive-post-date">12/30</span>
-            <a class="archive-post-title" href="/2023/12/30/the-performance/">关于 The Android Performance 知识星球介绍</a>
-        </li>
         <li class="archive-post-item">
             <span class="archive-post-date">10/15</span>
             <a class="archive-post-title" href="/2023/10/15/the-performance-design-of-os-en/">The Performance Design Of OS</a>
@@ -1017,7 +1112,7 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">12/01</span>
-            <a class="archive-post-title" href="/2019/12/01/BlogMap/">「置顶」博客文章目录</a>
+            <a class="archive-post-title" href="/2019/12/01/BlogMap/">「置顶」博客文章目录 + 个人项目</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">12/01</span>
@@ -1356,6 +1451,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Android
             </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
             <span class="sidebar-tag-name" data-tags="Perfetto">
                 <span class="iconfont-archer">&#xe606;</span>
                 Perfetto
@@ -1363,10 +1462,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Systrace">
                 <span class="iconfont-archer">&#xe606;</span>
                 Systrace
-            </span>
-            <span class="sidebar-tag-name" data-tags="Jank">
-                <span class="iconfont-archer">&#xe606;</span>
-                Jank
             </span>
             <span class="sidebar-tag-name" data-tags="年终总结">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1376,9 +1471,33 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 知识星球
             </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="AOSP">
+                <span class="iconfont-archer">&#xe606;</span>
+                AOSP
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="AIW">
+                <span class="iconfont-archer">&#xe606;</span>
+                AIW
+            </span>
+            <span class="sidebar-tag-name" data-tags="Open Source">
+                <span class="iconfont-archer">&#xe606;</span>
+                Open Source
+            </span>
             <span class="sidebar-tag-name" data-tags="随笔">
                 <span class="iconfont-archer">&#xe606;</span>
                 随笔
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
             </span>
             <span class="sidebar-tag-name" data-tags="Agent OS">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1396,29 +1515,17 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Mobile OS
             </span>
-            <span class="sidebar-tag-name" data-tags="ANR">
+            <span class="sidebar-tag-name" data-tags="Tools">
                 <span class="iconfont-archer">&#xe606;</span>
-                ANR
+                Tools
             </span>
             <span class="sidebar-tag-name" data-tags="RenderThread">
                 <span class="iconfont-archer">&#xe606;</span>
                 RenderThread
             </span>
-            <span class="sidebar-tag-name" data-tags="Performance">
-                <span class="iconfont-archer">&#xe606;</span>
-                Performance
-            </span>
-            <span class="sidebar-tag-name" data-tags="Tools">
-                <span class="iconfont-archer">&#xe606;</span>
-                Tools
-            </span>
             <span class="sidebar-tag-name" data-tags="Linux">
                 <span class="iconfont-archer">&#xe606;</span>
                 Linux
-            </span>
-            <span class="sidebar-tag-name" data-tags="Framework">
-                <span class="iconfont-archer">&#xe606;</span>
-                Framework
             </span>
             <span class="sidebar-tag-name" data-tags="Java">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1455,6 +1562,62 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Binder">
                 <span class="iconfont-archer">&#xe606;</span>
                 Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="SQL">
+                <span class="iconfont-archer">&#xe606;</span>
+                SQL
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceProcessor">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceProcessor
+            </span>
+            <span class="sidebar-tag-name" data-tags="Trace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Trace
+            </span>
+            <span class="sidebar-tag-name" data-tags="DataFlow">
+                <span class="iconfont-archer">&#xe606;</span>
+                DataFlow
+            </span>
+            <span class="sidebar-tag-name" data-tags="SDK">
+                <span class="iconfont-archer">&#xe606;</span>
+                SDK
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceEvent">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceEvent
+            </span>
+            <span class="sidebar-tag-name" data-tags="heapprofd">
+                <span class="iconfont-archer">&#xe606;</span>
+                heapprofd
+            </span>
+            <span class="sidebar-tag-name" data-tags="GPU">
+                <span class="iconfont-archer">&#xe606;</span>
+                GPU
+            </span>
+            <span class="sidebar-tag-name" data-tags="Power">
+                <span class="iconfont-archer">&#xe606;</span>
+                Power
+            </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
+            <span class="sidebar-tag-name" data-tags="Input">
+                <span class="iconfont-archer">&#xe606;</span>
+                Input
+            </span>
+            <span class="sidebar-tag-name" data-tags="Latency">
+                <span class="iconfont-archer">&#xe606;</span>
+                Latency
+            </span>
+            <span class="sidebar-tag-name" data-tags="Camera">
+                <span class="iconfont-archer">&#xe606;</span>
+                Camera
+            </span>
+            <span class="sidebar-tag-name" data-tags="Audio">
+                <span class="iconfont-archer">&#xe606;</span>
+                Audio
             </span>
             <span class="sidebar-tag-name" data-tags="MAT">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1504,10 +1667,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 MCP
             </span>
-            <span class="sidebar-tag-name" data-tags="Open Source">
-                <span class="iconfont-archer">&#xe606;</span>
-                Open Source
-            </span>
             <span class="sidebar-tag-name" data-tags="Android Performance">
                 <span class="iconfont-archer">&#xe606;</span>
                 Android Performance
@@ -1544,13 +1703,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 程序员的修炼
             </span>
-            <span class="sidebar-tag-name" data-tags="设计原则">
-                <span class="iconfont-archer">&#xe606;</span>
-                设计原则
-            </span>
             <span class="sidebar-tag-name" data-tags="测试">
                 <span class="iconfont-archer">&#xe606;</span>
                 测试
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计原则">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计原则
             </span>
             <span class="sidebar-tag-name" data-tags="了解你的用户">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1614,13 +1773,13 @@ loading="lazy"             decoding="async"
             <span class="iconfont-archer">&#xe60a;</span>
             Android
         </span>
-        <span class="sidebar-category-name" data-categories="AI">
-            <span class="iconfont-archer">&#xe60a;</span>
-            AI
-        </span>
         <span class="sidebar-category-name" data-categories="Java">
             <span class="iconfont-archer">&#xe60a;</span>
             Java
+        </span>
+        <span class="sidebar-category-name" data-categories="AI">
+            <span class="iconfont-archer">&#xe60a;</span>
+            AI
         </span>
         <span class="sidebar-category-name" data-categories="Android性能优化">
             <span class="iconfont-archer">&#xe60a;</span>

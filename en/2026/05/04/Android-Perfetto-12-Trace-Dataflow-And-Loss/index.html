@@ -1,0 +1,1980 @@
+<!DOCTYPE html>
+<html lang="en">
+    <!-- title -->
+            <!-- keywords -->
+
+                  <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <meta name="author" content="Gracker">
+                    <meta name="renderer" content="webkit">
+                    <meta name="copyright" content="Gracker">
+                      <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,Optimization,Startup,Perfetto,Systrace,RenderThread,Java,Responsiveness,Smoothness">
+                          <meta name="description" content="Technical blog about Android system performance optimization">
+                          <meta name="description" content="One of the most troublesome situations when opening a trace is finding that the file appears to contain data, but some of it was lost along the way. The UI still shows tracks, and SQL still returns ro">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Android Perfetto Series 12: Trace Dataflow and Data Loss Troubleshooting">
+<meta property="og:url" content="https://androidperformance.com/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/index.html">
+<meta property="og:site_name" content="Android Performance">
+<meta property="og:description" content="One of the most troublesome situations when opening a trace is finding that the file appears to contain data, but some of it was lost along the way. The UI still shows tracks, and SQL still returns ro">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://androidperformance.com/en/images/Perfetto-11-18-Diagrams/02-trace-dataflow.png">
+<meta property="article:published_time" content="2026-05-04T02:12:00.000Z">
+<meta property="article:modified_time" content="2026-09-19T16:52:22.730Z">
+<meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Android">
+<meta property="article:tag" content="Perfetto">
+<meta property="article:tag" content="Performance">
+<meta property="article:tag" content="Trace">
+<meta property="article:tag" content="DataFlow">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://androidperformance.com/en/images/Perfetto-11-18-Diagrams/02-trace-dataflow.png">
+                            <meta http-equiv="Cache-control" content="no-cache">
+                            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+                            <link rel="icon" href="/en/assets/favicon.ico">
+                                <title>
+                                  Android Perfetto Series 12: Trace Dataflow and Data Loss Troubleshooting · Android Performance
+                                </title>
+                                
+<link rel="canonical" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">
+                                  <style type="text/css">
+    @font-face {
+        font-family: 'Oswald-Regular';
+        src: url("/en/font/Oswald-Regular.woff2") format('woff2'),
+             url("/en/font/Oswald-Regular.ttf") format('truetype');
+        font-display: swap;
+    }
+
+    body {
+        margin: 0;
+    }
+
+    /* Removed initial hide to show content immediately */
+
+    .site-intro {
+        position: relative;
+        z-index: 3;
+        width: 100%;
+        /* height: 50vh; */
+        overflow: hidden;
+    }
+
+    .site-intro-placeholder {
+        position: absolute;
+        z-index: -2;
+        top: 0;
+        left: 0;
+        width: calc(100% + 300px);
+        height: 100%;
+        background: repeating-linear-gradient(
+            -45deg,
+            #444 0,
+            #444 80px,
+            #333 80px,
+            #333 160px
+        );
+        background-position: center center;
+        transform: translate3d(-226px, 0, 0);
+        animation: gradient-move 2.5s ease-out 0s infinite;
+    }
+
+    @keyframes gradient-move {
+        0% {
+            transform: translate3d(-226px, 0, 0);
+        }
+        100% {
+            transform: translate3d(0, 0, 0);
+        }
+    }
+</style>
+
+                                    <link id="stylesheet-base" rel="stylesheet" href="/en/css/style.css">
+                                    <link id="stylesheet-mobile" rel="stylesheet" href="/en/css/mobile.css" media="screen and (max-width: 960px)">
+                                    <link id="stylesheet-theme-dark" rel="stylesheet" href="/en/css/dark.css">
+                                    <link id="stylesheet-custom" rel="stylesheet" href="/en/css/custom.css">
+                                    <link rel="preload" href="/en/lib/jquery.min.js" as="script">
+                                    <link rel="preload" href="/en/scripts/main.js" as="script">
+                                    <!-- algolia -->
+                                                    <!-- Hreflang Tags -->
+                                                    
+                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/" />
+                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/" />
+                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/" />
+                  <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/en/atom.xml" title="Android Performance" type="application/atom+xml">
+</head>
+
+        <body class="post-body">
+        <!-- header -->
+        <header class="header header-mobile">
+    <!-- top read progress line -->
+    <div class="header-element">
+        <div class="read-progress"></div>
+    </div>
+    <!-- sidebar menu button -->
+    <div class="header-element">
+        <div
+            class="header-sidebar-menu">
+                    <div style="padding-left: 1px;">&#xe775;</div>
+        </div>
+    </div>
+    <!-- header actions -->
+    <div class="header-actions">
+        <!-- search button -->
+            <span class="header-search-btn header-element popup-trigger" role="button" aria-label="Search" data-tooltip="Search">
+                <span class="iconfont-archer search-icon" aria-hidden="true">&#xe627;</span>
+            </span>
+        <!-- theme mode switch button -->
+        <span class="header-theme-btn header-element" role="button" aria-label="Theme" data-tooltip="Theme">
+            <span aria-hidden="true">&#9680;</span>
+        </span>
+        <!-- language transition button -->
+        <span class="header-lang-btn header-element" data-tooltip="Language">
+            <a href="javascript:void(0)" onclick="toggleLanguage()" class="lang-text" aria-label="Language">EN</a>
+            <script>
+                // Update language button text based on current path
+                (function() {
+                    var path = window.location.pathname;
+                    var isEn = /^\/en(\/|$)/.test(path);
+                    var langBtn = document.querySelector('.header-lang-btn .lang-text');
+                    if (langBtn) {
+                        langBtn.textContent = isEn ? 'CN' : 'EN';
+                    }
+                })();
+                
+                function toggleLanguage() {
+                    var path = window.location.pathname;
+                    var isEn = /^\/en(\/|$)/.test(path);
+
+                    if (isEn) {
+                        var newPath = path.replace(/^\/en(\/|$)/, '/');
+                        if (newPath === '') newPath = '/';
+                        window.location.href = newPath;
+                    } else {
+                        var suffix = path;
+                        if (suffix === '/') suffix = '';
+                        window.location.href = '/en' + suffix;
+                    }
+                }
+            </script>
+        </span>
+        <!-- home button -->
+        <span class="home-link header-element">
+            <a href="/en/" aria-label="Home" data-tooltip="Home">
+                <svg class="home-icon" aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="m3 10.5 9-7 9 7"></path>
+                    <path d="M5 9.5V21h14V9.5"></path>
+                    <path d="M10 21v-6h4v6"></path>
+                </svg>
+            </a>
+        </span>
+    </div>
+    <!-- toggle banner -->
+                <div class="banner">
+                        <div class="blog-title header-element">
+                            <a href="/en/">
+                                Android Performance
+                            </a>
+                        </div>
+                        <div class="post-title header-element">
+                            <a href="#" class="post-name">Android Perfetto Series 12: Trace Dataflow and Data Loss Troubleshooting</a>
+                        </div>
+                </div>
+</header>
+
+        <!-- fixed footer -->
+        <footer class="footer-fixed">
+    <!-- donate button -->
+    <div class="donate-popup donate-popup--hidden">
+    <div class="donate-popup__title">Buy Me A Coffee</div>
+    <div class="donate-popup__content">
+        <div class="donate-popup__content-description">If you find this article helpful, consider buying me a coffee.</div>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Wechat"
+            alt="Wechat"
+            src="/en/assets/donate-wechat.webp"
+        ></img>
+        <img
+            class="donate-popup__content-qrCode"
+            title="Alipay"
+            alt="Alipay"
+            src="/en/assets/donate-alipay.png"
+        ></img>
+    </div>
+</div>
+
+    <div
+        title="Donate to the author"
+        class="footer-fixed-btn footer-fixed-btn--hidden donate-btn"
+    >
+        <span aria-hidden="true">&#165;</span>
+    </div>
+
+    <!-- back to top button -->
+    <div class="footer-fixed-btn footer-fixed-btn--hidden back-top">
+        <div>&#xe639;</div>
+    </div>
+</footer>
+
+        <!-- wrapper -->
+        <div class="wrapper">
+            <div class="site-intro" style="    height:50vh;
+">
+    <!-- 主页  -->
+    <!-- 404页  -->
+    <div class="site-intro-placeholder"></div>
+    <picture>
+            <source type="image/webp" srcset="/en/intro/post-bg.webp">
+        <img class="site-intro-img"
+             src="/en/intro/post-bg.jpg"
+             alt=""
+loading="lazy"             decoding="async"
+             fetchpriority="auto"
+             sizes="100vw">
+    </picture>
+    <div class="site-intro-meta">
+        <!-- 标题  -->
+        <h1 class="intro-title">
+            <!-- 主页  -->
+                Android Perfetto Series 12: Trace Dataflow and Data Loss Troubleshooting
+            <!-- 404 -->
+        </h1>
+        <!-- 副标题 -->
+        <p class="intro-subtitle">
+            <!-- 主页副标题  -->
+            <!-- 404 -->
+        </p>
+        <!-- 文章页 meta -->
+            <div class="post-intros">
+                <!-- 文章页标签  -->
+                    <div class="post-intro-tags" >
+        <span class="post-category" data-categories="Android">
+            <span class="iconfont-archer post-category-icon" aria-hidden="true">&#xe666;</span>
+            <span class="post-category-text">
+                Android
+            </span>
+        </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Trace">Trace</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="DataFlow">DataFlow</a>
+</div>
+
+                <!-- 文章字数统计 -->
+                    <div class="post-intro-read">
+                        <span>Word count: <span class="post-count word-count">5.3k</span>Reading time: <span class="post-count reading-time">33 min</span></span>
+                    </div>
+                <div class="post-intro-meta">
+                    <!-- 撰写日期 -->
+                    <span class="iconfont-archer post-intro-calander">&#xe676;</span>
+                    <span class="post-intro-time">2026/05/04</span>
+                    <!-- 文章分享 -->
+                    <span class="share-wrapper">
+                        <span class="iconfont-archer share-icon">&#xe71d;</span>
+                        <span class="share-text">Share</span>
+                        <ul class="share-list">
+                            <li class="iconfont-archer share-qr" data-type="qr">&#xe75b;
+                                <div class="share-qrcode"></div>
+                            </li>
+                            <li class="iconfont-archer" data-type="weibo">&#xe619;</li>
+                            <li class="iconfont-archer" data-type="qzone">&#xe62e;</li>
+                            <li class="iconfont-archer" data-type="twitter">&#xe634;</li>
+                            <li class="iconfont-archer" data-type="facebook">&#xe67a;</li>
+                        </ul>
+                    </span>
+                </div>
+            </div>
+    </div>
+</div>
+
+            
+            <script>
+  (function () {
+    var done = false
+
+    function fontLoaded() {
+      if (done) return
+      done = true
+
+      var introTitle = document.getElementsByClassName('intro-title')[0]
+      var introSubtitle = document.getElementsByClassName('intro-subtitle')[0]
+      var postIntros = document.getElementsByClassName('post-intros')[0]
+
+      if (introTitle) introTitle.classList.add('intro-fade-in')
+      if (introSubtitle) introSubtitle.classList.add('intro-fade-in')
+      if (postIntros) postIntros.classList.add('post-fade-in')
+    }
+
+    function waitForLocalFont() {
+      if (document.fonts && document.fonts.load) {
+        Promise.race([
+          document.fonts.load('1em Oswald-Regular'),
+          new Promise(function (resolve) { setTimeout(resolve, 1000) })
+        ]).then(fontLoaded, fontLoaded)
+      } else {
+        fontLoaded()
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', waitForLocalFont, false)
+    } else {
+      waitForLocalFont()
+    }
+  })()
+</script>
+
+            <img class="loading" src="/en/assets/loading.svg" style="display: block; margin: 6rem auto 0 auto; width: 6rem; height: 6rem;" alt="loading">
+            <div class="container container-unloaded">
+                <main class="main post-page">
+    <article class="article-entry">
+        <p>One of the most troublesome situations when opening a trace is finding that the file appears to contain data, but some of it was lost along the way. The UI still shows tracks, and SQL still returns rows, yet part of a thread’s state history is missing, process names do not line up, or some Track Events have disappeared. The further you analyze it, the more your conclusions start to resemble guesses.</p>
+<p>SQL can only analyze evidence that still exists in the trace. Unless you address this first, even the most elegant queries merely turn a trace with missing evidence into a table.</p>
+<p>Part 02 covered capture, and Part 11 covered SQL queries. This article focuses on one question: where did the trace lose data, which conclusions does that affect, and how should the next capture configuration change?</p>
+<p>We will follow the data from the kernel to the trace file, locating loss at each stage: ftrace, producer shared memory, the central buffer, incremental state, and flush. Each stage loses data differently and needs a different remedy. At the end, there is a template for explaining how much of a trace remains trustworthy in an analysis report.</p>
+<span id="more"></span>
+
+<p><a id="series"></a></p>
+<h2 id="Perfetto-Series-Catalog"><a href="#Perfetto-Series-Catalog" class="headerlink" title="Perfetto Series Catalog"></a>Perfetto Series Catalog</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/03/27/Android-Perfetto-101/">Android Perfetto Series Catalog</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto Series 1: Introduction to Perfetto</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto Series 4: Opening Large Traces via Command Line</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Choreographer-based Rendering Flow</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto Series 6: Why 120Hz? Advantages and Challenges</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto Series 7: MainThread and RenderThread Deep Dive</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto Series 8: Understanding Vsync and Performance Analysis</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto Series 9: Interpreting CPU Information</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto Series 10: Binder Scheduling and Lock Contention</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-11-PerfettoSQL-TraceProcessor-Automation/">Android Perfetto Series 11: PerfettoSQL, Trace Processor and Regression Detection</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">Android Perfetto Series 12: Trace Dataflow and Data Loss</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event and App Field Traces</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto Series 14: heapprofd and Memory Profiling</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces and Long-running Field Tracing</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters and Hardware Bottlenecks</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-17-Engineering-Domain-And-Platform-Tracing/">Android Perfetto Series 17: Scenario Automation and Platform Tracing</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto Series 18: Input Response Latency</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV1oi82efE4D/?vd_source=0c6d2191e785de0a36dc21a9da7e664e">Video (Bilibili) - Android Perfetto Basics and Case Studies</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV17A6bBLECu/">Video (Bilibili) - Android Perfetto: Trace Graph Types - AOSP, WebView, Flutter + OEM System Optimization</a></li>
+</ol>
+<h2 id="A-Trace-with-Data-Does-Not-Necessarily-Have-Complete-Evidence"><a href="#A-Trace-with-Data-Does-Not-Necessarily-Have-Complete-Evidence" class="headerlink" title="A Trace with Data Does Not Necessarily Have Complete Evidence"></a>A Trace with Data Does Not Necessarily Have Complete Evidence</h2><p>Perfetto is not a lossless recorder. Its write path is asynchronous to keep overhead low: producers first write to their own shared memory; when shared-memory pages fill, tracing ends, or a flush occurs, they submit that data to the central buffer in <code>traced</code>. The data is then written to the output file when tracing ends, during streaming, or through periodic file writes.</p>
+<p>Data loss can occur whenever any stage cannot keep up. A flush only asks producers to hand uncommitted data to the tracing service; it does not mean the data has been written directly to the file.</p>
+<p>Before analyzing a trace, make an integrity check part of your routine:</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">Open the trace</span><br><span class="line">  -&gt; Query stats</span><br><span class="line">  -&gt; Locate loss in ftrace, central buffers, or parsing</span><br><span class="line">  -&gt; Mark metrics that provide only tentative evidence</span><br><span class="line">  -&gt; Decide which questions this trace can answer</span><br><span class="line">  -&gt; Adjust the next capture configuration</span><br></pre></td></tr></table></figure>
+
+<p><img src="/en/images/Perfetto-11-18-Diagrams/02-trace-dataflow.png" alt="Trace dataflow from event writes to the output file"></p>
+<p><em>Diagram: the ftrace kernel buffers, producer shared memory, and central buffers are separate stages; a flush is not the same as writing the file to storage.</em></p>
+<p>This takes little time and can save you from spending the next half hour analyzing a trace with gaps.</p>
+<p>A common field scenario looks like this: you can find a janky frame and main-thread slices in Perfetto UI, but <code>stats</code> also contains <code>ftrace_cpu_has_data_loss</code>. First distinguish the sources of your evidence.</p>
+<p>On Android 12+ with <code>android.surfaceflinger.frametimeline</code> enabled, FrameTimeline can still serve as an entry point if the expected&#x2F;actual FrameTimeline slices exist in the target window and there are no parser or pairing anomalies. App SDK Track Events may also help locate business-level stages.</p>
+<p>However, Choreographer, HWUI, RenderThread, and SurfaceFlinger slices from atrace&#x2F;ftrace, along with Runnable and wakeup conclusions, must be downgraded when ftrace loss occurs. “No Runnable wait was observed” cannot be written as “there was no scheduling issue.”</p>
+<h2 id="How-Data-Reaches-the-Trace-File"><a href="#How-Data-Reaches-the-Trace-File" class="headerlink" title="How Data Reaches the Trace File"></a>How Data Reaches the Trace File</h2><p>The Perfetto data path can be divided into four stages:</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Where it happens</th>
+<th>Common problems</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Data sources produce events</td>
+<td><code>traced_probes</code>, app processes, native processes, heapprofd</td>
+<td>Too many events enabled; dense bursts of writes</td>
+</tr>
+<tr>
+<td>Producer shared memory</td>
+<td>Shared memory between each producer and <code>traced</code></td>
+<td>Producers write faster than <code>traced</code> can drain the data</td>
+</tr>
+<tr>
+<td>Central buffer (the tracing service’s central buffer)</td>
+<td><code>buffers</code> in <code>TraceConfig</code></td>
+<td>Ring overwrites old data; Discard drops new data</td>
+</tr>
+<tr>
+<td>Output file and parsing</td>
+<td>Trace file, Trace Processor</td>
+<td>Long traces are not written to file promptly; import sorting or clock synchronization anomalies</td>
+</tr>
+</tbody></table>
+<p>Incremental state is a concern across stages, not a separate transport path. When context packets such as Track Event track descriptors, interned strings, and process&#x2F;thread metadata are overwritten or missing, subsequent events may retain only IDs or be skipped by Trace Processor.</p>
+<p><code>linux.ftrace</code> has an additional kernel per-CPU buffer stage. Kernel events first enter each CPU’s ftrace buffer, which <code>traced_probes</code> reads periodically. This stage is particularly vulnerable when ftrace tracepoints such as <code>sched_switch</code>, <code>sched_waking</code>, Binder, and IRQ, along with some vendor Camera&#x2F;GPU ftrace events, are enabled.</p>
+<p>Binder evidence requires explicitly enabling <code>binder_driver</code> or the corresponding binder ftrace events and checking <code>ftrace_setup_errors</code>. Available categories and events vary with Android and kernel versions.</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;ftrace_setup_errors&#x27;</span>;</span><br></pre></td></tr></table></figure>
+
+<p>The <code>ftrace_setup_errors</code> count is in <code>stats</code>; the location of details and the severity depend on the parser version. In v57.2 it is <code>info</code>, with failure details available under the same name in <code>metadata</code>; in v58.2 it is <code>notice</code>, with details in the trace import logs. In either version, filtering only for <code>error</code>&#x2F;<code>data_loss</code> misses it. Cross-version queries should retain this count by name.</p>
+<p>The Buffers and dataflow documentation gives a useful estimate: at a total write rate of 2 MB&#x2F;s, a 16 MB central buffer retains roughly 8 seconds. A small central buffer alone is insufficient for captures lasting 30 seconds, 60 seconds, or several minutes.</p>
+<p>This explains many cases where a long recording does not contain the target window: Ring overwrites old data, while Discard drops subsequent new data. Setting a 60-second recording duration does not mean every buffer retains 60 seconds of data. The length of the trace file’s timeline, the window a buffer can retain, and the actual coverage of a particular data source are three different things.</p>
+<p>A single SQL query provides an initial check of these distinctions. Inspect the earliest and latest events in each high-frequency table and compare them with the trace boundaries:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> <span class="string">&#x27;trace&#x27;</span> <span class="keyword">AS</span> source, trace_start() <span class="keyword">AS</span> min_ts, trace_end() <span class="keyword">AS</span> max_ts</span><br><span class="line"><span class="keyword">UNION</span> <span class="keyword">ALL</span></span><br><span class="line"><span class="keyword">SELECT</span> <span class="string">&#x27;sched&#x27;</span>, <span class="built_in">MIN</span>(ts), <span class="built_in">MAX</span>(ts <span class="operator">+</span> dur) <span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">UNION</span> <span class="keyword">ALL</span></span><br><span class="line"><span class="keyword">SELECT</span> <span class="string">&#x27;slice&#x27;</span>, <span class="built_in">MIN</span>(ts), <span class="built_in">MAX</span>(ts <span class="operator">+</span> dur) <span class="keyword">FROM</span> slice</span><br><span class="line"><span class="keyword">UNION</span> <span class="keyword">ALL</span></span><br><span class="line"><span class="keyword">SELECT</span> <span class="string">&#x27;counter&#x27;</span>, <span class="built_in">MIN</span>(ts), <span class="built_in">MAX</span>(ts) <span class="keyword">FROM</span> counter;</span><br></pre></td></tr></table></figure>
+
+<p>A <code>min_ts</code> later than <code>trace_start()</code> only tells you that the first observed event of that type occurred later. The difference alone does not prove overwrite: a data source starting late, a thread not yet being created, or an interval with no events can produce the same result. Assess this alongside <code>traced_buf_chunks_overwritten</code>, buffer mappings, data-source start&#x2F;stop behavior, and scenario markers. First and last timestamps cannot rule out gaps in the middle, either. Report the observed range and the evidence for coverage, rather than treating total trace duration as complete coverage for every source.</p>
+<h2 id="Checking-Trace-Health-with-stats"><a href="#Checking-Trace-Health-with-stats" class="headerlink" title="Checking Trace Health with stats"></a>Checking Trace Health with stats</h2><p>Part 11 introduced Trace Processor. Here, we use it to run a query directly. This query belongs at the beginning of every analysis script: besides <code>error</code> &#x2F; <code>data_loss</code>, it includes <code>info</code> entries for central buffers, ftrace setup, FrameTimeline parsing&#x2F;pairing, flushes, and clocks that can affect conclusions.</p>
+<p>First distinguish rows in <code>stats</code> from the definitions of statistics: the table is not a complete capability registry. <code>kSingle</code> entries can have preinitialized rows with a value of 0, whereas <code>kIndexed</code> entries appear according to the CPU&#x2F;PID&#x2F;buffer indices actually recorded in this trace. Consequently, <code>COUNT(*) = 0</code> neither proves that the current version does not support an entry nor independently proves that capture was complete. <code>ftrace_cpu_has_data_loss</code> and several <code>heapprofd_*</code> entries are defined in both v57.2 and v58.2, but may have no rows if no corresponding records were triggered. To determine version support, check the source matching <code>trace_processor --version</code>; to assess the quality of this capture, also check whether the data source was captured and whether it covers the target window.</p>
+<p>Note that the official stats reference uses types such as <code>kError</code>, <code>kDataLoss</code>, <code>kNotice</code>, and <code>kInfo</code>, but SQL <code>severity</code> values are lowercase: <code>error</code>, <code>data_loss</code>, <code>notice</code>, and <code>info</code>. <code>ftrace_setup_errors</code> has severity <code>notice</code> in v58.2 and <code>info</code> in v57.2. The query below retains it by name, independently of severity:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br></pre></td><td class="code"><pre><span class="line">./trace_processor query trace.perfetto-trace <span class="string">&quot;</span></span><br><span class="line"><span class="string">SELECT</span></span><br><span class="line"><span class="string">  name,</span></span><br><span class="line"><span class="string">  idx,</span></span><br><span class="line"><span class="string">  severity,</span></span><br><span class="line"><span class="string">  source,</span></span><br><span class="line"><span class="string">  value</span></span><br><span class="line"><span class="string">FROM stats</span></span><br><span class="line"><span class="string">WHERE value != 0</span></span><br><span class="line"><span class="string">  AND (</span></span><br><span class="line"><span class="string">    severity IN (&#x27;error&#x27;, &#x27;data_loss&#x27;)</span></span><br><span class="line"><span class="string">    OR name IN (</span></span><br><span class="line"><span class="string">      &#x27;traced_buf_chunks_overwritten&#x27;,</span></span><br><span class="line"><span class="string">      &#x27;traced_buf_chunks_discarded&#x27;,</span></span><br><span class="line"><span class="string">      &#x27;ftrace_setup_errors&#x27;,</span></span><br><span class="line"><span class="string">      &#x27;frame_timeline_event_parser_errors&#x27;,</span></span><br><span class="line"><span class="string">      &#x27;frame_timeline_unpaired_end_event&#x27;,</span></span><br><span class="line"><span class="string">      &#x27;config_write_into_file_no_flush&#x27;,</span></span><br><span class="line"><span class="string">      &#x27;config_write_into_file_discard&#x27;,</span></span><br><span class="line"><span class="string">      &#x27;traced_flushes_failed&#x27;,</span></span><br><span class="line"><span class="string">      &#x27;traced_final_flush_failed&#x27;</span></span><br><span class="line"><span class="string">    )</span></span><br><span class="line"><span class="string">    OR name GLOB &#x27;clock_sync_failure*&#x27;</span></span><br><span class="line"><span class="string">    OR name GLOB &#x27;perf_*&#x27;</span></span><br><span class="line"><span class="string">    OR name GLOB &#x27;heapprofd_*&#x27;</span></span><br><span class="line"><span class="string">    OR name GLOB &#x27;meminfo_*&#x27;</span></span><br><span class="line"><span class="string">    OR name GLOB &#x27;rss_stat_*&#x27;</span></span><br><span class="line"><span class="string">    OR name GLOB &#x27;proc_stat_*&#x27;</span></span><br><span class="line"><span class="string">    OR name GLOB &#x27;memory_snapshot_*&#x27;</span></span><br><span class="line"><span class="string">  )</span></span><br><span class="line"><span class="string">ORDER BY name, idx;</span></span><br><span class="line"><span class="string">&quot;</span></span><br></pre></td></tr></table></figure>
+
+<p>Do not read the results merely as “are there any nonzero values?” First map common entries to decisions:</p>
+<table>
+<thead>
+<tr>
+<th><code>stats</code> entry &#x2F; symptom</th>
+<th>Affected data sources</th>
+<th>Questions still answerable</th>
+<th>Questions no longer answerable</th>
+<th>Decision</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>ftrace_cpu_has_data_loss</code></td>
+<td><code>sched</code>, <code>thread_state</code>, wakeup, Binder kernel events</td>
+<td>Positive evidence that survived can provide leads</td>
+<td>Cannot conclude “no Runnable wait,” “no wakeup delay,” or “no scheduling blockage”</td>
+<td>Downgrade scheduling attribution; recapture if necessary</td>
+</tr>
+<tr>
+<td><code>traced_buf_chunks_overwritten</code> &#x2F; <code>discarded</code></td>
+<td>Data sources assigned to the affected buffer</td>
+<td>Positive evidence in windows that were not overwritten</td>
+<td>App markers, FrameTimeline, or process&#x2F;thread metadata in overwritten windows</td>
+<td>Use <code>idx</code> to identify the buffer and <code>target_buffer</code>; decide whether to recapture or downgrade</td>
+</tr>
+<tr>
+<td>FrameTimeline tables have rows, but target-window coverage is incomplete</td>
+<td>FrameTimeline</td>
+<td>Facts about surviving frames</td>
+<td>Cannot prove that target-window frame metrics are complete</td>
+<td>Output <code>frame_metrics_partial</code></td>
+</tr>
+<tr>
+<td><code>clock_sync_failure*</code></td>
+<td>Timestamp conversion</td>
+<td>Some metadata that does not depend on time</td>
+<td>Precise timing, durations, or cross-thread ordering</td>
+<td>Treat time semantics as untrustworthy first</td>
+</tr>
+<tr>
+<td><code>perf_*</code> &#x2F; <code>heapprofd_*</code> &#x2F; <code>meminfo_*</code> &#x2F; <code>rss_stat_*</code></td>
+<td>CPU profiling, native allocations, RSS&#x2F;PSS, system memory</td>
+<td>Conclusions that depend on unaffected data sources</td>
+<td>Corresponding profile or memory measurements</td>
+<td>Downgrade individual metrics</td>
+</tr>
+</tbody></table>
+<p>Standardize report fields as well; otherwise every report still relies on someone writing an ad hoc judgment:</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">trace_quality_status,affected_sources,affected_metrics,usable_metrics,unusable_metrics,evidence_grade,fallback_used,recapture_required,recapture_reason,next_trace_config_change</span><br><span class="line">partial,ftrace;sched,Runnable;wakeup,FrameTimeline;AppTrackEvent,RunnableNegativeConclusion,weak,false,true,ftrace_cpu_has_data_loss,reduce_ftrace_events+increase_ftrace_buffer</span><br></pre></td></tr></table></figure>
+
+<p>To investigate buffer pressure specifically, inspect overwrite and discard counts per buffer. Some versions classify these counts as <code>info</code>, so filtering only for <code>data_loss</code> misses clues:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> <span class="keyword">value</span> <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line">  <span class="keyword">AND</span> (</span><br><span class="line">    severity <span class="keyword">IN</span> (<span class="string">&#x27;error&#x27;</span>, <span class="string">&#x27;data_loss&#x27;</span>)</span><br><span class="line">    <span class="keyword">OR</span> name <span class="keyword">IN</span> (</span><br><span class="line">      <span class="string">&#x27;traced_buf_chunks_overwritten&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_buf_chunks_discarded&#x27;</span></span><br><span class="line">    )</span><br><span class="line">  )</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> name, idx;</span><br></pre></td></tr></table></figure>
+
+<p>To determine whether frame metrics are usable, also query FrameTimeline. It is not produced directly by ftrace, but it can still be affected by whether the data source is enabled, the Android version, central-buffer overwrite, and parser&#x2F;pairing anomalies:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> <span class="string">&#x27;actual&#x27;</span> <span class="keyword">AS</span> table_name, <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> row_count</span><br><span class="line"><span class="keyword">FROM</span> actual_frame_timeline_slice</span><br><span class="line"><span class="keyword">UNION</span> <span class="keyword">ALL</span></span><br><span class="line"><span class="keyword">SELECT</span> <span class="string">&#x27;expected&#x27;</span> <span class="keyword">AS</span> table_name, <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> row_count</span><br><span class="line"><span class="keyword">FROM</span> expected_frame_timeline_slice;</span><br></pre></td></tr></table></figure>
+
+<p>Whole-table row counts are insufficient. Frame records are not a continuous signal: a static screen may produce no new frames. Min&#x2F;max timestamps enclosing a window neither prove that no frame records are missing in between nor constitute a necessary condition for complete capture. Check expected&#x2F;actual pairing, unclosed or dropped frames, capture start&#x2F;stop, and loss in the same source buffer for the target <code>upid</code>, layer, and frame tokens. The following query only lists the range of observed frames in the window; it cannot automatically determine completeness.</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br></pre></td><td class="code"><pre><span class="line">INCLUDE PERFETTO <span class="keyword">MODULE</span> time.conversion;</span><br><span class="line"></span><br><span class="line"><span class="keyword">WITH</span> target_window(start_ts, end_ts) <span class="keyword">AS</span> (</span><br><span class="line">  <span class="keyword">VALUES</span> (<span class="number">123000000000</span>, <span class="number">123500000000</span>)</span><br><span class="line">)</span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  <span class="string">&#x27;actual&#x27;</span> <span class="keyword">AS</span> table_name,</span><br><span class="line">  <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> row_count,</span><br><span class="line">  time_to_ms(<span class="built_in">MIN</span>(a.ts)) <span class="keyword">AS</span> min_ts_ms,</span><br><span class="line">  time_to_ms(<span class="built_in">MAX</span>(a.ts <span class="operator">+</span> a.dur)) <span class="keyword">AS</span> max_end_ms</span><br><span class="line"><span class="keyword">FROM</span> actual_frame_timeline_slice a</span><br><span class="line"><span class="keyword">JOIN</span> target_window w</span><br><span class="line"><span class="keyword">WHERE</span> a.ts <span class="operator">&lt;</span> w.end_ts</span><br><span class="line">  <span class="keyword">AND</span> a.ts <span class="operator">+</span> a.dur <span class="operator">&gt;</span> w.start_ts</span><br><span class="line"><span class="keyword">UNION</span> <span class="keyword">ALL</span></span><br><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  <span class="string">&#x27;expected&#x27;</span> <span class="keyword">AS</span> table_name,</span><br><span class="line">  <span class="built_in">COUNT</span>(<span class="operator">*</span>) <span class="keyword">AS</span> row_count,</span><br><span class="line">  time_to_ms(<span class="built_in">MIN</span>(e.ts)) <span class="keyword">AS</span> min_ts_ms,</span><br><span class="line">  time_to_ms(<span class="built_in">MAX</span>(e.ts <span class="operator">+</span> e.dur)) <span class="keyword">AS</span> max_end_ms</span><br><span class="line"><span class="keyword">FROM</span> expected_frame_timeline_slice e</span><br><span class="line"><span class="keyword">JOIN</span> target_window w</span><br><span class="line"><span class="keyword">WHERE</span> e.ts <span class="operator">&lt;</span> w.end_ts</span><br><span class="line">  <span class="keyword">AND</span> e.ts <span class="operator">+</span> e.dur <span class="operator">&gt;</span> w.start_ts;</span><br></pre></td></tr></table></figure>
+
+<p>For a broader review of the capture configuration, inspect all nonzero statistics:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> <span class="keyword">value</span> <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> <span class="keyword">CASE</span> severity</span><br><span class="line">  <span class="keyword">WHEN</span> <span class="string">&#x27;data_loss&#x27;</span> <span class="keyword">THEN</span> <span class="number">0</span></span><br><span class="line">  <span class="keyword">WHEN</span> <span class="string">&#x27;error&#x27;</span> <span class="keyword">THEN</span> <span class="number">1</span></span><br><span class="line">  <span class="keyword">WHEN</span> <span class="string">&#x27;notice&#x27;</span> <span class="keyword">THEN</span> <span class="number">2</span></span><br><span class="line">  <span class="keyword">ELSE</span> <span class="number">3</span></span><br><span class="line"><span class="keyword">END</span>, name, idx;</span><br></pre></td></tr></table></figure>
+
+<p>Check <code>source</code>, too. <code>source = &#39;trace&#39;</code> usually points to capture or trace-content issues, so start with TraceConfig, producers, or device capabilities. <code>source = &#39;analysis&#39;</code> more often concerns Trace Processor import, parsing, or modeling, so start with import parameters, parser version, producer implementation, or trace-format issues. Do not assume that increasing buffer sizes alone fixes a parser error.</p>
+<p>Reading <code>stats</code> should not stop at checking whether values exist. After finding a nonzero entry, ask:</p>
+<ul>
+<li>Where was data lost: ftrace, producer shared memory, the central buffer, or parsing?</li>
+<li>What does it affect: scheduling events, potentially missing process&#x2F;thread names, or gaps in app custom events, FrameTimeline, or logs?</li>
+<li>How can it be corrected: fewer events, larger buffers, separate buffers, file writing, or a shorter capture window next time?</li>
+</ul>
+<h2 id="ftrace-Loss-Kernel-Events-Outpace-Readers"><a href="#ftrace-Loss-Kernel-Events-Outpace-Readers" class="headerlink" title="ftrace Loss: Kernel Events Outpace Readers"></a>ftrace Loss: Kernel Events Outpace Readers</h2><p>If <code>stats</code> contains <code>ftrace_cpu_has_data_loss</code>, loss occurred between the kernel ftrace per-CPU buffers and userspace readers. Typical causes are enabling too many events or <code>traced_probes</code> failing to read each CPU’s buffer promptly while the device is under heavy load.</p>
+<p>Counters such as <code>ftrace_cpu_overrun_*</code> help identify which CPU experienced overruns, but cannot reconstruct exactly when loss occurred on the trace timeline. More precise timing requires <code>FtraceEventBundle.lost_events</code> or raw-packet&#x2F;UI evidence. Without that evidence, limit the conclusion to “this CPU’s ftrace&#x2F;sched evidence is unreliable.”</p>
+<p>For an ftrace-specific check, do not rely only on the general query. Statistics for overruns and dropped events may be classified as <code>info</code> in some versions and need to be selected explicitly:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> <span class="keyword">value</span> <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line">  <span class="keyword">AND</span> (</span><br><span class="line">    name <span class="keyword">IN</span> (</span><br><span class="line">      <span class="string">&#x27;ftrace_cpu_has_data_loss&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;ftrace_setup_errors&#x27;</span></span><br><span class="line">    )</span><br><span class="line">    <span class="keyword">OR</span> name GLOB <span class="string">&#x27;ftrace_cpu_overrun_*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name GLOB <span class="string">&#x27;ftrace_cpu_dropped_events_*&#x27;</span></span><br><span class="line">  )</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> name, idx;</span><br></pre></td></tr></table></figure>
+
+<p>This kind of loss affects conclusions about CPU scheduling, Runnable time, wakeup relationships, and Binder kernel events. Observed sched rows can still provide surviving clues, but all negative conclusions must be downgraded: do not claim “no Runnable wait,” “no wakeup delay,” or “no scheduling blockage.” To discuss CPU busy time, also check coverage of <code>sched</code>, <code>thread_state</code>, CPU idle, CPU frequency, or sys_stats cpufreq in the same window.</p>
+<p>For the next capture, you can start tuning from this configuration:</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    target_buffer: <span class="number">0</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      buffer_size_kb: <span class="number">32768</span>   # Increase the kernel buffer for each CPU</span><br><span class="line">      drain_period_ms: <span class="number">100</span>    # Read from the kernel more frequently</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>Also remove ftrace events that are irrelevant to the current problem. Do not enable every checkbox and expect buffers to absorb everything. For scroll jank, start with <code>sched/sched_switch</code>, <code>sched/sched_waking</code>, FrameTimeline, and app markers; remove irrelevant IRQ, Camera, and vendor GPU events first. Enable binder events for slow Binder calls, and add Camera&#x2F;GPU events for Camera open investigations. High-frequency ftrace events can displace low-frequency kernel tracepoints in the same ftrace per-CPU buffers. Displacement of process stats, logs, power, or FrameTimeline data happens later, when sources share central buffers.</p>
+<p>The example’s 32768 KiB buffer is per CPU. On an eight-core device, this stage alone can consume about 256 MiB. It is a high-memory setting that must be selected after measurement, not used directly as a production default. <code>buffer_size_kb</code> and <code>drain_period_ms</code> are local tuning parameters; the official reference also warns that they are not guaranteed to take full effect as configured when ftrace sessions run concurrently.</p>
+<p>For public presets, reduce events first. Consider <code>buffer_size_kb + buffer_size_lower_bound</code> only when you need a non-default ftrace buffer and compatibility across Perfetto versions; most Perfetto v43+ configurations can leave these unset. A public preset should specify more than a number: include the device scope, Android&#x2F;Perfetto versions, event set, and file growth rate.</p>
+<h2 id="Producer-x2F-TraceWriter-Packet-Loss-Locate-It-Before-Assigning-a-Cause"><a href="#Producer-x2F-TraceWriter-Packet-Loss-Locate-It-Before-Assigning-a-Cause" class="headerlink" title="Producer &#x2F; TraceWriter Packet Loss: Locate It Before Assigning a Cause"></a>Producer &#x2F; TraceWriter Packet Loss: Locate It Before Assigning a Cause</h2><p>Treat <code>traced_buf_trace_writer_packet_loss</code> as a general packet-loss signal first, rather than attributing it directly to producer shared memory. It may result from producer shared-memory bursts, but it can also relate to packet loss before the start of a RING_BUFFER or after the end of DISCARD, missing sequence packets, or central-buffer policy. Attribution requires considering <code>traced_buf_chunks_overwritten</code>, <code>traced_buf_chunks_discarded</code>, <code>traced_buf_sequence_packet_loss</code>, <code>traced_buf_patches_failed</code>, buffer <code>idx</code>, and fill policy together.</p>
+<p>Common Android <code>android.os.Trace</code> &#x2F; <code>androidx.tracing</code> instrumentation follows the atrace&#x2F;ftrace path, so check ftrace loss and <code>ftrace_setup_errors</code> first. Producers such as Perfetto SDK Track Event, custom DataSources, large packets, and heapprofd sampling relate more directly to shared memory and producer-side write policies.</p>
+<p>The implications are straightforward: if your app’s custom events delimit business stages, stage-duration evidence may be incomplete. If the lost data belongs to heapprofd or CPU profiling, confidence in the sampling conclusions must also be reduced.</p>
+<p>Represent missing markers as report fields instead of merely saying “business events may have been lost.” For example, if <code>network_done</code> is missing between <code>checkout_submit</code> and <code>first_frame_present</code>, you can report only end-to-end latency, not split it into network and rendering stages: <code>fallback_used=true</code>, <code>missing_marker=network_done</code>, and <code>recapture_reason=track_event_marker_missing</code>.</p>
+<p>An easily overlooked shared-memory figure is its default size: 256 KB, with an approximate practical range of 128–512 KB in the official documentation. This is usually sufficient for ordinary slices, but not for bursts of large packets. The documentation uses a screenshot data source as an example: the average write rate may look modest, but writing 2 MB at once can briefly far exceed the rate at which <code>traced</code> moves data.</p>
+<p>A useful order of remedies is:</p>
+<ul>
+<li>Reduce event density. Do not emit a Track Event on every iteration of a hot loop.</li>
+<li>Break up oversized events. A single large packet can exhaust shared memory.</li>
+<li>For Perfetto SDK producers, evaluate <code>shmem_size_hint_kb</code> or the producer shared-memory size. This is appropriate only after confirming that producer-side bursts, rather than central-buffer overwrite, are the bottleneck.</li>
+<li><code>BufferExhaustedPolicy::kStall</code> can prevent immediate packet loss, but makes the producer wait when the buffer is exhausted. Use it to protect critical events only after establishing that the blocking overhead is acceptable.</li>
+</ul>
+<p>Part 13 expands on this in its discussion of app-side Track Events and field tracing. The denser your instrumentation, the more important event density, packet size, and producer-side backpressure policy become.</p>
+<h2 id="Central-Buffer-Loss-Ring-Overwrites-Old-Data-Discard-Drops-New-Data"><a href="#Central-Buffer-Loss-Ring-Overwrites-Old-Data-Discard-Drops-New-Data" class="headerlink" title="Central-Buffer Loss: Ring Overwrites Old Data; Discard Drops New Data"></a>Central-Buffer Loss: Ring Overwrites Old Data; Discard Drops New Data</h2><p>The <code>buffers</code> in <code>TraceConfig</code> are central buffers. Two common types of loss occur here; inspect the statistic names directly rather than relying solely on severity:</p>
+<ul>
+<li><code>traced_buf_chunks_overwritten</code>: <code>RING_BUFFER</code> overwrites old data after filling up.</li>
+<li><code>traced_buf_chunks_discarded</code>: <code>DISCARD</code> drops new data after filling up.</li>
+</ul>
+<p>Also inspect TraceBufferV2’s <code>traced_buf_data_loss_*</code> reason breakdown. These entries already exist in v57.2&#x2F;v58.2; whether they appear and what values they contain also depend on whether the capture side reports the corresponding statistics. All have severity <code>data_loss</code>, so the earlier general query covers them, as does the <code>traced_buf_*</code> query below:</p>
+<ul>
+<li><code>traced_buf_data_loss_overwrite</code>: the ring wraps and overwrites chunks that have not yet been read.</li>
+<li><code>traced_buf_data_loss_smb_full</code>: the producer reports shared-memory exhaustion; <code>traced_buf_data_loss_writer_abort</code>: a writer aborts an unfinished fragmented packet.</li>
+<li><code>traced_buf_data_loss_read_gap</code>, <code>traced_buf_data_loss_chunk_corrupted</code>: a gap in chunk numbering or a corrupted chunk during reading.</li>
+<li><code>traced_buf_data_loss_orphan_continuation</code>, <code>traced_buf_data_loss_reassembly_gap</code>, <code>traced_buf_data_loss_reassembly_broken_chain</code>: a missing initial fragment, a reassembly gap, or a broken fragment chain.</li>
+</ul>
+<p>These entries attribute loss by buffer and are not equivalent substitutes for the kernel per-CPU <code>ftrace_cpu_has_data_loss</code>. In particular, <code>traced_buf_chunks_overwritten</code> counts overwrites, whereas <code>traced_buf_data_loss_overwrite</code> indicates a specific loss reason received by the parser. Interpret both against the target window and <code>target_buffer</code>; not every overwrite means that the incident window was damaged.</p>
+<p>Review capacity per buffer <code>idx</code>. For <code>traced_buf_*</code>, <code>idx</code> is usually the buffer index; for ftrace CPU statistics, it is usually a CPU ID. Include <code>idx_semantics</code> in reports to avoid confusing CPU 3 with buffer 3.</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> <span class="keyword">value</span> <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line">  <span class="keyword">AND</span> (</span><br><span class="line">    name GLOB <span class="string">&#x27;traced_buf_*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name <span class="keyword">IN</span> (</span><br><span class="line">      <span class="string">&#x27;traced_buf_chunks_overwritten&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_buf_chunks_discarded&#x27;</span></span><br><span class="line">    )</span><br><span class="line">  )</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> idx, name;</span><br></pre></td></tr></table></figure>
+
+<p>When every data source shares one central buffer, high-frequency sched events can displace lower-frequency or critical data such as process stats, logs, power, FrameTimeline, App Track Event, and SurfaceFlinger&#x2F;Winscope. The UI may still show abundant scheduling events, while only a small fraction of thread names, process names, memory samples, logs, and frame metrics survives.</p>
+<p>For <code>android.log</code>, consider device constraints as well. Official documentation lists <code>android.log</code> support for userdebug builds. Rooted user builds may also capture logs when logd&#x2F;SELinux permissions permit it, so build type alone cannot prove unavailability. However, <code>adb root</code> does not guarantee support on every device. Do not assume that the <code>android.log</code> data source is available on an unmodified production user build; external logcat, bugreport, or sanitized platform logs can be included in the same case package.</p>
+<p>The Trace configuration documentation gives an Android-oriented example: scheduler tracing on a typical phone may write roughly 10,000 events, or about 1 MB, per second, while memory statistics are written only once every 5 seconds. Put them in the same 4 MB central buffer, and only one memory snapshot may survive—or none at all. Opening the trace will not produce an error saying “memory sampling did not work”; the file simply has too little evidence left.</p>
+<h3 id="Short-Traces-First-Separate-Sources-That-Compete-for-Buffers"><a href="#Short-Traces-First-Separate-Sources-That-Compete-for-Buffers" class="headerlink" title="Short Traces: First Separate Sources That Compete for Buffers"></a>Short Traces: First Separate Sources That Compete for Buffers</h3><p>A more reliable approach separates high-frequency and low-frequency data:</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br></pre></td><td class="code"><pre><span class="line">buffers &#123; size_kb: <span class="number">131072</span> fill_policy: RING_BUFFER &#125; # <span class="number">0</span>: High-frequency ftrace</span><br><span class="line">buffers &#123; size_kb: <span class="number">32768</span>  fill_policy: RING_BUFFER &#125; # <span class="number">1</span>: Low-frequency metadata and logs</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    target_buffer: <span class="number">0</span></span><br><span class="line">    ftrace_config &#123;</span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      ftrace_events: <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">data_sources &#123;</span><br><span class="line">  config &#123;</span><br><span class="line">    name: <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    target_buffer: <span class="number">1</span></span><br><span class="line">    process_stats_config &#123;</span><br><span class="line">      scan_all_processes_on_start: <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>Check <code>target_buffer</code> for critical graphics data sources and App SDK Track Event as well. FrameTimeline, SurfaceFlinger&#x2F;Winscope, and App SDK Track Event can be isolated through each data source’s <code>target_buffer</code>. HWUI, Choreographer, and RenderThread atrace data follow <code>linux.ftrace</code>; protect them by reducing ftrace events, increasing ftrace per-CPU buffers, and increasing or isolating the ftrace central buffer. Separate buffers isolate only central-buffer contention; they cannot repair producer shared memory that has already overflowed.</p>
+<p>To determine whether displaced data is required by your analysis, check each dependency: expected&#x2F;actual FrameTimeline row counts in the target window, app marker counts, process&#x2F;thread name completeness, log&#x2F;power&#x2F;memory coverage of the target window, and the affected buffer <code>idx</code> in <code>stats</code>. If these checks do not line up, prioritize recapture. If only explanatory variables are affected, downgrade the report accordingly.</p>
+<h3 id="Long-Traces-Then-Add-Periodic-File-Writing"><a href="#Long-Traces-Then-Add-Periodic-File-Writing" class="headerlink" title="Long Traces: Then Add Periodic File Writing"></a>Long Traces: Then Add Periodic File Writing</h3><p>For long-running field captures, larger memory buffers alone are insufficient. Have Perfetto write to the file periodically:</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">duration_ms: <span class="number">600000</span></span><br><span class="line">write_into_file: <span class="literal">true</span></span><br><span class="line">file_write_period_ms: <span class="number">2500</span></span><br><span class="line">flush_period_ms: <span class="number">10000</span></span><br><span class="line">max_file_size_bytes: <span class="number">2147483648</span></span><br><span class="line"></span><br><span class="line">buffers &#123;</span><br><span class="line">  size_kb: <span class="number">32768</span></span><br><span class="line">  fill_policy: RING_BUFFER</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>A shorter <code>file_write_period_ms</code> reduces memory pressure but increases I&#x2F;O overhead. Long traces also require explicit consideration of flush behavior. Newer versions can use the automatic policy in <code>write_flush_mode</code>; for public configurations spanning versions, prefer an explicit <code>flush_period_ms</code> and inspect <code>config_write_into_file_no_flush</code> and <code>config_write_into_file_discard</code> in stats. The Trace configuration documentation gives about 1–4 MB&#x2F;s as a common Android trace data rate. Use that only as an initial estimate; measure file growth for your specific configuration.</p>
+<p>If the issue has a clear trigger, prefer a smaller capture window or triggered capture. Retaining a few tens of seconds around the issue reduces overwrite and I&#x2F;O pressure more effectively than recording indefinitely without a target.</p>
+<p>File writing also depends on the device and how capture starts. Restrictions such as <code>/data/misc/perfetto-traces/</code> refer to the <code>TraceConfig.output_path</code> field when using system traced on Android R+. Ordinary <code>adb shell perfetto -o ...</code> and bugreport clone&#x2F;save follow a different consumer path. To include a trace in bugreport, set <code>bugreport_score &gt; 0</code> so dumpstate triggers saving; session handling also differs between Android S&#x2F;T and U+. A public preset should include Android&#x2F;Perfetto versions, the execution command, and the output path, not just pbtxt.</p>
+<p>Be cautious with I&#x2F;O-related tracepoints, syscalls, and page faults as well. Writing a long trace can compete with the workload for the same storage path. Clean stats indicate that trace data is relatively complete; they do not prove that capture did not perturb the scenario. Distinguish <code>trace_quality_status</code> from <code>collection_perturbation_risk</code> in reports.</p>
+<p>A rough sizing formula is:</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">Minimum central-buffer size</span><br><span class="line">  = Capture write rate in MB/s</span><br><span class="line">  * file_write_period_ms / 1000</span><br><span class="line">  * Safety factor</span><br></pre></td></tr></table></figure>
+
+<p>The safety factor should generally be at least 2. Writes are not uniform: scrolling, startup, Camera open, and audio-route changes can all produce short bursts.</p>
+<h2 id="Incremental-State-Loss-Events-Remain-but-Names-and-Context-Are-Missing"><a href="#Incremental-State-Loss-Events-Remain-but-Names-and-Context-Are-Missing" class="headerlink" title="Incremental-State Loss: Events Remain, but Names and Context Are Missing"></a>Incremental-State Loss: Events Remain, but Names and Context Are Missing</h2><p>Perfetto reuses context information to reduce trace size. If context packets such as Track Event track descriptors, interned strings, and process&#x2F;thread metadata are overwritten or missing, later events may retain only IDs or fail to parse completely.</p>
+<p>The less obvious symptoms often include:</p>
+<ul>
+<li>The UI shows only a tid, without a process name.</li>
+<li>Track Event track names are missing or parse incorrectly.</li>
+<li><code>stats</code> contains entries related to sequences, incremental state, tokenizers, interning, or track hierarchy.</li>
+<li>Trace Processor skips packets that reference missing descriptor packets.</li>
+</ul>
+<p>Start with these statistics:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> name, idx, severity, source, <span class="keyword">value</span></span><br><span class="line"><span class="keyword">FROM</span> stats</span><br><span class="line"><span class="keyword">WHERE</span> <span class="keyword">value</span> <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line">  <span class="keyword">AND</span> (</span><br><span class="line">    name <span class="keyword">IN</span> (</span><br><span class="line">      <span class="string">&#x27;traced_buf_trace_writer_packet_loss&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_buf_sequence_packet_loss&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;traced_buf_incremental_sequences_dropped&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;interned_data_tokenizer_errors&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;track_event_tokenizer_errors&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;track_hierarchy_missing_uuid&#x27;</span>,</span><br><span class="line">      <span class="string">&#x27;tokenizer_skipped_packets&#x27;</span></span><br><span class="line">    )</span><br><span class="line">    <span class="keyword">OR</span> name GLOB <span class="string">&#x27;track_descriptor_*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name GLOB <span class="string">&#x27;track_event_*missing*&#x27;</span></span><br><span class="line">    <span class="keyword">OR</span> name GLOB <span class="string">&#x27;track_event_*invalid*&#x27;</span></span><br><span class="line">  )</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> name, idx;</span><br></pre></td></tr></table></figure>
+
+<p>Tokenizer, interning, and track-hierarchy statistics are better understood as parsing consequences or supporting signals. They can indicate missing names and context, but the root cause often lies in missing sequence packets, ring overwrite, or producer write bursts. Rather than reporting only “no Track Event packet loss observed,” include <code>track_event_packet_loss_count</code>, <code>track_event_sequence_loss_count</code>, <code>track_event_tokenizer_error_count</code>, <code>interning_error_count</code>, <code>track_hierarchy_error_count</code>, and <code>track_event_invalid_end_count</code>, then assign a <code>track_event_trust_level</code>.</p>
+<p>There are two types of remedy:</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">incremental_state_config &#123;</span><br><span class="line">  clear_period_ms: <span class="number">5000</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p><code>clear_period_ms</code> makes data sources that use incremental state resend descriptors periodically, which is useful for ring buffers. Another option is to use <code>target_buffer</code> to place low-frequency metadata in a buffer less likely to be overwritten.</p>
+<p>This setting only notifies data sources that declare support for incremental-state clearing; it does not forcibly apply to every source. The Buffers and dataflow documentation recommends a stricter relationship: <code>clear_period_ms</code> should ideally be an order of magnitude smaller than the central buffer’s estimated retention window. For example, if a buffer retains about 60 seconds of data, refreshing descriptors every 5 seconds is much more robust than every 30 seconds.</p>
+<h2 id="Long-Traces-Also-Need-Attention-to-Flushes"><a href="#Long-Traces-Also-Need-Attention-to-Flushes" class="headerlink" title="Long Traces Also Need Attention to Flushes"></a>Long Traces Also Need Attention to Flushes</h2><p>During long captures, data sources with few events may leave data in shared memory for a long time before submitting it. This can appear as an unexpectedly stretched timeline in the UI or as out-of-order problems during Trace Processor import.</p>
+<p>You can add a periodic flush:</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">flush_period_ms: <span class="number">10000</span></span><br></pre></td></tr></table></figure>
+
+<p>This setting makes the tracing service periodically request that data sources submit partially filled shared-memory pages. The Buffers and dataflow documentation gives 10–30 seconds as a common range for long traces. Actual behavior also depends on the device’s Android&#x2F;Perfetto version and settings such as <code>write_into_file</code> and <code>write_flush_mode</code>.</p>
+<p>In practice, first check <code>write_into_file</code>, <code>file_write_period_ms</code>, I&#x2F;O pressure, and import errors, then decide whether to set <code>flush_period_ms</code> explicitly. Excessively frequent flushes increase overhead.</p>
+<p>If <code>stats</code> contains <code>traced_flushes_failed</code> or <code>traced_final_flush_failed</code>, first state the limits of confidence in the report, then check file writes, flush&#x2F;write-flush configuration, and I&#x2F;O pressure for the long trace. Do not dismiss these entries as ordinary parser noise.</p>
+<p>If you already have a long trace captured without periodic flushes and encounter out-of-order import problems, a one-off recovery option is to import it into Trace Processor with <code>--full-sort</code>. This uses more memory and moves additional sorting work into import. It is suitable for offline analysis, not as a permanent substitute for a sound capture configuration.</p>
+<p><code>--full-sort</code> cannot fix clock problems. If you see <code>clock_sync_failure</code>, <code>clock_sync_failure_unknown_source_clock</code>, <code>clock_sync_mixed_clock_sources</code>, or <code>clock_sync_failure_undeferrable_packet_loss</code>, first treat timestamp&#x2F;clock semantics as untrustworthy. Then investigate packet loss, ClockSnapshot, producer implementation, and import sorting together to locate the cause. Do not explain the issue solely in terms of <code>--full-sort</code> or flushing.</p>
+<h2 id="Reporting-Confidence"><a href="#Reporting-Confidence" class="headerlink" title="Reporting Confidence"></a>Reporting Confidence</h2><p>A trace with data loss is not necessarily unusable in its entirety, but the report must state its limits. Define structured fields first:</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">stat_name,stat_idx,idx_semantics,severity,source,value,affected_evidence,affected_metrics,decision,next_config_action</span><br><span class="line">ftrace_cpu_has_data_loss,3,cpu,data_loss,trace,1,sched/thread_state/wakeup,RunnableNegativeConclusion,degrade_or_recapture,reduce_ftrace_events+increase_ftrace_buffer</span><br><span class="line">traced_buf_chunks_overwritten,0,buffer,info,trace,8,buffer0_data_sources,AppTrackEvent;FrameTimeline,recapture_if_target_window_missing,split_buffers+increase_buffer0</span><br></pre></td></tr></table></figure>
+
+<p>A prose template could look like this:</p>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">Integrity check: stats contains ftrace_cpu_has_data_loss with CPU 3 value=1; ftrace_cpu_overrun_delta / dropped_events_delta serve only as supporting information.</span><br><span class="line">Affected evidence: sched/ftrace events may be missing; thread-state proportions and wakeup relationships provide only tentative evidence. Do not conclude &quot;no Runnable wait.&quot;</span><br><span class="line">Still usable: no FrameTimeline parser/pairing anomalies were found; expected/actual slices fully cover the target window, with no loss detected in their source buffer. No packet/sequence/tokenizer/interning/track hierarchy anomalies were observed for App SDK Track Event. If these sources share a buffer affected by loss, they must still be downgraded.</span><br><span class="line">Next capture configuration: reduce ftrace events, set the ftrace buffer to 32768KB, and set drain_period_ms to 100ms.</span><br></pre></td></tr></table></figure>
+
+<p>This makes it clear which conclusions readers can trust and which only point toward further investigation. One of the biggest risks in performance analysis is turning “not observed” into “did not happen.”</p>
+<h2 id="Summary"><a href="#Summary" class="headerlink" title="Summary"></a>Summary</h2><p>Checking <code>stats</code> assigns an evidence grade to every subsequent conclusion. When a trace has gaps, continuing to make strong claims only amplifies the risk of misdiagnosis. State what remains usable, what is merely suggestive, and how the next capture should fill the gaps.</p>
+<p>Every key conclusion should include its <code>evidence source + confidence + limitations</code>. For example: FrameTimeline shows 3 janky frames in the target window, whose coverage is complete, so that finding is trustworthy; Runnable attribution is affected by ftrace loss and can only provide a lead. Part 11 addressed how to express judgments in SQL. This article adds the prerequisite: SQL can measure only evidence that still exists in the trace. Part 13 returns to the same issue when discussing app-side Track Events: more instrumentation is not always better, and overly dense writes can displace the very evidence you need.</p>
+<h2 id="References"><a href="#References" class="headerlink" title="References"></a>References</h2><ol>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/concepts/buffers">Buffers and dataflow</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/concepts/config">Trace configuration</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/analysis/sql-stats">Trace Processor Stats</a></li>
+<li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/getting-started/ftrace">Instrumenting the Linux kernel with ftrace</a></li>
+</ol>
+<p>Source version checked: <code>b23c67be1159e3f0b0657bd97be9e139e0d8ee2c</code> (2026-09-19).</p>
+<ul>
+<li><a target="_blank" rel="noopener" href="https://github.com/google/perfetto/blob/b23c67be1159e3f0b0657bd97be9e139e0d8ee2c/src/trace_processor/storage/stats.h">Perfetto stats definitions</a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/google/perfetto/blob/add693d8b338ba9599dbcbc3e300b1ab8c000897/src/trace_processor/storage/stats.h">v58.2 stats definitions (including indexed entries)</a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/google/perfetto/blob/da1d152cff27890903d158fe96751de3aab883cc/src/trace_processor/storage/stats.h">v57.2 stats definitions</a></li>
+</ul>
+<h2 id="About-Me-and-the-Blog"><a href="#About-Me-and-the-Blog" class="headerlink" title="About Me and the Blog"></a>About Me and the Blog</h2><p>Follow <a target="_blank" rel="noopener" href="https://www.androidperformance.com/en/">Android Performance</a>.</p>
+
+    </article>
+    <!-- license -->
+        <div class="license-wrapper">
+            <p>Author：<a href="https://androidperformance.com/en">Gracker</a>
+            <p>Link：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">https://androidperformance.com/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/</a>
+            <p>Publish date：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">May 4th 2026, 10:12:00 am</a>
+            <p>Update date：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">September 20th 2026, 12:52:22 am</a>
+            <p>License：This work is licensed under <a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a></p>
+        </div>
+    <!-- paginator -->
+    <ul class="post-paginator">
+        <li class="next">
+                <div class="nextSlogan">Next Post</div>
+                <a href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/" title="Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing">
+                    <div class="nextTitle">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</div>
+                </a>
+        </li>
+        <li class="previous">
+                <div class="prevSlogan">Previous Post</div>
+                <a href="/en/2026/05/04/Android-Perfetto-11-PerfettoSQL-TraceProcessor-Automation/" title="Android Perfetto Series 11: PerfettoSQL, Trace Processor, and Regression Detection">
+                    <div class="prevTitle">Android Perfetto Series 11: PerfettoSQL, Trace Processor, and Regression Detection</div>
+                </a>
+        </li>
+    </ul>
+    <!-- comment -->
+        <div class="post-comment">
+            <!-- 来必力 City 版安装代码 -->
+
+            
+            
+            
+            <!-- utteranc评论 -->
+
+            <!-- partial('_partial/comment/changyan') -->
+            <!--PC版-->
+
+            
+            
+            
+        </div>
+    <!-- timeliness note -->
+    <!-- idea from: https://hexo.fluid-dev.com/posts/hexo-injector/#%E6%96%87%E7%AB%A0%E6%97%B6%E6%95%88%E6%80%A7%E6%8F%90%E7%A4%BA -->
+    <!-- Mathjax -->
+</main>
+
+                <!-- profile -->
+            </div>
+            <footer class="footer footer-unloaded">
+    <!-- social  -->
+        <div class="social">
+                            <a href="mailto:Dreamtale.jg@gmail.com" class="iconfont-archer email" title="email" ></a>
+                <a href="https://github.com/gracker" class="iconfont-archer github" target="_blank" title="github"></a>
+                <span class="iconfont-archer wechat" title="wechat">
+                        <img class="profile-qr" src="/en/assets/Wechat.jpeg" />
+                </span>
+                <span class="iconfont-archer qq" title="qq: 553000664">
+                </span>
+                <a href="https://weibo.com/gracker520" class="iconfont-archer weibo" target="_blank" title="weibo"></a>
+                <a href="https://www.zhihu.com/people/gracker" class="iconfont-archer zhihu" target="_blank" title="zhihu"></a>
+                <a href="https://twitter.com/Gracker_Gao" class="iconfont-archer twitter" target="_blank" title="twitter"></a>
+                <a href="https://juejin.im/user/557b0590e4b052e031453d76" class="iconfont-archer juejin" target="_blank" title="juejin"></a>
+                <a href="https://www.youtube.com/@grackers" class="iconfont-archer youtube" target="_blank" title="youtube"></a>
+                <a href="/en/atom.xml" class="iconfont-archer rss" target="_blank" title="rss"></a>
+
+        </div>
+    <!-- powered by Hexo  -->
+    <div class="copyright">
+        <span id="hexo-power">Powered by <a href="https://hexo.io/" target="_blank">Hexo</a></span><span class="iconfont-archer power">&#xe635;</span><span id="theme-info">theme <a href="https://github.com/fi3ework/hexo-theme-archer" target="_blank">Archer</a></span>
+    </div>
+    <!-- website approve for Chinese user -->
+        <div class="website-approve">
+                <span id="icp-approve" class="icp-approve">
+                    <a href="https://beian.miit.gov.cn/" target="_blank">蜀 ICP 备 20016190 号</a>
+                </span>
+        </div>
+</footer>
+
+        </div>
+        <!-- toc -->
+            <div class="toc-wrapper toc-wrapper-loding" style=    top:50vh;
+>
+                <div class="toc-catalog">
+                    <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
+                </div>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-Series-Catalog"><span class="toc-number">1.</span> <span class="toc-text">Perfetto Series Catalog</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#A-Trace-with-Data-Does-Not-Necessarily-Have-Complete-Evidence"><span class="toc-number">2.</span> <span class="toc-text">A Trace with Data Does Not Necessarily Have Complete Evidence</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#How-Data-Reaches-the-Trace-File"><span class="toc-number">3.</span> <span class="toc-text">How Data Reaches the Trace File</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Checking-Trace-Health-with-stats"><span class="toc-number">4.</span> <span class="toc-text">Checking Trace Health with stats</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#ftrace-Loss-Kernel-Events-Outpace-Readers"><span class="toc-number">5.</span> <span class="toc-text">ftrace Loss: Kernel Events Outpace Readers</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Producer-x2F-TraceWriter-Packet-Loss-Locate-It-Before-Assigning-a-Cause"><span class="toc-number">6.</span> <span class="toc-text">Producer &#x2F; TraceWriter Packet Loss: Locate It Before Assigning a Cause</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Central-Buffer-Loss-Ring-Overwrites-Old-Data-Discard-Drops-New-Data"><span class="toc-number">7.</span> <span class="toc-text">Central-Buffer Loss: Ring Overwrites Old Data; Discard Drops New Data</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Short-Traces-First-Separate-Sources-That-Compete-for-Buffers"><span class="toc-number">7.1.</span> <span class="toc-text">Short Traces: First Separate Sources That Compete for Buffers</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Long-Traces-Then-Add-Periodic-File-Writing"><span class="toc-number">7.2.</span> <span class="toc-text">Long Traces: Then Add Periodic File Writing</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Incremental-State-Loss-Events-Remain-but-Names-and-Context-Are-Missing"><span class="toc-number">8.</span> <span class="toc-text">Incremental-State Loss: Events Remain, but Names and Context Are Missing</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Long-Traces-Also-Need-Attention-to-Flushes"><span class="toc-number">9.</span> <span class="toc-text">Long Traces Also Need Attention to Flushes</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Reporting-Confidence"><span class="toc-number">10.</span> <span class="toc-text">Reporting Confidence</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Summary"><span class="toc-number">11.</span> <span class="toc-text">Summary</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#References"><span class="toc-number">12.</span> <span class="toc-text">References</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#About-Me-and-the-Blog"><span class="toc-number">13.</span> <span class="toc-text">About Me and the Blog</span></a></li></ol>
+            </div>
+        <!-- sidebar -->
+        <div class="sidebar sidebar-hide">
+    <ul class="sidebar-tabs sidebar-tabs-active-0">
+        <li class="sidebar-tab-archives"><span class="iconfont-archer">&#xe67d;</span><span class="tab-name">Archive</span></li>
+        <li class="sidebar-tab-tags"><span class="iconfont-archer">&#xe61b;</span><span class="tab-name">Tag</span></li>
+        <li class="sidebar-tab-categories"><span class="iconfont-archer">&#xe666;</span><span class="tab-name">Cate</span></li>
+    </ul>
+    <div class="sidebar-content sidebar-content-show-archive">
+        <div class="sidebar-panel-archives">
+    <!-- 在 ejs 中将 archive 按照时间排序 -->
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    <div class="total-and-search">
+        <div class="total-archive">
+        Total : 140
+        </div>
+    </div>
+    <div class="post-archive">
+            <div class="archive-year"> 2026 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2026/09/19/SmartPerfetto-v1.12.0-Release-Notes/">SmartPerfetto v1.12.0 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2026/09/19/AIW-Open-Source-Android-Internals-Wiki/">Half a Year in the Making: Open-Sourcing an Android Internals Ebook</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/en/2026/08/21/SmartPerfetto-Five-Week-Update/">SmartPerfetto v1.7.0 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/17</span>
+            <a class="archive-post-title" href="/en/2026/07/17/SmartPerfetto-Six-Week-Update/">SmartPerfetto v1.1.1 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/04</span>
+            <a class="archive-post-title" href="/en/2026/06/04/SmartPerfetto-Three-Week-Update/">SmartPerfetto v1.0.28 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/17</span>
+            <a class="archive-post-title" href="/en/2026/05/17/SmartPerfetto-Two-Week-Update/">SmartPerfetto v1.0.7 Release Notes</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-12-Trace-Dataflow-And-Loss/">Android Perfetto Series 12: Trace Dataflow and Data Loss Troubleshooting</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto Series 14: heapprofd and Memory Profiling</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-11-PerfettoSQL-TraceProcessor-Automation/">Android Perfetto Series 11: PerfettoSQL, Trace Processor, and Regression Detection</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto Series 18: Response Latency in Practice, from Input Events to First-Frame Feedback</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-17-Engineering-Domain-And-Platform-Tracing/">Android Perfetto Series 17: Domain Automation, Issue Checklists, and Platform Infrastructure</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/29</span>
+            <a class="archive-post-title" href="/en/2026/04/29/SmartPerfetto-Open-Source-Perfetto-AI-Assistant/">SmartPerfetto Is Open Source: A Perfetto AI Assistant for Android Trace Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/28</span>
+            <a class="archive-post-title" href="/en/2026/04/28/Agent-OS-Task-Entry/">Long-form Forecast: Phones May No Longer Start from Apps: How Agent OS Takes Over the Task Entry Point</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/10</span>
+            <a class="archive-post-title" href="/en/2026/04/10/SmartPerfetto-Architecture-Deep-Dive-QA/">SmartPerfetto Architecture Q&A: 8 In-Depth Technical Questions</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/10</span>
+            <a class="archive-post-title" href="/en/2026/04/10/SmartPerfetto-Architecture-Deep-Dive/">From Trace to Insight: Harness Engineering in SmartPerfetto AI Agent</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/10</span>
+            <a class="archive-post-title" href="/en/2026/03/10/OpenClaw-FAQ/">OpenClaw FAQ: Token Costs, Use Cases, Local Models, Privacy, and Day-to-Day Experience</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/08</span>
+            <a class="archive-post-title" href="/en/2026/03/08/OpenClaw-Local-Practice/">After Running OpenClaw Locally for Three Weeks, I Realized It's Not a Chatbot</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2025 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/16</span>
+            <a class="archive-post-title" href="/en/2025/11/16/Android-Perfetto-10-Binder/">Android Perfetto Series 10: Binder Scheduling and Lock Contention</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/12</span>
+            <a class="archive-post-title" href="/en/2025/11/12/Android-Perfetto-09-CPU/">Android Perfetto Series 9: CPU Information Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/en/2025/08/05/Android-Perfetto-08-Vsync/">Android Perfetto Series 8: Understanding Vsync Mechanism and Performance Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/02</span>
+            <a class="archive-post-title" href="/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">Android Perfetto Series 7: MainThread and RenderThread Deep Dive</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/26</span>
+            <a class="archive-post-title" href="/en/2025/04/26/Android-Perfetto-06-Why-120Hz/">Android Perfetto Series 6: Why 120Hz? Advantages and Challenges</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/26</span>
+            <a class="archive-post-title" href="/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Choreographer-based Rendering Flow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-Perfetto-04-Open-Big-Trace-With-Command-Line/">Android Perfetto Series 4: Opening Large Traces via Command Line</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-01-ANR-Design/">Android ANR Series 1: Understanding Android ANR Design Philosophy</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/08</span>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2024 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto Series 1: Introduction to Perfetto</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/21</span>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/en/2024/03/27/Android-Perfetto-101/">Android Perfetto Series Catalog</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/01</span>
+            <a class="archive-post-title" href="/en/2024/01/01/2023-review/">Reflections on 2023: Health, Career, and the Future</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2023 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/21</span>
+            <a class="archive-post-title" href="/en/2023/08/21/the-performance-design-of-os/">Performance Considerations in Operating System Design</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/14</span>
+            <a class="archive-post-title" href="/en/2023/05/14/bad-android-app-with-system-permissions/">Can an App Really Do Whatever It Wants With System Permissions?</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2022 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/27</span>
+            <a class="archive-post-title" href="/en/2022/03/27/the-performance-tea-part-01/">The Performance Community Tea Talk - Episode 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-sleep/">Systrace Thread CPU State Analysis Tips - Sleep and Uninterruptible Sleep</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/13</span>
+            <a class="archive-post-title" href="/en/2022/03/13/android-systrace-cpu-state-running/">Systrace Thread CPU State Analysis Tips - Running</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2022/01/21/android-systrace-cpu-state-runnable/">Systrace Thread CPU State Analysis Tips - Runnable</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/en/2022/01/07/The-Performace-1-Performance-Tools/">Android Performance Optimization: Techniques, Methods, and Tools</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/07</span>
+            <a class="archive-post-title" href="/en/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/03</span>
+            <a class="archive-post-title" href="/en/2022/01/03/2021-Review/">2021 Year in Review: Baby, Career, and Growth</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2021 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/27</span>
+            <a class="archive-post-title" href="/en/2021/10/27/if-i-write-a-book-about-performance/">What Should Be in a Book About Android Smoothness?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/26</span>
+            <a class="archive-post-title" href="/en/2021/10/26/build-android-12/">Android System Development Series (1): Downloading, Compiling, and Flashing Android 12</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-3/">Android Systrace Responsiveness in Action 3 - Extended Knowledge on Responsiveness</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-1/">Android Systrace Responsiveness in Action 1 - Understanding Responsiveness Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2021/09/13/android-systrace-Responsiveness-in-action-2/">Android Systrace Responsiveness in Action 2 - Responsiveness Analysis - Using App Startup as an Example</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-3/">Android Systrace Smoothness in Action 3 - FAQs During Jank Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/24</span>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2020 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/20</span>
+            <a class="archive-post-title" href="/en/2020/08/20/weibo-imageload-opt-on-huawei/">Why is the Weibo Experience Better on Huawei? A Technical Analysis and Reflection</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/en/2020/05/26/samsung_crash/">An Incident Caused by a 'Leap' Month - Analysis of Samsung System Reboots</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/en/2020/05/07/Android-App-Chain-Wakeup/">Analysis of Android App Chain Wakeups</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/14</span>
+            <a class="archive-post-title" href="/en/2020/02/14/Android-Systrace-SurfaceFlinger/">Android Systrace Basics - SurfaceFlinger Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/03</span>
+            <a class="archive-post-title" href="/en/2020/02/03/android-development-learning-path-2020-edition/">Android Developer Learning Path (2020 Edition)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/28</span>
+            <a class="archive-post-title" href="/en/2020/01/28/2020-read/">My 2020 Reading List</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2019 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/21</span>
+            <a class="archive-post-title" href="/en/2019/12/21/Android-Systrace-CPU/">Android Systrace Basics - CPU Info Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/15</span>
+            <a class="archive-post-title" href="/en/2019/12/15/Android-Systrace-Triple-Buffer/">Android Systrace Basics - Triple Buffer Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/06</span>
+            <a class="archive-post-title" href="/en/2019/12/06/Android-Systrace-Binder/">Android Systrace Basics - Binder and Lock Contention Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/en/2019/12/01/BlogMap/">[Sticky] Blog Article Directory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/01</span>
+            <a class="archive-post-title" href="/en/2019/12/01/Android-Systrace-Vsync/">Android Systrace Basics - Vsync Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/06</span>
+            <a class="archive-post-title" href="/en/2019/11/06/Android-Systrace-MainThread-And-RenderThread/">Android Systrace Basics - MainThread and RenderThread Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/04</span>
+            <a class="archive-post-title" href="/en/2019/11/04/Android-Systrace-Input/">Android Systrace Basics - Input Interpretation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/24</span>
+            <a class="archive-post-title" href="/en/2019/10/24/Android-Background-Animation/">Analysis of 'Zombie Animations' in the Android Background</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/22</span>
+            <a class="archive-post-title" href="/en/2019/10/22/Android-Choreographer/">Detailed Explanation of Android Rendering Mechanism Based on Choreographer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/18</span>
+            <a class="archive-post-title" href="/en/2019/09/18/Android-Jank-Due-To-Low-Memory/">Overview of Jank and Frame Drops in Android - Low Memory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/17</span>
+            <a class="archive-post-title" href="/en/2019/09/17/Android-Kill-Background-App-Debug/">Case Study: Debugging the Android Launcher Kill Problem</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/05</span>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Debug/">Overview of Jank and Frame Drops in Android - Methodology</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/01</span>
+            <a class="archive-post-title" href="/en/2019/09/01/Android-Activity-Lunch-Mode/">A Detailed Guide to Activity Launch Modes in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/en/2019/07/27/Android-Hardware-Layer/">A Deep Dive into Hardware Layers in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/27</span>
+            <a class="archive-post-title" href="/en/2019/07/27/Android-Hardware-Layer-NEW/">Detailed Explanation of Hardware Layer in Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/23</span>
+            <a class="archive-post-title" href="/en/2019/07/23/Android-Systrace-Pre/">Android Systrace Basics - Prerequisites for Analyzing Systrace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/29</span>
+            <a class="archive-post-title" href="/en/2019/06/29/Android-Systrace-SystemServer/">Android Systrace Basics - SystemServer Explained</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/en/2019/05/28/Android-Systrace-About/">Android Systrace Basics - Introduction to Systrace</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/27</span>
+            <a class="archive-post-title" href="/en/2019/05/27/why-60-fps/">Android Systrace Basics - Why 60 FPS?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/26</span>
+            <a class="archive-post-title" href="/en/2019/05/26/Android_Systrace_0/">Android Systrace -- Series Article Index</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/15</span>
+            <a class="archive-post-title" href="/en/2019/05/15/90hz-on-android/">A New Era of Smoothness: Thoughts on 90Hz on Android</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/en/2019/04/07/Sharp-Tools/">Sharp Tools - Efficient Tool Recommendations</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/07</span>
+            <a class="archive-post-title" href="/en/2019/04/07/liqi/">Liqi - High-Efficiency Tools Recommendation</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/21</span>
+            <a class="archive-post-title" href="/en/2019/01/21/android-performance-case-jank-accessbility/">Case Analysis of System-wide Stutter Caused by Android Accessibility Service</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/12</span>
+            <a class="archive-post-title" href="/en/2019/01/12/recommend-of-2018/">2018 Best Items Recommendations - A Reward for Your Hard Work</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2018 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/01</span>
+            <a class="archive-post-title" href="/en/2018/11/01/android-system-develop-0/">Setting Up the Android System Development Environment</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/25</span>
+            <a class="archive-post-title" href="/en/2018/10/25/How-do-engineers-count-well/">Lu Qi: Besides Good Code, What Makes an Engineer Excellent?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/01</span>
+            <a class="archive-post-title" href="/en/2018/10/01/how-to-stop-sucking-and-be-awesome-instead-8/">The Programmer's Apprenticeship - 08: The Beauty of Reading</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/30</span>
+            <a class="archive-post-title" href="/en/2018/09/30/how-to-stop-sucking-and-be-awesome-instead-7/">The Programmer's Apprenticeship - 07: Games and Programming</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/29</span>
+            <a class="archive-post-title" href="/en/2018/09/29/how-to-stop-sucking-and-be-awesome-instead-6/">The Programmer's Apprenticeship - 06: All About the Internet</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/28</span>
+            <a class="archive-post-title" href="/en/2018/09/28/how-to-stop-sucking-and-be-awesome-instead-5/">The Programmer's Apprenticeship - 05: Know Your Users</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/27</span>
+            <a class="archive-post-title" href="/en/2018/09/27/how-to-stop-sucking-and-be-awesome-instead-4/">The Programmer's Apprenticeship - 04: Reflections on Testing</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/26</span>
+            <a class="archive-post-title" href="/en/2018/09/26/how-to-stop-sucking-and-be-awesome-instead-3/">The Programmer's Apprenticeship - 03: Web Design Principles</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/20</span>
+            <a class="archive-post-title" href="/en/2018/09/20/how-to-stop-sucking-and-be-awesome-instead-2/">The Programmer's Apprenticeship - 02: The Way of Programming</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/19</span>
+            <a class="archive-post-title" href="/en/2018/09/19/how-to-stop-sucking-and-be-awesome-instead-1/">The Programmer's Apprenticeship - 01: The Art of Fighting Back</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">09/13</span>
+            <a class="archive-post-title" href="/en/2018/09/13/android-memory/">Does the Android System Not Release Memory?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/13</span>
+            <a class="archive-post-title" href="/en/2018/08/13/Some-Thoughts-on-the-Fluency-of-Android/">Some Thoughts on Android System Fluency</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/20</span>
+            <a class="archive-post-title" href="/en/2018/05/20/zhihu-startingwindow/">Zhihu: Save Your StartingWindow</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/07</span>
+            <a class="archive-post-title" href="/en/2018/05/07/Android-performance-optimization-skills-and-tools/">[Sticky] Android Performance Optimization: Must-Know Skills and Tools</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/en/2018/01/06/2017-most-recommended/">2017 Best Recommendations - A Reward for Hard-Working Self</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/06</span>
+            <a class="archive-post-title" href="/en/2018/01/06/Most-Recommended-of-2017/">2017 Annual Best Recommendations - Reward Yourself for Hard Work</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2017 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/23</span>
+            <a class="archive-post-title" href="/en/2017/04/23/About-work/">Reflections on Work and Growth (2017)</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2016 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/en/2016/04/05/android-bottom-bar-2/">Android Bottom Navigation Spec Part 2: Style, Behavior, and Dimensions</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/05</span>
+            <a class="archive-post-title" href="/en/2016/04/05/android-bottom-bar-1/">Android Bottom Navigation Spec Part 1: Usage</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2015 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/31</span>
+            <a class="archive-post-title" href="/en/2015/12/31/How-to-calculation-android-app-lunch-time/">How to Calculate App Startup Time in Android?</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">12/29</span>
+            <a class="archive-post-title" href="/en/2015/12/29/Android-App-Launch-Optimization-DelayLoad-Part-2/">Android App Launch Optimization: Implementation and Principles of DelayLoad (Part 2)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">11/18</span>
+            <a class="archive-post-title" href="/en/2015/11/18/Android-app-lunch-optimize-delay-load/">Android App Startup Optimization - DelayLoad Implementation and Principles (Part 1)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/12</span>
+            <a class="archive-post-title" href="/en/2015/08/12/AndroidL-hwui-RenderThread-workflow/">RenderThread Workflow in Android hwui</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">08/05</span>
+            <a class="archive-post-title" href="/en/2015/08/05/HashMap/">Java 7 HashMap Source Code Analysis</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-onTrimMemory/">Android Code Memory Optimization Suggestions - OnTrimMemory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-AndroidResource/">Android Code Memory Optimization Suggestions - Android Resources</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">07/20</span>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/29</span>
+            <a class="archive-post-title" href="/en/2015/05/29/Nexus6-with-Android-M/">Enabling Multi-Window Mode on Nexus 6 with Android M</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/06</span>
+            <a class="archive-post-title" href="/en/2015/05/06/Java-Singleton/">A Detailed Guide to Java Singleton Pattern</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-3/">Android Performance Patterns: Understanding VSYNC</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-2/">Android Performance Patterns: Understanding Overdraw</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-4/">Android Performance Patterns: Profile GPU Rendering</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns-1/">Android Performance Patterns: Render Performance</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/19</span>
+            <a class="archive-post-title" href="/en/2015/04/19/Android-Performance-Patterns/">Overview of Android Performance Patterns</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Open-Bitmap-Object-In-MAT/">Android Memory Optimization (3) - Viewing Original Bitmaps in MAT</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">04/11</span>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/31</span>
+            <a class="archive-post-title" href="/en/2015/03/31/android-performance-case-study-follow-up/">Android Performance Case Study Follow-up</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-3/">Android Tips Round-Up, Part 3</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-4/">Android Tips Round-Up, Part 4</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">02/04</span>
+            <a class="archive-post-title" href="/en/2015/02/04/build-rom-for-nexus5/">Compiling Android Lollipop Firmware for Nexus 5</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/30</span>
+            <a class="archive-post-title" href="/en/2015/01/30/android-performance-tools-systrace-1/">Android Performance Optimization - Introduction to Systrace (Part 1)</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/16</span>
+            <a class="archive-post-title" href="/en/2015/01/16/view-android-source-code-with-androidstudio/">Viewing Android Lollipop Source Code with Android Studio</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">01/13</span>
+            <a class="archive-post-title" href="/en/2015/01/13/android-performance-optimization-overdraw-2/">Android Performance Optimization: Overdraw - Practical Application</a>
+        </li>
+                </ul>
+            <div class="archive-year"> 2014 </div>
+            <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/20</span>
+            <a class="archive-post-title" href="/en/2014/10/20/android-performance-optimization-overdraw-1/">Android Performance Optimization: Overdraw - Theory</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">06/03</span>
+            <a class="archive-post-title" href="/en/2014/06/03/android-edittext-do-not-auto-get-focus/">Android Tips: How to Prevent EditText from Automatically Getting Focus</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/31</span>
+            <a class="archive-post-title" href="/en/2014/05/31/android-tips-round-up-2/">Android Tips Round-Up, Part 2</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/28</span>
+            <a class="archive-post-title" href="/en/2014/05/28/android-tips-round-up-1/">Android Tips Round-Up, Part 1</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/02</span>
+            <a class="archive-post-title" href="/en/2014/05/02/android_log_to_file/">Android Tools - Log2File</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/25</span>
+            <a class="archive-post-title" href="/en/2014/03/25/ubuntu-adb-can-not-find-devices/">Ubuntu: Adb Command Cannot Find Device</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/17</span>
+            <a class="archive-post-title" href="/en/2014/03/17/android-build-your-own-android-notification-service-app/">Android Service: Building Your Own Notification Center (1) - Introduction to Accessibility Service</a>
+        </li>
+            </ul>
+    </div>
+</div>
+
+        <div class="sidebar-panel-tags">
+    <div class="sidebar-tags-name">
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
+            </span>
+            <span class="sidebar-tag-name" data-tags="Perfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                Perfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Yearly Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Yearly Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
+            </span>
+            <span class="sidebar-tag-name" data-tags="Year in Review">
+                <span class="iconfont-archer">&#xe606;</span>
+                Year in Review
+            </span>
+            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Knowledge Planet
+            </span>
+            <span class="sidebar-tag-name" data-tags="Essays">
+                <span class="iconfont-archer">&#xe606;</span>
+                Essays
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="AOSP">
+                <span class="iconfont-archer">&#xe606;</span>
+                AOSP
+            </span>
+            <span class="sidebar-tag-name" data-tags="Framework">
+                <span class="iconfont-archer">&#xe606;</span>
+                Framework
+            </span>
+            <span class="sidebar-tag-name" data-tags="AIW">
+                <span class="iconfont-archer">&#xe606;</span>
+                AIW
+            </span>
+            <span class="sidebar-tag-name" data-tags="Open Source">
+                <span class="iconfont-archer">&#xe606;</span>
+                Open Source
+            </span>
+            <span class="sidebar-tag-name" data-tags="Agent OS">
+                <span class="iconfont-archer">&#xe606;</span>
+                Agent OS
+            </span>
+            <span class="sidebar-tag-name" data-tags="AI">
+                <span class="iconfont-archer">&#xe606;</span>
+                AI
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenAI">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenAI
+            </span>
+            <span class="sidebar-tag-name" data-tags="Mobile OS">
+                <span class="iconfont-archer">&#xe606;</span>
+                Mobile OS
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Linux">
+                <span class="iconfont-archer">&#xe606;</span>
+                Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="Performance Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Performance Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Thread Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Thread Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="Battery Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Battery Optimization
+            </span>
+            <span class="sidebar-tag-name" data-tags="ANR Analysis">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR Analysis
+            </span>
+            <span class="sidebar-tag-name" data-tags="Page Response">
+                <span class="iconfont-archer">&#xe606;</span>
+                Page Response
+            </span>
+            <span class="sidebar-tag-name" data-tags="Trace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Trace
+            </span>
+            <span class="sidebar-tag-name" data-tags="DataFlow">
+                <span class="iconfont-archer">&#xe606;</span>
+                DataFlow
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="Locking">
+                <span class="iconfont-archer">&#xe606;</span>
+                Locking
+            </span>
+            <span class="sidebar-tag-name" data-tags="Scheduling">
+                <span class="iconfont-archer">&#xe606;</span>
+                Scheduling
+            </span>
+            <span class="sidebar-tag-name" data-tags="heapprofd">
+                <span class="iconfont-archer">&#xe606;</span>
+                heapprofd
+            </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
+            <span class="sidebar-tag-name" data-tags="SQL">
+                <span class="iconfont-archer">&#xe606;</span>
+                SQL
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceProcessor">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceProcessor
+            </span>
+            <span class="sidebar-tag-name" data-tags="GPU">
+                <span class="iconfont-archer">&#xe606;</span>
+                GPU
+            </span>
+            <span class="sidebar-tag-name" data-tags="Power">
+                <span class="iconfont-archer">&#xe606;</span>
+                Power
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
+            </span>
+            <span class="sidebar-tag-name" data-tags="Input">
+                <span class="iconfont-archer">&#xe606;</span>
+                Input
+            </span>
+            <span class="sidebar-tag-name" data-tags="Latency">
+                <span class="iconfont-archer">&#xe606;</span>
+                Latency
+            </span>
+            <span class="sidebar-tag-name" data-tags="Camera">
+                <span class="iconfont-archer">&#xe606;</span>
+                Camera
+            </span>
+            <span class="sidebar-tag-name" data-tags="Audio">
+                <span class="iconfont-archer">&#xe606;</span>
+                Audio
+            </span>
+            <span class="sidebar-tag-name" data-tags="SDK">
+                <span class="iconfont-archer">&#xe606;</span>
+                SDK
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceEvent">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceEvent
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
+            </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="Annual Recommendations">
+                <span class="iconfont-archer">&#xe606;</span>
+                Annual Recommendations
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenClaw">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenClaw
+            </span>
+            <span class="sidebar-tag-name" data-tags="AI Agent">
+                <span class="iconfont-archer">&#xe606;</span>
+                AI Agent
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Local Models">
+                <span class="iconfont-archer">&#xe606;</span>
+                Local Models
+            </span>
+            <span class="sidebar-tag-name" data-tags="Sharp Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Sharp Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity
+            </span>
+            <span class="sidebar-tag-name" data-tags="SmartPerfetto">
+                <span class="iconfont-archer">&#xe606;</span>
+                SmartPerfetto
+            </span>
+            <span class="sidebar-tag-name" data-tags="MCP">
+                <span class="iconfont-archer">&#xe606;</span>
+                MCP
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android Performance">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Specs">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Specs
+            </span>
+            <span class="sidebar-tag-name" data-tags="Compose">
+                <span class="iconfont-archer">&#xe606;</span>
+                Compose
+            </span>
+            <span class="sidebar-tag-name" data-tags="Kotlin">
+                <span class="iconfont-archer">&#xe606;</span>
+                Kotlin
+            </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
+            <span class="sidebar-tag-name" data-tags="Stutter">
+                <span class="iconfont-archer">&#xe606;</span>
+                Stutter
+            </span>
+            <span class="sidebar-tag-name" data-tags="Overdraw">
+                <span class="iconfont-archer">&#xe606;</span>
+                Overdraw
+            </span>
+            <span class="sidebar-tag-name" data-tags="Programmer">
+                <span class="iconfont-archer">&#xe606;</span>
+                Programmer
+            </span>
+            <span class="sidebar-tag-name" data-tags="Reading Notes">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading Notes
+            </span>
+            <span class="sidebar-tag-name" data-tags="The Programmer's Apprenticeship">
+                <span class="iconfont-archer">&#xe606;</span>
+                The Programmer's Apprenticeship
+            </span>
+            <span class="sidebar-tag-name" data-tags="Design Principles">
+                <span class="iconfont-archer">&#xe606;</span>
+                Design Principles
+            </span>
+            <span class="sidebar-tag-name" data-tags="Internet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Internet
+            </span>
+            <span class="sidebar-tag-name" data-tags="User Experience">
+                <span class="iconfont-archer">&#xe606;</span>
+                User Experience
+            </span>
+            <span class="sidebar-tag-name" data-tags="Game Programming">
+                <span class="iconfont-archer">&#xe606;</span>
+                Game Programming
+            </span>
+            <span class="sidebar-tag-name" data-tags="Testing">
+                <span class="iconfont-archer">&#xe606;</span>
+                Testing
+            </span>
+            <span class="sidebar-tag-name" data-tags="Reading">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading
+            </span>
+            <span class="sidebar-tag-name" data-tags="Liqi">
+                <span class="iconfont-archer">&#xe606;</span>
+                Liqi
+            </span>
+            <span class="sidebar-tag-name" data-tags="Community">
+                <span class="iconfont-archer">&#xe606;</span>
+                Community
+            </span>
+            <span class="sidebar-tag-name" data-tags="Smooth">
+                <span class="iconfont-archer">&#xe606;</span>
+                Smooth
+            </span>
+            <span class="sidebar-tag-name" data-tags="Experience Optimization">
+                <span class="iconfont-archer">&#xe606;</span>
+                Experience Optimization
+            </span>
+    </div>
+    <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
+    <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
+        缺失模块，请参考主题文档进行安装配置：https://github.com/fi3ework/hexo-theme-archer#%E5%AE%89%E8%A3%85%E4%B8%BB%E9%A2%98
+    </div> 
+    <div class="sidebar-tags-list"></div>
+</div>
+
+        <div class="sidebar-panel-categories">
+    <div class="sidebar-categories-name">
+        <span class="sidebar-category-name" data-categories="Essays">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Essays
+        </span>
+        <span class="sidebar-category-name" data-categories="Casual Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Casual Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Reading Notes">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Reading Notes
+        </span>
+        <span class="sidebar-category-name" data-categories="Android">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android
+        </span>
+        <span class="sidebar-category-name" data-categories="AI">
+            <span class="iconfont-archer">&#xe60a;</span>
+            AI
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
+        </span>
+        <span class="sidebar-category-name" data-categories="Android Performance Optimization">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Android Performance Optimization
+        </span>
+        <span class="sidebar-category-name" data-categories="SmartPerfetto">
+            <span class="iconfont-archer">&#xe60a;</span>
+            SmartPerfetto
+        </span>
+    </div>
+    <div class="iconfont-archer sidebar-categories-empty">&#xe678;</div>
+    <div class="sidebar-categories-list"></div>
+</div>
+
+    </div>
+</div>
+
+        <!-- site-meta -->
+        <script>
+    var siteMetaRoot = "/en/"
+    if (siteMetaRoot === "undefined") {
+        siteMetaRoot = '/'
+    }
+    var siteMeta = {
+        url: "https://androidperformance.com/en",
+        root: siteMetaRoot,
+        author: "Gracker"
+    }
+</script>
+
+        <!-- import experimental options here -->
+        <!-- Custom Font -->
+
+        <!-- jquery (must load before main.js) -->
+        <script src="/en/lib/jquery.min.js" defer></script>
+        <!-- main func (depends on jQuery) -->
+        <script src="/en/scripts/main.js" defer></script>
+        <script>
+    (function () {
+      function scheduleAfterLoad(task, delay, idleTimeout) {
+        function run() {
+          window.setTimeout(function () {
+            if (window.requestIdleCallback) {
+              window.requestIdleCallback(task, { timeout: idleTimeout || 3000 })
+            } else {
+              task()
+            }
+          }, delay || 0)
+        }
+
+        if (document.readyState === 'complete') {
+          run()
+        } else {
+          window.addEventListener('load', run, { once: true })
+        }
+      }
+
+      function loadScript(src, options) {
+        options = options || {}
+        if (options.id && document.getElementById(options.id)) return
+
+        var done = false
+        var script = document.createElement('script')
+        script.src = src
+        script.async = true
+        if (options.id) script.id = options.id
+        if (options.crossOrigin) script.crossOrigin = options.crossOrigin
+        if (options.referrerPolicy) script.referrerPolicy = options.referrerPolicy
+        script.onload = function () {
+          done = true
+          if (options.onload) options.onload()
+        }
+        script.onerror = function () {
+          done = true
+          if (script.parentNode) script.parentNode.removeChild(script)
+        }
+        if (options.timeout) {
+          window.setTimeout(function () {
+            if (done) return
+            script.onload = null
+            script.onerror = null
+            if (script.parentNode) script.parentNode.removeChild(script)
+          }, options.timeout)
+        }
+        document.head.appendChild(script)
+      }
+
+      function loadStyle(href, id) {
+        if (id && document.getElementById(id)) return
+        var link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = href
+        if (id) link.id = id
+        document.head.appendChild(link)
+      }
+
+      scheduleAfterLoad(function () {
+        if (!document.querySelector('[data-fancybox]')) return
+        loadStyle('/en/lib/fancybox/fancybox.css', 'fancybox-css')
+        loadScript('/en/lib/fancybox/fancybox.umd.js', {
+          id: 'fancybox-js',
+          timeout: 4000,
+          onload: function () {
+            if (window.Fancybox) window.Fancybox.bind('[data-fancybox]')
+          },
+        })
+      }, 1000, 3000)
+
+
+
+
+      scheduleAfterLoad(function () {
+        window.dataLayer = window.dataLayer || []
+        window.gtag = window.gtag || function () { window.dataLayer.push(arguments) }
+        window.gtag('js', new Date())
+        loadScript('https://www.googletagmanager.com/gtag/js?id=UA-50993302-2', {
+          id: 'gtag-js',
+          timeout: 4000,
+          onload: function () {
+            window.gtag('config', 'UA-50993302-2')
+          },
+        })
+      }, 4000, 3000)
+    })();
+</script>
+
+        <!-- search -->
+            <div class="site-search site-search-loading local-search-shell">
+    <div class="algolia-popup popup local-search-popup" role="dialog" aria-modal="true" aria-label="Search posts">
+        <div class="algolia-search local-search-header">
+            <div class="algolia-search-input-icon">
+                <i class="iconfont-archer">&#xe627;</i>
+            </div>
+            <div class="algolia-search-input local-search-input">
+                <input id="local-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search for Posts">
+            </div>
+            <button class="popup-btn-close local-search-close" type="button" aria-label="Close search">
+                <i class="iconfont-archer" aria-hidden="true">&#xe609;</i>
+            </button>
+        </div>
+
+        <div class="algolia-results local-search-results">
+            <div
+                id="local-search-config"
+                data-path="/en/search.xml"
+                data-per-page="10"
+                data-empty="We did not find any results for: ${query}"
+                data-stats="${hits} results found"
+                data-loading="Loading search index..."
+                data-error="Failed to load the search index. Please try again later."></div>
+            <div id="local-search-stats" class="algolia-stats"></div>
+            <div id="local-search-hits"></div>
+        </div>
+    </div>
+</div>
+
+            <script src="/en/scripts/local-search.js" async></script>
+        <!-- async load share.js on first click -->
+            <script>
+                (function(){
+                  var loaded = false
+                  function loadShare(){
+                    if (loaded) return
+                    loaded = true
+                    var s = document.createElement('script')
+                    s.src = '/en/scripts/share.js'
+                    s.async = true
+                    document.head.appendChild(s)
+                  }
+                  document.addEventListener('click', function(e){
+                    var t = e.target
+                    if (!t) return
+                    if (t.closest && t.closest('.share-wrapper')) { loadShare() }
+                    else if (t.classList && t.classList.contains('share-wrapper')) { loadShare() }
+                  }, true)
+                })();
+            </script>
+        <!-- mermaid -->
+    </body>
+</html>

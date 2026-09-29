@@ -476,15 +476,15 @@ loading="lazy"             decoding="async"
                 <span class="abstract-title-text">Android Perfetto 系列 18：响应速度实战，从输入事件到首帧反馈</span>
             </a>
             <div class="abstract-content">
-                <p>这篇补一个很容易被启动速度和流畅度盖住的话题：交互首帧响应。它关心用户刚操作完之后，屏幕多久给出第一帧反馈；页面完整加载和动画后半段稳定性要用其他指标衡量。</p>
-<p>点一个按钮，多久出现按压态；点微信会话，多久看到会话页第一帧开始动；手指滑动列表，多久看到内容跟着手指移动。这些问题和启动慢有关，也和掉帧有关，但分析口径要单独拎出来。</p>
-<p>本文用 Perfetto 拆这段时间：从 InputReader <code>read_time</code> 起算，到 App 收到事件，再到第一帧 present。主指标叫 <code>input_to_present_ms</code>，只度量 input read 到关联帧 present；它不覆盖触控 IC、驱动上报前延迟、显示扫描和面板响应。读完之后，你应该能给一个点击或滑动场景定义起点、终点、采集配置、SQL 指标和 App 侧补充 marker。</p>
-<p>文章把响应慢拆成 read&#x2F;dispatch、handling、ACK→first frame、滑动跟手四个独立指标，每个指标都配上采集配置、UI 上先看哪几条轨道和 SQL 写法，最后归纳五条常见归因路径，以及高速相机和 Perfetto 各自的边界。</p>
+                <p>按钮按下后，按压态何时出现？滑动列表时，内容何时第一次跟着手指移动？这两个问题都要找到输入事件和对应的第一帧反馈；启动总耗时与后续动画帧率回答的是别的问题。</p>
+<p>本文用 Perfetto 把 InputReader 读到事件、InputDispatcher 派发、App 处理、帧提交和 SurfaceFlinger 呈现分开计时。每一步的起止点要能回到 Trace 核对。</p>
+<p>从 InputReader 的 <code>read_time</code> 到关联帧 present，可以得到系统内部延迟的候选值 <code>estimated_input_to_present_ms</code>。只有确认目标 layer、业务状态确实在那一帧发生视觉变化，才把它写成 <code>input_to_present_ms</code>。这段时间不包含触控 IC、驱动上报前延迟、显示扫描和面板响应。</p>
+<p>点击和滑动还需要不同的终点定义：按压态、转场首帧和内容第一次位移不能混成一个数。App marker 能说明业务动作，高速相机可补外部可见时点。</p>
             </div>
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/20">
+                <div class="abstract-date" title="Last updated: 2026/09/29">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2026/05/04</span>
                 </div>
                 <!-- tags -->
@@ -510,13 +510,13 @@ loading="lazy"             decoding="async"
                 <span class="abstract-title-text">Android Perfetto 系列 17：专项场景自动化、问题清单与平台体系</span>
             </a>
             <div class="abstract-content">
-                <p>Camera open 慢、Audio underrun、WebView 首屏卡住、Flutter&#x2F;游戏掉帧，这类问题的证据会散在 App、<code>system_server</code>、<code>cameraserver</code>&#x2F;<code>audioserver</code>、HAL、SurfaceFlinger 和调度轨道里。只在 UI 里多看几条轨道，很容易漏掉关键时间点。</p>
-<p>这一篇用 Camera 和 Audio 举例，讲一套可复用的专项分析方法：先抓对数据，再识别对象，再算阶段和阻塞，报告里保留能跳回 UI 复查的时间点。Camera&#x2F;Audio 是例子，核心是领域 schema 和平台 tracing 协作。读完之后，至少能把 Camera open 慢拆成可复查阶段，把 Audio underrun 拆成周期异常，而不是只交一个 Top slice 表。</p>
+                <p>Camera 打开慢要区分 API 返回、HAL 首个 Buffer 和预览画面显示；Audio underrun 要看 App 写入与 mixer 周期是否稳定。这些事件分散在 App、系统服务、HAL 和调度轨道里，单列一张 Top slice 表还原不了顺序。</p>
+<p>这里用 Camera 和 Audio 两个场景说明：先确认一次操作涉及哪些进程和线程，再按阶段或真实周期计算耗时，最后把异常时间点、来源轨道和质量限制写进报告。平台侧还要维护稳定的事件名和采集配置，下一次 Trace 才能复用查询。</p>
             </div>
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/20">
+                <div class="abstract-date" title="Last updated: 2026/09/29">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2026/05/04</span>
                 </div>
                 <!-- tags -->
@@ -542,14 +542,14 @@ loading="lazy"             decoding="async"
                 <span class="abstract-title-text">Android Perfetto 系列 16：GPU、Power Counters 与硬件瓶颈分析</span>
             </a>
             <div class="abstract-content">
-                <p>FrameTimeline 标出一帧晚了，主线程、RenderThread、SurfaceFlinger 看起来都没有明显越界，这时很容易写出一句“可能是 GPU 瓶颈”。这句话风险很高：GPU 频率、GPU 计数器、电池电流、电源轨都不是 App 单帧归因工具。</p>
-<p>第 07、08 篇已经讲了 App 到 SurfaceFlinger 的渲染路径，第 06、09 篇已经讲了刷新率和 CPU 调度&#x2F;频率。这一篇不重复这些内容，只补一个经常被跳过的环节：当问题看起来已经压到硬件资源层时，GPU、devfreq、battery counter（电池计数器）、power rail（电源轨）这些数据该怎么进入同一段 trace 分析。</p>
-<p>这类 counter 的麻烦在于：不是每台设备都有，不同 GPU 厂商的 counter 名称也不一样。写结论时不能说“GPU 高就是 GPU 瓶颈”，只能把 FrameTimeline、RenderThread、SurfaceFlinger、GPU timeline、频率和功耗数据放到同一段时间里看。</p>
+                <p>FrameTimeline 标出一帧晚了，主线程和 RenderThread 没有明显长任务，下一步可以查 GPU 工作与 fence。GPU 频率、电池电流和电源轨只能提供同一窗口的硬件状态，不能单独证明某个 App 帧为何晚呈现。</p>
+<p>这篇把 GPU render stages、devfreq、电池计数器和电源轨放到同一段 Trace 窗口里，说明各自能回答什么、设备不支持时报告该怎么写。帧和线程的判读可接着<a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">第 7 篇</a>与<a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/">第 8 篇</a>的例子读。</p>
+<p>Counter 名称、单位和采样周期由设备 producer 决定。跨设备比较前先核对 descriptor；同一设备上也要确认目标帧与 GPU 工作是否能通过 token、layer 或 fence 关联。</p>
             </div>
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/20">
+                <div class="abstract-date" title="Last updated: 2026/09/29">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2026/05/04</span>
                 </div>
                 <!-- tags -->
@@ -575,13 +575,13 @@ loading="lazy"             decoding="async"
                 <span class="abstract-title-text">Android Perfetto 系列 15：Boot Trace、长时间现场 Trace 与偶发问题抓取</span>
             </a>
             <div class="abstract-content">
-                <p>很多性能问题不是点一下就能复现的。开机慢、偶发卡顿、亮灭屏后异常、几小时后音频断续、车机周期性抖动、温升后的性能下降，都不适合靠 10 秒手工 trace 解决。</p>
-<p>这一篇讲现场长 Trace：怎么提前定义窗口，怎么用 trigger 封存问题现场，怎么让文件安全写完，怎么拿回来之后判断数据是否可信。Boot Trace 放在后面作为特殊窗口处理。基础的交互式抓取方式（命令行、官方脚本、开发者选项、网页端）第 02 篇已经讲过，本文只讨论现场和长时间运行带来的差异。</p>
+                <p>开机慢、亮屏后偶发卡顿或几小时后才出现的音频断续，通常等不到工程师连上电脑再按「开始录制」。要保留问题发生前的调度、帧或音频事件，采集配置必须提前在设备上运行。</p>
+<p>现场抓取要先确定触发点前后各保留多久，再选 Ring Buffer、周期写文件或 trigger。文件写出后，还要确认问题窗口没有被覆盖、关键数据源没有丢失。设备开机属于更早的特殊窗口，单独处理。</p>
             </div>
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/20">
+                <div class="abstract-date" title="Last updated: 2026/09/29">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2026/05/04</span>
                 </div>
                 <!-- tags -->
@@ -607,15 +607,14 @@ loading="lazy"             decoding="async"
                 <span class="abstract-title-text">Android Perfetto 系列 14：heapprofd 与内存 Profiling</span>
             </a>
             <div class="abstract-content">
-                <p>内存问题最麻烦的地方在于：数字涨了，不代表马上能知道谁在涨。<code>dumpsys meminfo</code> 能告诉你 RSS&#x2F;PSS，Java heap dump 能告诉你对象保留关系，但 JNI&#x2F;C++、Skia&#x2F;Bitmap 的 CPU 侧分配、播放器里的 native wrapper 这些问题，经常还需要知道“哪个调用栈发起了 malloc&#x2F;new”。</p>
-<p>这一篇讲 heapprofd。它的价值是把 native allocation、free 和调用栈放进 Perfetto Trace，再和业务事件、线程调度、Binder 放到同一个时间轴里看。</p>
-<p>heapprofd 适合放在趋势确认之后。先用 RSS&#x2F;PSS、meminfo 或线上监控确认趋势，再用 heapprofd 找 malloc&#x2F;new 调用栈；这篇不解决 Java 对象引用和图形 backing 内存。</p>
-<p>下文的顺序是：什么时候上 heapprofd、怎么抓、UI 和 SQL 怎么读、采样间隔和符号化怎么理解，最后是发布报告前的检查清单。</p>
+                <p><code>dumpsys meminfo</code> 显示进程内存上涨，Java heap dump 却没有对应的对象增长时，下一步先查上涨落在 Native Heap、图形 Buffer，还是其他映射。若可疑部分来自 malloc&#x2F;new，heapprofd 可以把分配与调用栈对应起来。</p>
+<p>heapprofd 的分配、释放和调用栈记录能与业务事件放在同一条 Perfetto 时间轴上，便于核对一次操作前后哪些分配仍未释放。</p>
+<p>heapprofd 是采样工具，看到的 native allocation 不能直接当作 RSS，也不覆盖 Java 对象引用或所有图形 backing 内存。先分清内存账，再决定是否抓 profile。我更倾向先用 meminfo 和 smaps 把上涨来源拆开，再打开 flamegraph；若涨的是 GraphicBuffer，盯着 malloc 调用栈改代码就找错了方向。</p>
             </div>
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/20">
+                <div class="abstract-date" title="Last updated: 2026/09/29">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2026/05/04</span>
                 </div>
                 <!-- tags -->
@@ -641,14 +640,14 @@ loading="lazy"             decoding="async"
                 <span class="abstract-title-text">Android Perfetto 系列 13：Perfetto SDK、Track Event 与 App 现场 Trace</span>
             </a>
             <div class="abstract-content">
-                <p>系统 Trace 能告诉你线程什么时候运行、CPU 跑在哪个核、FrameTimeline 哪一帧超时；在启用 Binder&#x2F;ftrace&#x2F;sched 证据时，也能还原 Binder 调用和等待线索。但它不知道播放器正在解哪一个 frame id，也不知道游戏引擎正在加载哪个 scene，更不知道一个业务任务在队列里排了多久。</p>
-<p>这一篇只回答一个问题：业务语义怎么进入 Trace。系统能告诉你主线程慢了，Track Event 负责告诉你当时在 decode 哪一帧、哪个队列堵住、哪个请求跨线程流转。两边合在一起，才能把“主线程慢了 18ms”缩小到 frame 1082 附近的纹理上传候选区间，再结合 RenderThread&#x2F;HWUI、GPU 和 FrameTimeline 继续验证。</p>
-<p>文章按接入的实际顺序展开：先想清楚要不要接、接到哪一层，再定业务阶段字典和 backend，然后是最小接入骨架、category 开关、和系统 Trace 合抓、跨线程 flow，最后是控制写入量和 App 侧现场 Trace 协议。</p>
+                <p>系统 Trace 能显示线程、CPU、帧和 Binder 等系统事件；播放器的 frame id、游戏 scene 名称或业务队列里的等待时间，需要应用自己提供。缺少这些标记时，一段主线程耗时只能定位到系统活动，难以对应业务阶段。</p>
+<p>Perfetto SDK 的 Track Event 可以记录解码、纹理上传、队列深度和跨线程任务 ID。与系统轨道放在同一个时间窗口后，能先找到业务候选阶段，再用 RenderThread、GPU 和 FrameTimeline 验证它是否影响了可见帧。</p>
+<p>接入前要先定事件名称、参数单位和采样频率。否则埋点虽然能显示在 UI 中，后续 SQL 仍无法稳定地按业务阶段聚合。</p>
             </div>
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/20">
+                <div class="abstract-date" title="Last updated: 2026/09/29">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2026/05/04</span>
                 </div>
                 <!-- tags -->
@@ -674,15 +673,14 @@ loading="lazy"             decoding="async"
                 <span class="abstract-title-text">Android Perfetto 系列 12：Trace 数据流与丢失排查</span>
             </a>
             <div class="abstract-content">
-                <p>打开一份 Trace 后，最麻烦的情况是：文件里看起来有数据，但中间丢过。UI 里还能看到轨道，SQL 也能查出一些行，可线程状态少了一段、进程名对不上、某些 Track Event 消失了。继续分析下去，结论会越来越像猜。</p>
-<p>SQL 只能分析 Trace 里还存在的证据。这个问题不处理好，后面的查询写得再漂亮，也只是把一份缺证据的 Trace 包装成表格。</p>
-<p>第 02 篇已经讲过怎么抓，第 11 篇已经讲过怎么查 SQL；这一篇盯住一个问题：Trace 在哪里丢过数据、影响哪些结论、下一次抓取该怎么改配置。</p>
-<p>文章顺着数据从内核走到 Trace 文件的链路，逐段定位丢点：ftrace、producer 共享内存、central buffer、增量状态、flush。每一段的丢法不一样，补救方式也不一样。最后给一个在分析报告里写“这份 Trace 还能信多少”的模板。</p>
+                <p>一份 Trace 能在 UI 里打开、SQL 也查得到行，仍可能在采集中丢过数据。线程状态缺一段、进程名对不上、Track Event 只有 ID 没有名称时，先查数据丢在哪一层，再决定哪些分析还能继续。</p>
+<p>SQL 只能度量留下来的事件。丢失发生在 ftrace、producer 共享内存还是 central buffer，影响的查询不同。看到一条 ftrace loss，我不会立刻扔掉整份 Trace；先查它影响的是调度、业务标记，还是帧数据。</p>
+<p>下文沿事件从内核进入 Trace 文件的路径检查 ftrace、producer 共享内存、central buffer、增量状态和 flush。每一处都有对应的 <code>stats</code> 线索和下一次采集时可调整的配置。</p>
             </div>
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/20">
+                <div class="abstract-date" title="Last updated: 2026/09/29">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2026/05/04</span>
                 </div>
                 <!-- tags -->
@@ -708,14 +706,14 @@ loading="lazy"             decoding="async"
                 <span class="abstract-title-text">Android Perfetto 系列 11：PerfettoSQL、Trace Processor 与回归检测</span>
             </a>
             <div class="abstract-content">
-                <p>拿到一份卡顿 Trace，大部分人的第一反应（包括早些年的我）是打开 Perfetto UI，框一段时间，看主线程、RenderThread、CPU 状态，再截几张图写结论。这个办法处理眼前问题没什么毛病，但很难回答后面的追问：换一份 Trace 是不是同样结论？换一台设备是不是同样结论？下个版本修完后，怎么确认问题没有回来？</p>
-<p>第 11 篇讲 PerfettoSQL 与 Trace Processor。目标很朴素：把 UI 里的判断改成能复查的查询，再用 Python 批量跑多份 Trace。读者不需要先变成 SQL 专家，只需要把 Trace 当成一组带时间戳的表，再把“看图得出的判断”翻译成一段能反复执行的查询就够了。</p>
-<p>整篇文章就沿一条路走：认识 Trace Processor，把判断写成窗口化的查询，放进命令行，再用 Python 批量跑多份 Trace，最后沉淀成稳定指标和 Trace Summary。每一步都有能直接抄走的 SQL。</p>
+                <p>在 Perfetto UI 里框出问题窗口，看主线程、RenderThread 和 CPU 状态，再截几张图，单次定位很方便。换一份 Trace 或换一台设备，截图里的判断就难以按同一口径重算。我更关心的是：下次拿到同一类问题，还能不能算出可复查的数字。</p>
+<p>PerfettoSQL 与 Trace Processor 可以把时间窗口、线程身份和耗时口径写进查询，再让 Python 对多份 Trace 执行同一段 SQL。这样复测版本时，能回到每份原始 Trace 核对数字。</p>
+<p>下面从一条手工判断出发，逐步得到可批量执行的查询和结构化输出。示例代码需要替换目标进程、时间窗口和采集条件后再用于自己的场景。</p>
             </div>
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/20">
+                <div class="abstract-date" title="Last updated: 2026/09/29">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2026/05/04</span>
                 </div>
                 <!-- tags -->
@@ -904,13 +902,13 @@ loading="lazy"             decoding="async"
                 <span class="abstract-title-text">Android Perfetto 系列 10：Binder 调度与锁竞争</span>
             </a>
             <div class="abstract-content">
-                <p>本文是 Perfetto 系列的第十篇文章，聚焦 Binder 这一 Android 跨进程通信的核心机制。Binder 承载着大部分系统服务与应用的交互，也常常是性能瓶颈的源头。本文站在系统开发与性能调优的视角，结合 <code>linux.ftrace</code>（binder tracepoints + sched）、<code>thread_state</code> 轨道，以及 ART 的 Java Monitor Contention（通过 atrace 的 <code>dalvik</code> 类别采集）等信号，给出一套可直接使用的诊断流程，帮助初学者和进阶开发者定位耗时、线程池压力与锁竞争等问题。</p>
-<p>本系列的目标，就是通过 Perfetto 这个工具，从一个全新的图形化视角，来审视 Android 系统的整体运行，同时也提供一个学习 Framework 的新途径。或许你已经读过很多源码分析的文章，但总是对繁杂的调用链感到困惑，或者记不住具体的执行流程。那么通过 Perfetto，将这些流程可视化，你可能会对系统有更深入、更直观的理解。</p>
+                <p>主线程上出现一段长 Binder 调用，慢的可能是服务端处理，也可能是事务派发、服务端线程排队或锁等待。这篇从一次调用出发，用 Perfetto 的 Binder 事件、线程状态和 Java monitor contention，把等待时间逐段分开。</p>
+<p>这些信号需要在抓 Trace 时启用；看到主线程 Sleeping 或一个 futex 栈，只能确定它在等待，不能直接写成「Binder 慢」或「Java 锁慢」。</p>
             </div>
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/19">
+                <div class="abstract-date" title="Last updated: 2026/09/29">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2025/11/16</span>
                 </div>
                 <!-- tags -->
@@ -939,13 +937,13 @@ loading="lazy"             decoding="async"
                 <span class="abstract-title-text">Android Perfetto 系列 9：CPU 信息解读</span>
             </a>
             <div class="abstract-content">
-                <p>本文是 Perfetto 系列的第九篇文章，主题是 Perfetto 中的 CPU 信息分析。Perfetto 提供了远超 Systrace 的数据可视化与分析能力，理解 CPU 相关信息是定位性能瓶颈、分析功耗问题的基础。</p>
-<p>本系列的目标，就是通过 Perfetto 这个工具，从一个全新的图形化视角，来审视 Android 系统的整体运行，同时也提供一个学习 Framework 的新途径。或许你已经读过很多源码分析的文章，但总是对繁杂的调用链感到困惑，或者记不住具体的执行流程。那么通过 Perfetto，将这些流程可视化，你可能会对系统有更深入、更直观的理解。</p>
+                <p>App 主线程没有按时处理一帧时，先分清它在 Running、Runnable 还是 Sleep；这三种状态对应的下一步调查完全不同。这篇用 Perfetto 的 CPU 调度、频率、空闲状态和采样数据，把「CPU 慢」拆成可核对的现象。</p>
+<p>文中的核编号、频率和调度策略都要按目标设备确认。同一条线程运行在小核上，不足以单独证明调度错误。</p>
             </div>
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/19">
+                <div class="abstract-date" title="Last updated: 2026/09/27">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2025/11/12</span>
                 </div>
                 <!-- tags -->
@@ -975,16 +973,16 @@ loading="lazy"             decoding="async"
                 <span class="abstract-title-text">Android Perfetto 系列 8：深入理解 Vsync 机制与性能分析</span>
             </a>
             <div class="abstract-content">
-                <p>本篇是 Perfetto 系列文章的第八篇，主要深入介绍 Android 中的 Vsync 机制及其在 Perfetto 中的表现形式。文章将从 Perfetto 的角度来分析 Android 系统如何基于 Vsync 信号进行帧渲染和合成，涵盖 Vsync、Vsync-app、Vsync-sf、VsyncWorkDuration 等核心概念。</p>
-<p>随着高刷新率屏幕的普及，理解 Vsync 机制变得更加重要。本文将以 120Hz 刷新率为主要叙事线，帮助开发者理解现代 Android 设备中 Vsync 的工作原理，以及如何在 Perfetto 中观察和分析 Vsync 相关的性能问题。</p>
+                <p>在 Perfetto 里看到 <code>vsync-app</code>、<code>vsync-sf</code> 和 App 的 <code>doFrame</code>，很容易把三条轨道当成同一个时刻。这篇沿一次帧请求看 VSync 怎样从 SurfaceFlinger 的调度进入 App，接着怎样和 RenderThread、Buffer、FrameTimeline 对齐。</p>
+<p>示例以 120 Hz 设备为主。相位配置、是否启用硬件 VSync，以及 App 是否请求下一帧都会改变轨道形态；本文先分清每个信号代表什么，再谈延迟。</p>
 <blockquote>
-<p><strong>注：本文内容基于 Android 13~16 的公开实现与演进；文中代码以 AOSP main 的“签名对齐精简摘录”为主，少量位置使用 <code>...</code> 省略非主线逻辑，请以当前分支源码为准。</strong></p>
+<p><strong>注：本文以 Android 17（API 37）为当前技术参照，涉及 Android 13 的地方用于说明关键机制的引入；文中代码以 AOSP main 的“签名对齐精简摘录”为主，少量位置使用 <code>...</code> 省略非主线逻辑，不能当成 Android 17 发布分支的逐行源码，请以目标分支为准。</strong></p>
 </blockquote>
             </div>
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/19">
+                <div class="abstract-date" title="Last updated: 2026/09/29">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2025/08/05</span>
                 </div>
                 <!-- tags -->
@@ -1010,17 +1008,13 @@ loading="lazy"             decoding="async"
                 <span class="abstract-title-text">Android Perfetto 系列 7：MainThread 和 RenderThread 解读</span>
             </a>
             <div class="abstract-content">
-                <p>本篇是 Perfetto 系列文章的第七篇，主要介绍 Android App 中的 MainThread 和 RenderThread，也就是大家熟悉的<strong>主线程</strong>和<strong>渲染线程</strong>。文章会从 Perfetto 的角度来看 MainThread 和 RenderThread 的工作流程，涉及卡顿、软件渲染、掉帧计算等相关知识。</p>
-<p>随着 Google 正式推出 Perfetto 工具替代 Systrace，Perfetto 在性能分析领域已经成为主流选择。本文将结合 Perfetto 的具体 trace 信息，帮助读者理解 MainThread 和 RenderThread 的完整工作流程，让你在使用 Perfetto 分析性能问题时能够：</p>
-<ul>
-<li><strong>准确识别关键 trace tag</strong>：知道 UI Thread、RenderThread 等关键线程的作用</li>
-<li><strong>理解帧渲染的完整流程</strong>：从 Vsync 信号到屏幕显示的每个步骤</li>
-<li><strong>定位性能瓶颈</strong>：通过 trace 信息快速找到卡顿和性能问题的根因
+                <p>一次滑动卡顿，主线程可能在处理布局，也可能早已把绘制命令交给 RenderThread。这篇用同一份 Perfetto Trace 对照两条线程、Buffer 提交和 SurfaceFlinger，找出等待发生在哪一步。</p>
+<p>先沿截图读一帧，再看 ActivityThread、RenderThread 和 BLASTBufferQueue 的职责。Trace 能缩小调查范围；帧最终是否上屏，还要核对 FrameTimeline 与合成侧记录。</p>
             </div>
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/19">
+                <div class="abstract-date" title="Last updated: 2026/09/29">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2025/08/02</span>
                 </div>
                 <!-- tags -->
@@ -1047,13 +1041,13 @@ loading="lazy"             decoding="async"
                 <span class="abstract-title-text">Android Perfetto 系列 6：为什么是 120Hz？高刷新率的优势与挑战</span>
             </a>
             <div class="abstract-content">
-                <p>本文是 Android Perfetto 系列的第六篇，主要介绍 Android 设备上 120Hz 刷新率的相关知识。如今，120Hz 已成为 Android 旗舰手机的标配，本文将讨论高刷新率带来的优势和挑战，以及从系统角度解析 120Hz 的工作原理。</p>
-<p>在过去的几年中，移动设备的屏幕刷新率经历了从 60Hz 到 90Hz，再到现在普遍的 120Hz 的演进过程。这种提升不仅带来了更流畅的视觉体验，也对系统架构和应用开发提出了新的要求。通过 Perfetto 工具，我们可以更直观地理解高刷新率设备上帧渲染的过程和性能表现。</p>
+                <p>120 Hz 把显示刷新间隔从 60 Hz 的约 16.67 ms 缩短到约 8.33 ms，但屏幕刷新率、App 产帧率和用户看到的帧并不是同一个数字。这篇从一份 Perfetto Trace 出发，解释三个数字怎样对应，以及高刷新率给渲染和功耗带来的取舍。</p>
+<p>第 5 篇已经介绍 Choreographer 的回调顺序，这里重点看更短的显示周期。文中的设备截图只说明那次采集，不能代表所有 120 Hz 机型的调度配置。</p>
             </div>
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/19">
+                <div class="abstract-date" title="Last updated: 2026/09/29">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2025/04/26</span>
                 </div>
                 <!-- tags -->
@@ -1081,12 +1075,12 @@ loading="lazy"             decoding="async"
             </a>
             <div class="abstract-content">
                 <p>本文介绍了 App 开发者不经常接触到但在 Android Framework 渲染链路中非常重要的一个类 Choreographer，包括 Choreographer 的引入背景、简介、部分源码解析、与 MessageQueue 的交互、在 APM 中的应用，以及手机厂商基于 Choreographer 的一些优化思路。</p>
-<p>Choreographer 的引入主要是配合 Vsync，为上层应用的渲染提供稳定的 Message 处理时机。当 Vsync 信号到来时，系统通过对 Vsync 信号周期的调整，控制每一帧绘制操作的时机。目前主流手机的屏幕刷新率已达到 120Hz，即每 8.3ms 刷新一次，系统为配合屏幕刷新频率，相应调整 Vsync 周期。每个 Vsync 周期到来时，Vsync 信号唤醒 Choreographer 执行应用的绘制操作，这正是引入 Choreographer 的主要作用。了解 Choreographer 还可以帮助应用开发者深入理解每一帧的运行原理，同时加深对 <strong>Message</strong>、<strong>Handler</strong>、<strong>Looper</strong>、<strong>MessageQueue</strong>、<strong>Input</strong>、<strong>Animation</strong>、<strong>Measure</strong>、<strong>Layout</strong>、<strong>Draw</strong> 等核心组件的认识。许多 <strong>APM</strong>（应用性能监控）工具也利用了 <strong>Choreographer</strong>（通过 FrameCallback）、<strong>FrameMetrics&#x2F;gfxinfo framestats</strong>（底层依赖 FrameInfo）、<strong>MessageQueue</strong>（通过 IdleHandler）和 <strong>Looper</strong>（通过自定义 MessageLogging）这些组合机制进行性能监测。深入理解这些机制后，开发者可以更有针对性地进行性能优化，形成系统化的优化思路。</p>
+<p>Choreographer 的引入主要是配合 Vsync，为上层应用的渲染提供稳定的 Message 处理时机。当 Vsync 信号到来时，系统通过对 Vsync 信号周期的调整，控制每一帧绘制操作的时机。目前主流手机的屏幕刷新率已达到 120Hz，即每 8.3ms 刷新一次，系统为配合屏幕刷新频率，相应调整 Vsync 周期。当应用有待处理的帧回调时，Choreographer 请求 Vsync，并在回调到来后处理相应工作；并非每个 Vsync 都会触发应用绘制。了解 Choreographer 还可以帮助应用开发者深入理解每一帧的运行原理，同时加深对 <strong>Message</strong>、<strong>Handler</strong>、<strong>Looper</strong>、<strong>MessageQueue</strong>、<strong>Input</strong>、<strong>Animation</strong>、<strong>Measure</strong>、<strong>Layout</strong>、<strong>Draw</strong> 等核心组件的认识。许多 <strong>APM</strong>（应用性能监控）工具也利用了 <strong>Choreographer</strong>（通过 FrameCallback）、<strong>FrameMetrics&#x2F;gfxinfo framestats</strong>（底层依赖 FrameInfo）、<strong>MessageQueue</strong>（通过 IdleHandler）和 <strong>Looper</strong>（通过自定义 MessageLogging）这些组合机制进行性能监测。深入理解这些机制后，开发者可以更有针对性地进行性能优化，形成系统化的优化思路。</p>
             </div>
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/19">
+                <div class="abstract-date" title="Last updated: 2026/09/29">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2025/03/26</span>
                 </div>
                 <!-- tags -->
@@ -1112,13 +1106,13 @@ loading="lazy"             decoding="async"
                 <span class="abstract-title-text">Android Perfetto 系列 4：使用命令行在本地打开超大 Trace</span>
             </a>
             <div class="abstract-content">
-                <p>本篇是 Perfetto 系列文章的第四篇，如何使用 trace_processor_shell 在本地打开超过 2G 的大文件。在实际的问题分析过程中，我们经常会碰到非常大的 Trace 文件（大于 2GB），直接扔进 ui.perfetto.dev 是没法打开的，这是因为浏览器内存的限制。这时候我们就需要使用官方提供的 trace_processor_shell 工具来本地打开大文件。</p>
+                <p>本篇是 Perfetto 系列文章的第四篇，如何使用 trace_processor_shell 在本地打开超过 2G 的大文件。在实际的问题分析过程中，我们经常会碰到非常大的 Trace 文件（大于 2GB），直接扔进 ui.perfetto.dev 可能会因浏览器内存限制而打不开；这里的限制是解析时的内存占用，并不是文件超过 2GB 就一定打不开。这时候我们就可以使用官方提供的 trace_processor_shell 工具来本地打开大文件。</p>
 <p>随着 Google 宣布 Systrace 工具停更，推出 Perfetto 工具，Perfetto 在我的日常工作中已经基本能取代 Systrace 工具。同时 Oppo、Vivo 等大厂也已经把 Systrace 切换成了 Perfetto，许多新接触 Android 性能优化的小伙伴对于 Perfetto 那眼花缭乱的界面和复杂的功能感觉头疼，希望我能把之前的那些 Systrace 文章使用 Perfetto 来呈现。</p>
             </div>
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/19">
+                <div class="abstract-date" title="Last updated: 2026/09/27">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2025/02/08</span>
                 </div>
                 <!-- tags -->
@@ -1258,7 +1252,7 @@ loading="lazy"             decoding="async"
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/19">
+                <div class="abstract-date" title="Last updated: 2026/09/27">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2024/05/21</span>
                 </div>
                 <!-- tags -->
@@ -1290,7 +1284,7 @@ loading="lazy"             decoding="async"
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/19">
+                <div class="abstract-date" title="Last updated: 2026/09/29">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2024/05/21</span>
                 </div>
                 <!-- tags -->
@@ -1322,7 +1316,7 @@ loading="lazy"             decoding="async"
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/09/19">
+                <div class="abstract-date" title="Last updated: 2026/09/29">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2024/05/21</span>
                 </div>
                 <!-- tags -->
@@ -1353,7 +1347,7 @@ loading="lazy"             decoding="async"
             <!-- read more -->
             <div class="abstract-post-meta">
                 <!-- date -->
-                <div class="abstract-date" title="Last updated: 2026/07/19">
+                <div class="abstract-date" title="Last updated: 2026/09/29">
                     <span class="abstract-calander iconfont-archer">&#xe676;</span><span class="abstract-time">2024/03/27</span>
                 </div>
                 <!-- tags -->
@@ -1435,8 +1429,8 @@ loading="lazy"             decoding="async"
         <a class="post-tag" href="javascript:void(0);" data-tags="Memory">Memory</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
-        <a class="post-tag" href="javascript:void(0);" data-tags="Java">Java</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="RenderThread">RenderThread</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Java">Java</a>
 </div>
 
             </div>
@@ -3400,8 +3394,8 @@ Pixel 手机一台
         </span>
         <a class="post-tag" href="javascript:void(0);" data-tags="Startup">Startup</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
-        <a class="post-tag" href="javascript:void(0);" data-tags="Java">Java</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="RenderThread">RenderThread</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Java">Java</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="DelayLoad">DelayLoad</a>
 </div>
 
@@ -3433,8 +3427,8 @@ Pixel 手机一台
         <a class="post-tag" href="javascript:void(0);" data-tags="Startup">Startup</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Systrace">Systrace</a>
-        <a class="post-tag" href="javascript:void(0);" data-tags="Java">Java</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="RenderThread">RenderThread</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Java">Java</a>
 </div>
 
             </div>
@@ -4514,22 +4508,6 @@ Pixel 手机一台
                 <span class="iconfont-archer">&#xe606;</span>
                 随笔
             </span>
-            <span class="sidebar-tag-name" data-tags="ANR">
-                <span class="iconfont-archer">&#xe606;</span>
-                ANR
-            </span>
-            <span class="sidebar-tag-name" data-tags="Tools">
-                <span class="iconfont-archer">&#xe606;</span>
-                Tools
-            </span>
-            <span class="sidebar-tag-name" data-tags="Java">
-                <span class="iconfont-archer">&#xe606;</span>
-                Java
-            </span>
-            <span class="sidebar-tag-name" data-tags="RenderThread">
-                <span class="iconfont-archer">&#xe606;</span>
-                RenderThread
-            </span>
             <span class="sidebar-tag-name" data-tags="Agent OS">
                 <span class="iconfont-archer">&#xe606;</span>
                 Agent OS
@@ -4546,9 +4524,25 @@ Pixel 手机一台
                 <span class="iconfont-archer">&#xe606;</span>
                 Mobile OS
             </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
             <span class="sidebar-tag-name" data-tags="Linux">
                 <span class="iconfont-archer">&#xe606;</span>
                 Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
             </span>
             <span class="sidebar-tag-name" data-tags="BlastBufferQueue">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -4590,14 +4584,6 @@ Pixel 手机一台
                 <span class="iconfont-archer">&#xe606;</span>
                 TraceProcessor
             </span>
-            <span class="sidebar-tag-name" data-tags="Trace">
-                <span class="iconfont-archer">&#xe606;</span>
-                Trace
-            </span>
-            <span class="sidebar-tag-name" data-tags="DataFlow">
-                <span class="iconfont-archer">&#xe606;</span>
-                DataFlow
-            </span>
             <span class="sidebar-tag-name" data-tags="SDK">
                 <span class="iconfont-archer">&#xe606;</span>
                 SDK
@@ -4606,21 +4592,17 @@ Pixel 手机一台
                 <span class="iconfont-archer">&#xe606;</span>
                 TraceEvent
             </span>
-            <span class="sidebar-tag-name" data-tags="Field">
+            <span class="sidebar-tag-name" data-tags="Trace">
                 <span class="iconfont-archer">&#xe606;</span>
-                Field
+                Trace
+            </span>
+            <span class="sidebar-tag-name" data-tags="DataFlow">
+                <span class="iconfont-archer">&#xe606;</span>
+                DataFlow
             </span>
             <span class="sidebar-tag-name" data-tags="heapprofd">
                 <span class="iconfont-archer">&#xe606;</span>
                 heapprofd
-            </span>
-            <span class="sidebar-tag-name" data-tags="Input">
-                <span class="iconfont-archer">&#xe606;</span>
-                Input
-            </span>
-            <span class="sidebar-tag-name" data-tags="Latency">
-                <span class="iconfont-archer">&#xe606;</span>
-                Latency
             </span>
             <span class="sidebar-tag-name" data-tags="GPU">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -4638,6 +4620,18 @@ Pixel 手机一台
                 <span class="iconfont-archer">&#xe606;</span>
                 Audio
             </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
+            <span class="sidebar-tag-name" data-tags="Input">
+                <span class="iconfont-archer">&#xe606;</span>
+                Input
+            </span>
+            <span class="sidebar-tag-name" data-tags="Latency">
+                <span class="iconfont-archer">&#xe606;</span>
+                Latency
+            </span>
             <span class="sidebar-tag-name" data-tags="MAT">
                 <span class="iconfont-archer">&#xe606;</span>
                 MAT
@@ -4646,33 +4640,25 @@ Pixel 手机一台
                 <span class="iconfont-archer">&#xe606;</span>
                 DelayLoad
             </span>
-            <span class="sidebar-tag-name" data-tags="HashMap">
-                <span class="iconfont-archer">&#xe606;</span>
-                HashMap
-            </span>
             <span class="sidebar-tag-name" data-tags="程序员">
                 <span class="iconfont-archer">&#xe606;</span>
                 程序员
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
             </span>
             <span class="sidebar-tag-name" data-tags="Singleton">
                 <span class="iconfont-archer">&#xe606;</span>
                 Singleton
             </span>
-            <span class="sidebar-tag-name" data-tags="OpenClaw">
-                <span class="iconfont-archer">&#xe606;</span>
-                OpenClaw
-            </span>
-            <span class="sidebar-tag-name" data-tags="效率工具">
-                <span class="iconfont-archer">&#xe606;</span>
-                效率工具
-            </span>
-            <span class="sidebar-tag-name" data-tags="本地模型">
-                <span class="iconfont-archer">&#xe606;</span>
-                本地模型
-            </span>
             <span class="sidebar-tag-name" data-tags="Nexus">
                 <span class="iconfont-archer">&#xe606;</span>
                 Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenClaw">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenClaw
             </span>
             <span class="sidebar-tag-name" data-tags="AI Agent">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -4689,6 +4675,14 @@ Pixel 手机一台
             <span class="sidebar-tag-name" data-tags="Android Performance">
                 <span class="iconfont-archer">&#xe606;</span>
                 Android Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="效率工具">
+                <span class="iconfont-archer">&#xe606;</span>
+                效率工具
+            </span>
+            <span class="sidebar-tag-name" data-tags="本地模型">
+                <span class="iconfont-archer">&#xe606;</span>
+                本地模型
             </span>
             <span class="sidebar-tag-name" data-tags="Gracker">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -4722,13 +4716,13 @@ Pixel 手机一台
                 <span class="iconfont-archer">&#xe606;</span>
                 程序员的修炼
             </span>
-            <span class="sidebar-tag-name" data-tags="设计原则">
-                <span class="iconfont-archer">&#xe606;</span>
-                设计原则
-            </span>
             <span class="sidebar-tag-name" data-tags="测试">
                 <span class="iconfont-archer">&#xe606;</span>
                 测试
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计原则">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计原则
             </span>
             <span class="sidebar-tag-name" data-tags="了解你的用户">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -4792,13 +4786,13 @@ Pixel 手机一台
             <span class="iconfont-archer">&#xe60a;</span>
             Android
         </span>
-        <span class="sidebar-category-name" data-categories="Java">
-            <span class="iconfont-archer">&#xe60a;</span>
-            Java
-        </span>
         <span class="sidebar-category-name" data-categories="AI">
             <span class="iconfont-archer">&#xe60a;</span>
             AI
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
         </span>
         <span class="sidebar-category-name" data-categories="Android性能优化">
             <span class="iconfont-archer">&#xe60a;</span>

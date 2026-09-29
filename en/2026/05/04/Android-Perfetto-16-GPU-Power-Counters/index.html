@@ -20,11 +20,11 @@
 <meta property="og:locale" content="en_US">
 <meta property="og:image" content="https://androidperformance.com/en/images/Perfetto-11-18-Diagrams/07-gpu-power-window.png">
 <meta property="article:published_time" content="2026-05-04T02:16:00.000Z">
-<meta property="article:modified_time" content="2026-09-19T16:54:18.916Z">
+<meta property="article:modified_time" content="2026-09-29T01:56:42.261Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Android">
-<meta property="article:tag" content="Perfetto">
 <meta property="article:tag" content="Performance">
+<meta property="article:tag" content="Perfetto">
 <meta property="article:tag" content="GPU">
 <meta property="article:tag" content="Power">
 <meta name="twitter:card" content="summary">
@@ -255,8 +255,8 @@ loading="lazy"             decoding="async"
             </span>
         </span>
         <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
-        <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="GPU">GPU</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Power">Power</a>
 </div>
@@ -401,6 +401,7 @@ loading="lazy"             decoding="async"
 <li>A <code>power rail</code> measures subsystem energy. It can show changes in rails such as GPU, Display, Memory, and WLAN, but still does not provide per-process measurements.</li>
 </ul>
 <p>Read hardware counters together with frames, threads, SurfaceFlinger, and application actions from the same interval. No single track, however clear, can establish attribution by itself.</p>
+<p>When I see a high GPU frequency track, I treat it as a reason to inspect the frame, not as a verdict that the GPU held it up. A frequency policy can react to load without telling us which stage missed the deadline. Align render stages and fences with App and SurfaceFlinger frames before assigning the delay.</p>
 <h2 id="Keep-the-Data-Types-Separate"><a href="#Keep-the-Data-Types-Separate" class="headerlink" title="Keep the Data Types Separate"></a>Keep the Data Types Separate</h2><table>
 <thead>
 <tr>
@@ -471,8 +472,8 @@ loading="lazy"             decoding="async"
 <li>Android GPU frequency can be captured through the ftrace event <code>power/gpu_frequency</code>.</li>
 <li>Per-process GPU memory can be captured through the ftrace event <code>gpu_mem/gpu_mem_total</code>.</li>
 </ul>
-<p>Power counters have similar limitations. Battery counters were introduced in Android 10 and depend on device power-management hardware; they are more common on Pixel devices. Power rails depend on specialized hardware such as ODPM (on-device power rail monitor) and the IPowerStats HAL. The Android Studio Power Profiler documentation presents ODPM as a more practical capability on Android 10+ and Pixel 6 or later devices; many production devices lack it.</p>
-<p>Perfetto’s ODPM data source was introduced in Android 10+, but actual availability depends on specialized hardware and the HAL. The Pixel 6+ wording in Android Studio Power Profiler documentation is better understood as guidance about tool experience and practical device coverage, not as the minimum version boundary for Perfetto power rails.</p>
+<p>Power counters have similar limitations. Battery counters depend on device power-management hardware and are more common on Pixel devices. Power rails depend on specialized hardware such as ODPM (on-device power rail monitor) and the IPowerStats HAL. Availability still needs to be checked per device on Android 12–17; many production devices lack it.</p>
+<p>Actual availability of Perfetto’s ODPM data source depends on specialized hardware and the HAL. The Pixel 6+ wording in Android Studio Power Profiler documentation is guidance about tool experience and practical device coverage; it does not imply that every Android 12–17 device has power rails.</p>
 <h2 id="Confirm-Device-Capabilities-First"><a href="#Confirm-Device-Capabilities-First" class="headerlink" title="Confirm Device Capabilities First"></a>Confirm Device Capabilities First</h2><p>Do not write a GPU&#x2F;Power configuration and hope it works. Before capturing, use the Record page in Perfetto UI or query data source descriptors on the device to confirm producer names, counter IDs, units, and support for selection by name:</p>
 <figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">adb shell perfetto --query --long</span><br></pre></td></tr></table></figure>
 
@@ -515,12 +516,12 @@ loading="lazy"             decoding="async"
 
 <p>The aim is to collect a complete set of evidence for the same window first. FrameTimeline requires Android 12 or later. <code>gpu.renderstages</code> depends on GPU producer and driver support and is unavailable on many devices. If render stages cannot be captured, report “GPU stage evidence is missing.” Do not promote frequency or power rail measurements directly into a conclusion about GPU execution.</p>
 <p>Be explicit when GPU stages are missing: <code>gpu_stage_status=unavailable; conclusion_scope=hardware_trend_only; cannot_claim=gpu_execution_delay</code>.</p>
-<p>Remember to pair <code>stat_period_ms</code> with explicit <code>stat_counters</code>. In traced_probes versions after mid-2019, leaving <code>stat_counters</code> empty collects all <code>/proc/stat</code> counters, including per-CPU times and per-IRQ counts; earlier versions may collect nothing. Explicitly specifying <code>STAT_CPU_TIMES</code> both keeps behavior consistent across versions and avoids pulling hundreds of IRQ counters into the trace.</p>
+<p>Remember to pair <code>stat_period_ms</code> with explicit <code>stat_counters</code>. Leaving <code>stat_counters</code> empty may collect all <code>/proc/stat</code> counters, including per-CPU times and per-IRQ counts. Specifying <code>STAT_CPU_TIMES</code> makes the intended data clear and avoids pulling hundreds of IRQ counters into the trace.</p>
 <p><code>power/gpu_frequency</code> and <code>devfreq/devfreq_frequency</code> are event paths; <code>gpufreq_period_ms</code> and <code>devfreq_period_ms</code> are sysfs polling paths. Events provide precise change points, but you may need to look before the window for the preceding state. Polling captures sustained trends but is constrained by its sampling period and may miss brief spikes. <code>power/cpu_idle</code> records transitions; <code>cpuidle_period_ms</code> polls idle-state durations. USB connections, wakelocks, and whether a scenario is in the foreground or background all affect idle measurements.</p>
 <p>Thermal-zone names, units, and availability vary by device. If <code>thermal_period_ms</code> was not collected or there are no thermal tracks, report only “this trace contains no thermal evidence,” not “thermal control had no effect.”</p>
 <p>These polling periods suit only short diagnostic windows. Long traces require longer sampling periods, separate buffers, and measurements of write rate and CPU overhead. These power counters are not a Power HAL trace. Unless you also capture the Power HAL’s own atrace, logs, or vendor events, report only “frequency, rail, and thermal changes occurred in the same window,” not “the Power HAL caused it.”</p>
-<p>Android 10+ supports text configurations; Android 9&#x2F;P requires binary configurations. <code>pbtxt</code> works well for manual investigation and article examples, while generated binary proto configurations are preferable for automation or long-term deployment. On non-root user builds of Android 10&#x2F;11, do not assume the device can read a configuration from any path. Prefer stdin:</p>
-<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">adb shell <span class="string">&#x27;cat &gt; /data/local/tmp/gpu_power.pbtxt&#x27;</span> &lt; gpu_power.pbtxt</span><br><span class="line">adb shell <span class="string">&#x27;cat /data/local/tmp/gpu_power.pbtxt | perfetto --txt -c - -o /data/misc/perfetto-traces/gpu_power.perfetto-trace&#x27;</span></span><br><span class="line">adb pull /data/misc/perfetto-traces/gpu_power.perfetto-trace</span><br></pre></td></tr></table></figure>
+<p>Using Android 17 as the current reference, devices running Android 12 or later can place a text configuration in <code>/data/misc/perfetto-configs</code>. <code>pbtxt</code> works well for manual investigation and article examples, while generated binary proto configurations are preferable for automation or long-term deployment:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">adb push gpu_power.pbtxt /data/misc/perfetto-configs/gpu_power.pbtxt</span><br><span class="line">adb shell perfetto --txt -c /data/misc/perfetto-configs/gpu_power.pbtxt -o /data/misc/perfetto-traces/gpu_power.perfetto-trace</span><br><span class="line">adb pull /data/misc/perfetto-traces/gpu_power.perfetto-trace</span><br></pre></td></tr></table></figure>
 
 <p>For short traces, these signals can share one buffer. For long traces, separate them and examine their data volumes. Combining 1 ms GPU counter sampling, logcat, Track Event, and ftrace sched can quickly shrink the ring-buffer window. Reuse the constraints on data loss and buffer windows from Part 12 and on long-running file output from Part 15.</p>
 <h2 id="GPU-Counter-Selection-Examples"><a href="#GPU-Counter-Selection-Examples" class="headerlink" title="GPU Counter Selection Examples"></a>GPU Counter Selection Examples</h2><p>Select GPU counters for the particular device. Selecting counter IDs from its descriptor is the more robust approach; use <code>counter_names</code> and globs only when the producer descriptor explicitly supports them.</p>
@@ -747,7 +748,7 @@ loading="lazy"             decoding="async"
             <p>Author：<a href="https://androidperformance.com/en">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">https://androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/</a>
             <p>Publish date：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">May 4th 2026, 10:16:00 am</a>
-            <p>Update date：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">September 20th 2026, 12:54:18 am</a>
+            <p>Update date：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">September 29th 2026, 9:56:42 am</a>
             <p>License：This work is licensed under <a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a></p>
         </div>
     <!-- paginator -->
@@ -1019,19 +1020,15 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
-            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</a>
-        </li>
-        <li class="archive-post-item">
-            <span class="archive-post-date">05/04</span>
             <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto Series 14: heapprofd and Memory Profiling</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
-            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</a>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
-            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</a>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
@@ -1040,6 +1037,10 @@ loading="lazy"             decoding="async"
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
             <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto Series 18: Response Latency in Practice, from Input Events to First-Frame Feedback</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/29</span>
@@ -1102,11 +1103,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/08</span>
-            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/08</span>
-            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
         </li>
                 </ul>
             <div class="archive-year"> 2024 </div>
@@ -1117,11 +1118,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/21</span>
-            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/21</span>
-            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/27</span>
@@ -1198,11 +1199,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
-            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
-            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
@@ -1260,11 +1261,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">11/18</span>
-            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">11/18</span>
-            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">11/06</span>
@@ -1292,11 +1293,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
-            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
-            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
@@ -1472,11 +1473,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">07/20</span>
-            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">07/20</span>
-            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/29</span>
@@ -1512,15 +1513,19 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/11</span>
-            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/11</span>
-            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/31</span>
             <a class="archive-post-title" href="/en/2015/03/31/android-performance-case-study-follow-up/">Android Performance Case Study Follow-up</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/15</span>
@@ -1529,10 +1534,6 @@ loading="lazy"             decoding="async"
         <li class="archive-post-item">
             <span class="archive-post-date">03/15</span>
             <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-4/">Android Tips Round-Up, Part 4</a>
-        </li>
-        <li class="archive-post-item">
-            <span class="archive-post-date">03/15</span>
-            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/04</span>
@@ -1587,41 +1588,25 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-tags">
     <div class="sidebar-tags-name">
-            <span class="sidebar-tag-name" data-tags="Android">
-                <span class="iconfont-archer">&#xe606;</span>
-                Android
-            </span>
-            <span class="sidebar-tag-name" data-tags="Perfetto">
-                <span class="iconfont-archer">&#xe606;</span>
-                Perfetto
-            </span>
-            <span class="sidebar-tag-name" data-tags="Systrace">
-                <span class="iconfont-archer">&#xe606;</span>
-                Systrace
-            </span>
-            <span class="sidebar-tag-name" data-tags="Startup">
-                <span class="iconfont-archer">&#xe606;</span>
-                Startup
-            </span>
             <span class="sidebar-tag-name" data-tags="Jank">
                 <span class="iconfont-archer">&#xe606;</span>
                 Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
             </span>
             <span class="sidebar-tag-name" data-tags="Yearly Recommendations">
                 <span class="iconfont-archer">&#xe606;</span>
                 Yearly Recommendations
             </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
             <span class="sidebar-tag-name" data-tags="Memory">
                 <span class="iconfont-archer">&#xe606;</span>
                 Memory
-            </span>
-            <span class="sidebar-tag-name" data-tags="Year in Review">
-                <span class="iconfont-archer">&#xe606;</span>
-                Year in Review
-            </span>
-            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
-                <span class="iconfont-archer">&#xe606;</span>
-                Knowledge Planet
             </span>
             <span class="sidebar-tag-name" data-tags="Performance">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1651,17 +1636,9 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 ANR
             </span>
-            <span class="sidebar-tag-name" data-tags="RenderThread">
+            <span class="sidebar-tag-name" data-tags="Perfetto">
                 <span class="iconfont-archer">&#xe606;</span>
-                RenderThread
-            </span>
-            <span class="sidebar-tag-name" data-tags="DelayLoad">
-                <span class="iconfont-archer">&#xe606;</span>
-                DelayLoad
-            </span>
-            <span class="sidebar-tag-name" data-tags="Java">
-                <span class="iconfont-archer">&#xe606;</span>
-                Java
+                Perfetto
             </span>
             <span class="sidebar-tag-name" data-tags="Agent OS">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1679,9 +1656,25 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Mobile OS
             </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
             <span class="sidebar-tag-name" data-tags="Tools">
                 <span class="iconfont-archer">&#xe606;</span>
                 Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
             </span>
             <span class="sidebar-tag-name" data-tags="Linux">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1711,18 +1704,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Page Response
             </span>
-            <span class="sidebar-tag-name" data-tags="Binder">
-                <span class="iconfont-archer">&#xe606;</span>
-                Binder
-            </span>
-            <span class="sidebar-tag-name" data-tags="Locking">
-                <span class="iconfont-archer">&#xe606;</span>
-                Locking
-            </span>
-            <span class="sidebar-tag-name" data-tags="Scheduling">
-                <span class="iconfont-archer">&#xe606;</span>
-                Scheduling
-            </span>
             <span class="sidebar-tag-name" data-tags="SQL">
                 <span class="iconfont-archer">&#xe606;</span>
                 SQL
@@ -1739,21 +1720,17 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 DataFlow
             </span>
-            <span class="sidebar-tag-name" data-tags="SDK">
-                <span class="iconfont-archer">&#xe606;</span>
-                SDK
-            </span>
-            <span class="sidebar-tag-name" data-tags="TraceEvent">
-                <span class="iconfont-archer">&#xe606;</span>
-                TraceEvent
-            </span>
             <span class="sidebar-tag-name" data-tags="heapprofd">
                 <span class="iconfont-archer">&#xe606;</span>
                 heapprofd
             </span>
-            <span class="sidebar-tag-name" data-tags="Field">
+            <span class="sidebar-tag-name" data-tags="Year in Review">
                 <span class="iconfont-archer">&#xe606;</span>
-                Field
+                Year in Review
+            </span>
+            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Knowledge Planet
             </span>
             <span class="sidebar-tag-name" data-tags="GPU">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1763,6 +1740,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Power
             </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
             <span class="sidebar-tag-name" data-tags="Camera">
                 <span class="iconfont-archer">&#xe606;</span>
                 Camera
@@ -1770,6 +1751,22 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Audio">
                 <span class="iconfont-archer">&#xe606;</span>
                 Audio
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="Locking">
+                <span class="iconfont-archer">&#xe606;</span>
+                Locking
+            </span>
+            <span class="sidebar-tag-name" data-tags="Scheduling">
+                <span class="iconfont-archer">&#xe606;</span>
+                Scheduling
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
             </span>
             <span class="sidebar-tag-name" data-tags="Input">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1779,9 +1776,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Latency
             </span>
-            <span class="sidebar-tag-name" data-tags="MAT">
+            <span class="sidebar-tag-name" data-tags="SDK">
                 <span class="iconfont-archer">&#xe606;</span>
-                MAT
+                SDK
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceEvent">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceEvent
             </span>
             <span class="sidebar-tag-name" data-tags="HashMap">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1799,10 +1800,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Annual Recommendations
             </span>
-            <span class="sidebar-tag-name" data-tags="Nexus">
-                <span class="iconfont-archer">&#xe606;</span>
-                Nexus
-            </span>
             <span class="sidebar-tag-name" data-tags="OpenClaw">
                 <span class="iconfont-archer">&#xe606;</span>
                 OpenClaw
@@ -1815,17 +1812,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Local Models
             </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
             <span class="sidebar-tag-name" data-tags="AI Agent">
                 <span class="iconfont-archer">&#xe606;</span>
                 AI Agent
-            </span>
-            <span class="sidebar-tag-name" data-tags="Sharp Tools">
-                <span class="iconfont-archer">&#xe606;</span>
-                Sharp Tools
-            </span>
-            <span class="sidebar-tag-name" data-tags="Productivity">
-                <span class="iconfont-archer">&#xe606;</span>
-                Productivity
             </span>
             <span class="sidebar-tag-name" data-tags="SmartPerfetto">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1843,25 +1836,33 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Design Specs
             </span>
-            <span class="sidebar-tag-name" data-tags="Kotlin">
-                <span class="iconfont-archer">&#xe606;</span>
-                Kotlin
-            </span>
             <span class="sidebar-tag-name" data-tags="Compose">
                 <span class="iconfont-archer">&#xe606;</span>
                 Compose
             </span>
-            <span class="sidebar-tag-name" data-tags="Process">
+            <span class="sidebar-tag-name" data-tags="Kotlin">
                 <span class="iconfont-archer">&#xe606;</span>
-                Process
+                Kotlin
             </span>
             <span class="sidebar-tag-name" data-tags="Stutter">
                 <span class="iconfont-archer">&#xe606;</span>
                 Stutter
             </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
             <span class="sidebar-tag-name" data-tags="Overdraw">
                 <span class="iconfont-archer">&#xe606;</span>
                 Overdraw
+            </span>
+            <span class="sidebar-tag-name" data-tags="Sharp Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Sharp Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity
             </span>
             <span class="sidebar-tag-name" data-tags="Reading Notes">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1882,10 +1883,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="User Experience">
                 <span class="iconfont-archer">&#xe606;</span>
                 User Experience
-            </span>
-            <span class="sidebar-tag-name" data-tags="Reading">
-                <span class="iconfont-archer">&#xe606;</span>
-                Reading
             </span>
             <span class="sidebar-tag-name" data-tags="Internet">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1911,6 +1908,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Experience Optimization
             </span>
+            <span class="sidebar-tag-name" data-tags="Reading">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading
+            </span>
     </div>
     <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
     <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
@@ -1921,29 +1922,29 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-categories">
     <div class="sidebar-categories-name">
-        <span class="sidebar-category-name" data-categories="Essays">
+        <span class="sidebar-category-name" data-categories="Reading Notes">
             <span class="iconfont-archer">&#xe60a;</span>
-            Essays
+            Reading Notes
         </span>
         <span class="sidebar-category-name" data-categories="Casual Notes">
             <span class="iconfont-archer">&#xe60a;</span>
             Casual Notes
         </span>
-        <span class="sidebar-category-name" data-categories="Reading Notes">
-            <span class="iconfont-archer">&#xe60a;</span>
-            Reading Notes
-        </span>
         <span class="sidebar-category-name" data-categories="Android">
             <span class="iconfont-archer">&#xe60a;</span>
             Android
         </span>
-        <span class="sidebar-category-name" data-categories="Java">
+        <span class="sidebar-category-name" data-categories="Essays">
             <span class="iconfont-archer">&#xe60a;</span>
-            Java
+            Essays
         </span>
         <span class="sidebar-category-name" data-categories="AI">
             <span class="iconfont-archer">&#xe60a;</span>
             AI
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
         </span>
         <span class="sidebar-category-name" data-categories="Android Performance Optimization">
             <span class="iconfont-archer">&#xe60a;</span>

@@ -11,16 +11,16 @@
                     <meta name="copyright" content="Gracker">
                       <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,启动优化,Startup,Perfetto,Systrace,RenderThread,Java">
                           <meta name="description" content="Focus On Android Performance">
-                          <meta name="description" content="FrameTimeline 标出一帧晚了，主线程、RenderThread、SurfaceFlinger 看起来都没有明显越界，这时很容易写出一句“可能是 GPU 瓶颈”。这句话风险很高：GPU 频率、GPU 计数器、电池电流、电源轨都不是 App 单帧归因工具。 第 07、08 篇已经讲了 App 到 SurfaceFlinger 的渲染路径，第 06、09 篇已经讲了刷新率和 CPU 调度&amp;#">
+                          <meta name="description" content="FrameTimeline 标出一帧晚了，主线程和 RenderThread 没有明显长任务，下一步可以查 GPU 工作与 fence。GPU 频率、电池电流和电源轨只能提供同一窗口的硬件状态，不能单独证明某个 App 帧为何晚呈现。 这篇把 GPU render stages、devfreq、电池计数器和电源轨放到同一段 Trace 窗口里，说明各自能回答什么、设备不支持时报告该怎么写。帧和线程">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Android Perfetto 系列 16：GPU、Power Counters 与硬件瓶颈分析">
 <meta property="og:url" content="https://androidperformance.com/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/index.html">
 <meta property="og:site_name" content="Android Performance">
-<meta property="og:description" content="FrameTimeline 标出一帧晚了，主线程、RenderThread、SurfaceFlinger 看起来都没有明显越界，这时很容易写出一句“可能是 GPU 瓶颈”。这句话风险很高：GPU 频率、GPU 计数器、电池电流、电源轨都不是 App 单帧归因工具。 第 07、08 篇已经讲了 App 到 SurfaceFlinger 的渲染路径，第 06、09 篇已经讲了刷新率和 CPU 调度&amp;#">
+<meta property="og:description" content="FrameTimeline 标出一帧晚了，主线程和 RenderThread 没有明显长任务，下一步可以查 GPU 工作与 fence。GPU 频率、电池电流和电源轨只能提供同一窗口的硬件状态，不能单独证明某个 App 帧为何晚呈现。 这篇把 GPU render stages、devfreq、电池计数器和电源轨放到同一段 Trace 窗口里，说明各自能回答什么、设备不支持时报告该怎么写。帧和线程">
 <meta property="og:locale">
 <meta property="og:image" content="https://androidperformance.com/images/Perfetto-11-18-Diagrams/07-gpu-power-window.png">
 <meta property="article:published_time" content="2026-05-04T02:16:00.000Z">
-<meta property="article:modified_time" content="2026-09-19T16:49:52.600Z">
+<meta property="article:modified_time" content="2026-09-29T01:53:44.102Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Android">
 <meta property="article:tag" content="Perfetto">
@@ -263,7 +263,7 @@ loading="lazy"             decoding="async"
 
                 <!-- 文章字数统计 -->
                     <div class="post-intro-read">
-                        <span>Word count: <span class="post-count word-count">7.5k</span>Reading time: <span class="post-count reading-time">32 min</span></span>
+                        <span>Word count: <span class="post-count word-count">7.3k</span>Reading time: <span class="post-count reading-time">32 min</span></span>
                     </div>
                 <div class="post-intro-meta">
                     <!-- 撰写日期 -->
@@ -329,9 +329,9 @@ loading="lazy"             decoding="async"
             <div class="container container-unloaded">
                 <main class="main post-page">
     <article class="article-entry">
-        <p>FrameTimeline 标出一帧晚了，主线程、RenderThread、SurfaceFlinger 看起来都没有明显越界，这时很容易写出一句“可能是 GPU 瓶颈”。这句话风险很高：GPU 频率、GPU 计数器、电池电流、电源轨都不是 App 单帧归因工具。</p>
-<p>第 07、08 篇已经讲了 App 到 SurfaceFlinger 的渲染路径，第 06、09 篇已经讲了刷新率和 CPU 调度&#x2F;频率。这一篇不重复这些内容，只补一个经常被跳过的环节：当问题看起来已经压到硬件资源层时，GPU、devfreq、battery counter（电池计数器）、power rail（电源轨）这些数据该怎么进入同一段 trace 分析。</p>
-<p>这类 counter 的麻烦在于：不是每台设备都有，不同 GPU 厂商的 counter 名称也不一样。写结论时不能说“GPU 高就是 GPU 瓶颈”，只能把 FrameTimeline、RenderThread、SurfaceFlinger、GPU timeline、频率和功耗数据放到同一段时间里看。</p>
+        <p>FrameTimeline 标出一帧晚了，主线程和 RenderThread 没有明显长任务，下一步可以查 GPU 工作与 fence。GPU 频率、电池电流和电源轨只能提供同一窗口的硬件状态，不能单独证明某个 App 帧为何晚呈现。</p>
+<p>这篇把 GPU render stages、devfreq、电池计数器和电源轨放到同一段 Trace 窗口里，说明各自能回答什么、设备不支持时报告该怎么写。帧和线程的判读可接着<a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">第 7 篇</a>与<a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/08/05/Android-Perfetto-08-Vsync/">第 8 篇</a>的例子读。</p>
+<p>Counter 名称、单位和采样周期由设备 producer 决定。跨设备比较前先核对 descriptor；同一设备上也要确认目标帧与 GPU 工作是否能通过 token、layer 或 fence 关联。</p>
 <span id="more"></span>
 
 <p><a id="series"></a></p>
@@ -358,7 +358,7 @@ loading="lazy"             decoding="async"
 <li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV1oi82efE4D/?vd_source=0c6d2191e785de0a36dc21a9da7e664e">视频(B站) - Android Perfetto 基础和案例分享</a></li>
 <li><a target="_blank" rel="noopener" href="https://www.bilibili.com/video/BV17A6bBLECu/">视频(B站) - Android Perfetto 分享 - 出图类型分享：AOSP、WebView、Flutter + OEM 系统优化分享</a></li>
 </ol>
-<p>这篇只解决几个很实际的问题：哪些硬件数据值得抓，抓不到时怎么降级，抓到了以后怎么避免误判。读完以后不需要变成 GPU driver 工程师，但要能划清一次排查的边界：UI 晚了、线程没忙、合成没卡住时，下一步到底该看哪条硬件信号。</p>
+<p>从一次晚帧出发，先查设备是否提供 GPU stage、频率或 counter，再看它们与 App 和 SurfaceFlinger 时间线的关系。缺少关键轨道时，把结果停在「GPU 方向待验证」。</p>
 <p><img src="/images/Perfetto-11-18-Diagrams/07-gpu-power-window.png" alt="硬件信号按同一窗口对齐"></p>
 <p><em>示意图：帧、GPU stage、频率和能量采样在同一窗口对齐；时间重叠本身不能证明 GPU 根因。</em></p>
 <h2 id="什么时候需要硬件-counter"><a href="#什么时候需要硬件-counter" class="headerlink" title="什么时候需要硬件 counter"></a>什么时候需要硬件 counter</h2><p>FrameTimeline 能告诉你某帧 jank，CPU 调度能告诉你线程有没有拿到 CPU，RenderThread&#x2F;HWUI 能帮助判断 App 侧是否在预算内完成绘制并产出或提交 buffer。GPU 执行、完成和硬件压力要结合 FrameTimeline、GPU render stages、fence、GPU counter 或 AGI&#x2F;厂商工具看。</p>
@@ -391,7 +391,7 @@ loading="lazy"             decoding="async"
 <td>AGI GPU counter、Perfetto 系统上下文、业务 Track Event</td>
 </tr>
 </tbody></table>
-<p>硬件 counter 很少单独给出根因。它更像“排除错误方向”的证据：问题到底在 CPU 侧、GPU 侧、合成侧、内存带宽，还是功耗&#x2F;温控策略。</p>
+<p>硬件 counter 要和线程、帧、合成轨道交叉使用。单条频率或功耗曲线不能区分 CPU、GPU、内存带宽和温控各自的影响。</p>
 <p>几个术语先分开：</p>
 <ul>
 <li><code>frequency</code> 是频率轨道，说明调频策略给硬件分配了什么档位，不等于利用率。</li>
@@ -400,7 +400,7 @@ loading="lazy"             decoding="async"
 <li><code>battery current</code>（电池电流）是电池口径，包含整机，不是某个 App 的耗电。</li>
 <li><code>power rail</code>（电源轨）是子系统能量口径，能看到 GPU、Display、Memory、WLAN 这类 rail 的变化，但仍然不是进程口径。</li>
 </ul>
-<p>硬件 counter 必须和同一段时间内的帧、线程、SurfaceFlinger、业务动作一起读。单条轨道再漂亮，也不能独立完成归因。</p>
+<p>硬件 counter 必须和同一段时间内的帧、线程、SurfaceFlinger、业务动作一起读。看到 GPU 频率抬高，我不会直接写“GPU 是瓶颈”；先问同一帧的 GPU stage、fence 和 App&#x2F;SF 时间线能不能对上。</p>
 <h2 id="几类数据别混用"><a href="#几类数据别混用" class="headerlink" title="几类数据别混用"></a>几类数据别混用</h2><table>
 <thead>
 <tr>
@@ -471,8 +471,8 @@ loading="lazy"             decoding="async"
 <li>Android GPU frequency 可以通过 ftrace 的 <code>power/gpu_frequency</code> 采集。</li>
 <li>每进程 GPU memory 可以通过 ftrace 的 <code>gpu_mem/gpu_mem_total</code> 采集。</li>
 </ul>
-<p>Power counters 也有类似边界。Battery counters 从 Android 10 开始引入，依赖设备电源管理硬件，Pixel 上更常见。Power rails 依赖 ODPM（on-device power rail monitor）这类专用硬件和 IPowerStats HAL；Android Studio Power Profiler 文档把 ODPM 作为 Android 10+、Pixel 6 及之后设备上更现实的能力，很多量产设备没有。</p>
-<p>Perfetto ODPM 数据源是 Android 10+ 引入的能力，但真实可用性取决于专用硬件和 HAL；Android Studio Power Profiler 里提到的 Pixel 6+，更像工具体验和现实覆盖面的提醒，不是 Perfetto power rails 的版本下限。</p>
+<p>Power counters 也有类似边界。Battery counters 依赖设备电源管理硬件，Pixel 上更常见。Power rails 依赖 ODPM（on-device power rail monitor）这类专用硬件和 IPowerStats HAL；在 Android 12–17 的设备上仍要逐台确认可用性，很多量产设备没有。</p>
+<p>Perfetto ODPM 数据源的真实可用性取决于专用硬件和 HAL；Android Studio Power Profiler 里提到的 Pixel 6+，更像工具体验和现实覆盖面的提醒，不能据此认定所有 Android 12–17 设备都有 power rails。</p>
 <h2 id="先确认设备能力"><a href="#先确认设备能力" class="headerlink" title="先确认设备能力"></a>先确认设备能力</h2><p>GPU&#x2F;Power 配置不能先写再碰运气。抓取前先用 Perfetto UI 的 Record 页，或在设备上查询数据源 descriptor，确认 producer 名称、counter ID、单位和名称选择能力：</p>
 <figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">adb shell perfetto --query --long</span><br></pre></td></tr></table></figure>
 
@@ -515,12 +515,12 @@ loading="lazy"             decoding="async"
 
 <p>这份配置的重点是“先把同窗证据拿全”。FrameTimeline 需要 Android 12 或更高版本；<code>gpu.renderstages</code> 依赖 GPU producer 和驱动支持，很多设备抓不到。抓不到 render stages 时只能写“缺少 GPU stage 证据”，不能把频率或 power rail 直接升级成 GPU 执行结论。</p>
 <p>缺 GPU stage 的报告写法要明确：<code>gpu_stage_status=unavailable; conclusion_scope=hardware_trend_only; cannot_claim=gpu_execution_delay</code>。</p>
-<p><code>stat_period_ms</code> 记得配上显式的 <code>stat_counters</code>。2019 年中之后的 traced_probes 在 <code>stat_counters</code> 留空时会采集 <code>/proc/stat</code> 的全部计数（包括逐 CPU 时间和逐 IRQ 计数），更早的版本则可能什么都不采；显式写 <code>STAT_CPU_TIMES</code> 既跨版本行为一致，也避免把几百个 IRQ 计数一起拖进 trace。</p>
+<p><code>stat_period_ms</code> 要配上显式的 <code>stat_counters</code>。本文的 <code>STAT_CPU_TIMES</code> 只取 CPU 时间；留空时可能把 <code>/proc/stat</code> 的逐 IRQ 等计数一起采进 Trace，增加写入量。</p>
 <p><code>power/gpu_frequency</code> 和 <code>devfreq/devfreq_frequency</code> 是事件路径，<code>gpufreq_period_ms</code> 和 <code>devfreq_period_ms</code> 是 sysfs 轮询路径。event 适合精确变化点，但窗口开始处可能要向前找前一条状态；polling 适合持续趋势，但会受采样周期影响，短暂尖峰可能漏掉。<code>power/cpu_idle</code> 是 transition 事件，<code>cpuidle_period_ms</code> 是 idle state duration 轮询；插 USB、wakelock 和场景前后台都会影响 idle 口径。</p>
 <p>thermal zone 名称、单位和可用性依设备而定。没有采 <code>thermal_period_ms</code> 或没有 thermal 轨道时，只能写“本 trace 无 thermal 证据”，不要写“没有温控影响”。</p>
 <p>这些轮询周期只适合短窗口诊断；长 Trace 需要放宽采样周期、拆 buffer，并实测写入速率和 CPU 开销。这里的 power counters 不是 Power HAL trace；除非额外采到 Power HAL 自身的 atrace、log 或厂商事件，否则报告只能写“频率、rail、thermal 同窗变化”，不要写“Power HAL 导致”。</p>
-<p>Android 10+ 可以用文本配置；Android 9&#x2F;P 需要二进制配置。<code>pbtxt</code> 适合手工排查和文章示例，自动化或长期方案更建议生成 binary proto config。Android 10&#x2F;11 的非 root user build 不要假设设备能从任意路径读配置，优先走 stdin：</p>
-<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">adb shell <span class="string">&#x27;cat &gt; /data/local/tmp/gpu_power.pbtxt&#x27;</span> &lt; gpu_power.pbtxt</span><br><span class="line">adb shell <span class="string">&#x27;cat /data/local/tmp/gpu_power.pbtxt | perfetto --txt -c - -o /data/misc/perfetto-traces/gpu_power.perfetto-trace&#x27;</span></span><br><span class="line">adb pull /data/misc/perfetto-traces/gpu_power.perfetto-trace</span><br></pre></td></tr></table></figure>
+<p>下面以 Android 17 为当前参照，Android 12 及以上设备可把文本配置放入 <code>/data/misc/perfetto-configs</code>；<code>pbtxt</code> 适合手工排查和文章示例，自动化或长期方案更建议生成 binary proto config：</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">adb push gpu_power.pbtxt /data/misc/perfetto-configs/gpu_power.pbtxt</span><br><span class="line">adb shell perfetto --txt -c /data/misc/perfetto-configs/gpu_power.pbtxt -o /data/misc/perfetto-traces/gpu_power.perfetto-trace</span><br><span class="line">adb pull /data/misc/perfetto-traces/gpu_power.perfetto-trace</span><br></pre></td></tr></table></figure>
 
 <p>短 Trace 允许这些信号放在同一个 Buffer 里；长 Trace 要拆开看数据量。GPU counters 的 1ms 采样、logcat、Track Event、ftrace sched 混在一起，会很快压缩 Ring Buffer 窗口。第 12 篇讲过数据丢失和 Buffer 窗口，第 15 篇讲过长时间写文件，这里要沿用同一套约束。</p>
 <h2 id="GPU-counter-选择示例"><a href="#GPU-counter-选择示例" class="headerlink" title="GPU counter 选择示例"></a>GPU counter 选择示例</h2><p>GPU counters 要按设备选择。更稳的做法是按 descriptor 里的 counter ID 选择；<code>counter_names</code> 和 glob 只有 producer descriptor 明确支持时才用。</p>
@@ -605,7 +605,7 @@ loading="lazy"             decoding="async"
 <p>counter track 名由 <code>batt.&lt;counter&gt;</code> 拼出；设备上报了电池名时会变成 <code>batt.&lt;battery_name&gt;.&lt;counter&gt;</code>，所以单位判断用后缀 GLOB，不要写死全名。</p>
 <p><code>batt.current_ua</code> 是整机电池口径：负数通常表示电池放电，正数表示外部电源正在给电池充电。这个符号方向只说明电池电流，不等于某个 rail 或某个 App 的功耗。</p>
 <p>报告用窗口均值、中位数或稳定区间，不用单点峰值；current 解释必须同时写 USB&#x2F;充电状态。</p>
-<p>功耗分析更像 A&#x2F;B 实验，不像单帧 jank 定位。你需要控制亮度、刷新率、网络、温度、后台任务、USB 供电、场景时长，然后比较同一设备上的两个版本。Android Studio Power Profiler 文档也把 ODPM 数据用于“同一功能不同实现”的对比，而不是单次采样后给 App 定罪。</p>
+<p>比较功耗时，要固定同一设备的亮度、刷新率、网络、温度、后台任务、USB 供电和场景时长，再比较两个版本。<a target="_blank" rel="noopener" href="https://developer.android.com/studio/profile/power-profiler">Android Studio Power Profiler 文档</a>也用 ODPM 数据比较同一功能的不同实现；单次电流峰值不能归因到某个 App。</p>
 <h2 id="按同一窗口推进分析"><a href="#按同一窗口推进分析" class="headerlink" title="按同一窗口推进分析"></a>按同一窗口推进分析</h2><p>分析 GPU&#x2F;Power 问题时，按这个顺序走更稳：</p>
 <ol>
 <li>用 FrameTimeline 找问题帧或问题窗口。</li>
@@ -722,8 +722,7 @@ loading="lazy"             decoding="async"
 <td>写设备和驱动边界，不做裸值横比</td>
 </tr>
 </tbody></table>
-<h2 id="把硬件信号写成可复查结论"><a href="#把硬件信号写成可复查结论" class="headerlink" title="把硬件信号写成可复查结论"></a>把硬件信号写成可复查结论</h2><p>GPU&#x2F;Power counters 是渲染分析的硬件补充。它们不能替代 FrameTimeline、RenderThread、SurfaceFlinger 和 CPU 调度，只能帮助判断问题是否已经进入 GPU、memory&#x2F;interconnect、功耗或温控层。</p>
-<p>报告按三条规则写：设备没有提供的信号要写缺失，不要写反证；只有同一窗口内多源证据一致时，才写 GPU&#x2F;功耗方向；证据指向 GPU 内部时，再切到 AGI 或厂商 GPU 工具。</p>
+<h2 id="把硬件信号写成可复查结论"><a href="#把硬件信号写成可复查结论" class="headerlink" title="把硬件信号写成可复查结论"></a>把硬件信号写成可复查结论</h2><p>报告先列设备提供了哪些 counter、单位和采样周期，再列目标帧、GPU stage 与 fence 的关联。缺少 GPU 数据时写「未采集」；多条证据都指向 GPU 内部时，再用 AGI 或厂商工具查具体硬件事件。功耗另做同设备、同场景的版本对比。</p>
 <h2 id="参考文档"><a href="#参考文档" class="headerlink" title="参考文档"></a>参考文档</h2><ol>
 <li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/gpu">GPU data sources</a></li>
 <li><a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/battery-counters">Power data sources</a></li>
@@ -747,7 +746,7 @@ loading="lazy"             decoding="async"
             <p>Author：<a href="https://androidperformance.com">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">https://androidperformance.com/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/</a>
             <p>Publish date：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">May 4th 2026, 10:16:00 am</a>
-            <p>Update date：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">September 20th 2026, 12:49:52 am</a>
+            <p>Update date：<a href="https://androidperformance.com/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">September 29th 2026, 9:53:44 am</a>
             <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     <!-- paginator -->
@@ -1641,22 +1640,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 随笔
             </span>
-            <span class="sidebar-tag-name" data-tags="ANR">
-                <span class="iconfont-archer">&#xe606;</span>
-                ANR
-            </span>
-            <span class="sidebar-tag-name" data-tags="Tools">
-                <span class="iconfont-archer">&#xe606;</span>
-                Tools
-            </span>
-            <span class="sidebar-tag-name" data-tags="Java">
-                <span class="iconfont-archer">&#xe606;</span>
-                Java
-            </span>
-            <span class="sidebar-tag-name" data-tags="RenderThread">
-                <span class="iconfont-archer">&#xe606;</span>
-                RenderThread
-            </span>
             <span class="sidebar-tag-name" data-tags="Agent OS">
                 <span class="iconfont-archer">&#xe606;</span>
                 Agent OS
@@ -1673,9 +1656,25 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Mobile OS
             </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
             <span class="sidebar-tag-name" data-tags="Linux">
                 <span class="iconfont-archer">&#xe606;</span>
                 Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
             </span>
             <span class="sidebar-tag-name" data-tags="BlastBufferQueue">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1717,14 +1716,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 TraceProcessor
             </span>
-            <span class="sidebar-tag-name" data-tags="Trace">
-                <span class="iconfont-archer">&#xe606;</span>
-                Trace
-            </span>
-            <span class="sidebar-tag-name" data-tags="DataFlow">
-                <span class="iconfont-archer">&#xe606;</span>
-                DataFlow
-            </span>
             <span class="sidebar-tag-name" data-tags="SDK">
                 <span class="iconfont-archer">&#xe606;</span>
                 SDK
@@ -1733,21 +1724,17 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 TraceEvent
             </span>
-            <span class="sidebar-tag-name" data-tags="Field">
+            <span class="sidebar-tag-name" data-tags="Trace">
                 <span class="iconfont-archer">&#xe606;</span>
-                Field
+                Trace
+            </span>
+            <span class="sidebar-tag-name" data-tags="DataFlow">
+                <span class="iconfont-archer">&#xe606;</span>
+                DataFlow
             </span>
             <span class="sidebar-tag-name" data-tags="heapprofd">
                 <span class="iconfont-archer">&#xe606;</span>
                 heapprofd
-            </span>
-            <span class="sidebar-tag-name" data-tags="Input">
-                <span class="iconfont-archer">&#xe606;</span>
-                Input
-            </span>
-            <span class="sidebar-tag-name" data-tags="Latency">
-                <span class="iconfont-archer">&#xe606;</span>
-                Latency
             </span>
             <span class="sidebar-tag-name" data-tags="GPU">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1765,6 +1752,18 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Audio
             </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
+            <span class="sidebar-tag-name" data-tags="Input">
+                <span class="iconfont-archer">&#xe606;</span>
+                Input
+            </span>
+            <span class="sidebar-tag-name" data-tags="Latency">
+                <span class="iconfont-archer">&#xe606;</span>
+                Latency
+            </span>
             <span class="sidebar-tag-name" data-tags="MAT">
                 <span class="iconfont-archer">&#xe606;</span>
                 MAT
@@ -1773,33 +1772,25 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 DelayLoad
             </span>
-            <span class="sidebar-tag-name" data-tags="HashMap">
-                <span class="iconfont-archer">&#xe606;</span>
-                HashMap
-            </span>
             <span class="sidebar-tag-name" data-tags="程序员">
                 <span class="iconfont-archer">&#xe606;</span>
                 程序员
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
             </span>
             <span class="sidebar-tag-name" data-tags="Singleton">
                 <span class="iconfont-archer">&#xe606;</span>
                 Singleton
             </span>
-            <span class="sidebar-tag-name" data-tags="OpenClaw">
-                <span class="iconfont-archer">&#xe606;</span>
-                OpenClaw
-            </span>
-            <span class="sidebar-tag-name" data-tags="效率工具">
-                <span class="iconfont-archer">&#xe606;</span>
-                效率工具
-            </span>
-            <span class="sidebar-tag-name" data-tags="本地模型">
-                <span class="iconfont-archer">&#xe606;</span>
-                本地模型
-            </span>
             <span class="sidebar-tag-name" data-tags="Nexus">
                 <span class="iconfont-archer">&#xe606;</span>
                 Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenClaw">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenClaw
             </span>
             <span class="sidebar-tag-name" data-tags="AI Agent">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1816,6 +1807,14 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Android Performance">
                 <span class="iconfont-archer">&#xe606;</span>
                 Android Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="效率工具">
+                <span class="iconfont-archer">&#xe606;</span>
+                效率工具
+            </span>
+            <span class="sidebar-tag-name" data-tags="本地模型">
+                <span class="iconfont-archer">&#xe606;</span>
+                本地模型
             </span>
             <span class="sidebar-tag-name" data-tags="Gracker">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1849,13 +1848,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 程序员的修炼
             </span>
-            <span class="sidebar-tag-name" data-tags="设计原则">
-                <span class="iconfont-archer">&#xe606;</span>
-                设计原则
-            </span>
             <span class="sidebar-tag-name" data-tags="测试">
                 <span class="iconfont-archer">&#xe606;</span>
                 测试
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计原则">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计原则
             </span>
             <span class="sidebar-tag-name" data-tags="了解你的用户">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1919,13 +1918,13 @@ loading="lazy"             decoding="async"
             <span class="iconfont-archer">&#xe60a;</span>
             Android
         </span>
-        <span class="sidebar-category-name" data-categories="Java">
-            <span class="iconfont-archer">&#xe60a;</span>
-            Java
-        </span>
         <span class="sidebar-category-name" data-categories="AI">
             <span class="iconfont-archer">&#xe60a;</span>
             AI
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
         </span>
         <span class="sidebar-category-name" data-categories="Android性能优化">
             <span class="iconfont-archer">&#xe60a;</span>

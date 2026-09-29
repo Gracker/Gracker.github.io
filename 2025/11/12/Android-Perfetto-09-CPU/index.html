@@ -11,12 +11,12 @@
                     <meta name="copyright" content="Gracker">
                       <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,启动优化,Startup,Perfetto,Systrace,RenderThread,Java">
                           <meta name="description" content="Focus On Android Performance">
-                          <meta name="description" content="本文是 Perfetto 系列的第九篇文章，主题是 Perfetto 中的 CPU 信息分析。Perfetto 提供了远超 Systrace 的数据可视化与分析能力，理解 CPU 相关信息是定位性能瓶颈、分析功耗问题的基础。 本系列的目标，就是通过 Perfetto 这个工具，从一个全新的图形化视角，来审视 Android 系统的整体运行，同时也提供一个学习 Framework 的新途径。或许你已">
+                          <meta name="description" content="App 主线程没有按时处理一帧时，先分清它在 Running、Runnable 还是 Sleep；这三种状态对应的下一步调查完全不同。这篇用 Perfetto 的 CPU 调度、频率、空闲状态和采样数据，把「CPU 慢」拆成可核对的现象。 文中的核编号、频率和调度策略都要按目标设备确认。同一条线程运行在小核上，不足以单独证明调度错误。">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Android Perfetto 系列 9：CPU 信息解读">
 <meta property="og:url" content="https://androidperformance.com/2025/11/12/Android-Perfetto-09-CPU/index.html">
 <meta property="og:site_name" content="Android Performance">
-<meta property="og:description" content="本文是 Perfetto 系列的第九篇文章，主题是 Perfetto 中的 CPU 信息分析。Perfetto 提供了远超 Systrace 的数据可视化与分析能力，理解 CPU 相关信息是定位性能瓶颈、分析功耗问题的基础。 本系列的目标，就是通过 Perfetto 这个工具，从一个全新的图形化视角，来审视 Android 系统的整体运行，同时也提供一个学习 Framework 的新途径。或许你已">
+<meta property="og:description" content="App 主线程没有按时处理一帧时，先分清它在 Running、Runnable 还是 Sleep；这三种状态对应的下一步调查完全不同。这篇用 Perfetto 的 CPU 调度、频率、空闲状态和采样数据，把「CPU 慢」拆成可核对的现象。 文中的核编号、频率和调度策略都要按目标设备确认。同一条线程运行在小核上，不足以单独证明调度错误。">
 <meta property="og:locale">
 <meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-09-CPU/image-20251112214415666.webp">
 <meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-09-CPU/image-20251112214626810.webp">
@@ -36,7 +36,7 @@
 <meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-09-CPU/image-20251112223237018.webp">
 <meta property="og:image" content="https://androidperformance.com/images/WechatIMG581.webp">
 <meta property="article:published_time" content="2025-11-12T02:00:00.000Z">
-<meta property="article:modified_time" content="2026-09-19T12:41:55.700Z">
+<meta property="article:modified_time" content="2026-09-27T05:26:25.149Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Android">
 <meta property="article:tag" content="Perfetto">
@@ -287,7 +287,7 @@ loading="lazy"             decoding="async"
 
                 <!-- 文章字数统计 -->
                     <div class="post-intro-read">
-                        <span>Word count: <span class="post-count word-count">8.6k</span>Reading time: <span class="post-count reading-time">32 min</span></span>
+                        <span>Word count: <span class="post-count word-count">8.1k</span>Reading time: <span class="post-count reading-time">30 min</span></span>
                     </div>
                 <div class="post-intro-meta">
                     <!-- 撰写日期 -->
@@ -353,8 +353,8 @@ loading="lazy"             decoding="async"
             <div class="container container-unloaded">
                 <main class="main post-page">
     <article class="article-entry">
-        <p>本文是 Perfetto 系列的第九篇文章，主题是 Perfetto 中的 CPU 信息分析。Perfetto 提供了远超 Systrace 的数据可视化与分析能力，理解 CPU 相关信息是定位性能瓶颈、分析功耗问题的基础。</p>
-<p>本系列的目标，就是通过 Perfetto 这个工具，从一个全新的图形化视角，来审视 Android 系统的整体运行，同时也提供一个学习 Framework 的新途径。或许你已经读过很多源码分析的文章，但总是对繁杂的调用链感到困惑，或者记不住具体的执行流程。那么通过 Perfetto，将这些流程可视化，你可能会对系统有更深入、更直观的理解。</p>
+        <p>App 主线程没有按时处理一帧时，先分清它在 Running、Runnable 还是 Sleep；这三种状态对应的下一步调查完全不同。这篇用 Perfetto 的 CPU 调度、频率、空闲状态和采样数据，把「CPU 慢」拆成可核对的现象。</p>
+<p>文中的核编号、频率和调度策略都要按目标设备确认。同一条线程运行在小核上，不足以单独证明调度错误。</p>
 <span id="more"></span>
 
 <h2 id="本文目录"><a href="#本文目录" class="headerlink" title="本文目录"></a>本文目录</h2><ul>
@@ -401,7 +401,7 @@ loading="lazy"             decoding="async"
 <li><strong>CPU Idle (CPU 空闲状态)</strong>: 显示每个 CPU 核心进入的低功耗状态 (C-States)。</li>
 </ul>
 <p><img src="/images/Android-Perfetto-09-CPU/image-20251112214415666.webp" alt="image-20251112214415666"></p>
-<p>通过分析 CPU 相关的信息，可以解答以下关键性能问题， 或者进行竞品分析：</p>
+<p>把 CPU 轨道和目标线程放在同一时间窗口，可以先回答：</p>
 <ul>
 <li>应用主线程为何没有执行？是否被其他线程抢占？</li>
 <li>某个任务执行缓慢的原因是什么？是否被调度到了低性能核心？</li>
@@ -409,24 +409,24 @@ loading="lazy"             decoding="async"
 <li>应用在后台时，CPU 是否有效进入了深度睡眠状态？</li>
 </ul>
 <p><a id="traceconfig"></a></p>
-<h2 id="抓取-CPU-信息所需要的-Trace-Config"><a href="#抓取-CPU-信息所需要的-Trace-Config" class="headerlink" title="抓取 CPU 信息所需要的 Trace Config"></a>抓取 CPU 信息所需要的 Trace Config</h2><p>为了采集到本文分析所需的所有 CPU 数据，你需要一个正确的 <code>TraceConfig</code>。不正确的配置会导致某些轨道（如 CPU 频率）或某些内核事件（如唤醒事件）丢失。以下是 Perfetto 官方文档推荐的、用于通用 CPU 分析的配置。你可以将其添加到你的 Perfetto 的 Config 中，抓 Trace 的时候使用。</p>
-<figure class="highlight yaml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br></pre></td><td class="code"><pre><span class="line"><span class="string">data_sources</span> &#123;</span><br><span class="line">  <span class="string">config</span> &#123;</span><br><span class="line">    <span class="attr">name:</span> <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    <span class="string">ftrace_config</span> &#123;</span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;sched/sched_process_exit&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;sched/sched_process_free&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;task/task_newtask&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;task/task_rename&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;power/suspend_resume&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;sched/sched_blocked_reason&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;sched/sched_wakeup&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;sched/sched_wakeup_new&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;sched/sched_process_exit&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;sched/sched_process_free&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;task/task_newtask&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;task/task_rename&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;power/cpu_frequency&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;power/cpu_idle&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;power/suspend_resume&quot;</span></span><br><span class="line">      <span class="attr">symbolize_ksyms:</span> <span class="literal">true</span></span><br><span class="line">      <span class="attr">disable_generic_events:</span> <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"><span class="string">data_sources</span> &#123;</span><br><span class="line">  <span class="string">config</span> &#123;</span><br><span class="line">    <span class="attr">name:</span> <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    <span class="string">process_stats_config</span> &#123;</span><br><span class="line">      <span class="attr">scan_all_processes_on_start:</span> <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"><span class="string">data_sources</span> &#123;</span><br><span class="line">  <span class="string">config</span> &#123;</span><br><span class="line">    <span class="attr">name:</span> <span class="string">&quot;linux.sys_stats&quot;</span></span><br><span class="line">    <span class="string">sys_stats_config</span> &#123;</span><br><span class="line">      <span class="attr">cpufreq_period_ms:</span> <span class="number">250</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+<h2 id="抓取-CPU-信息所需要的-Trace-Config"><a href="#抓取-CPU-信息所需要的-Trace-Config" class="headerlink" title="抓取 CPU 信息所需要的 Trace Config"></a>抓取 CPU 信息所需要的 Trace Config</h2><p>下面的配置取自 <a target="_blank" rel="noopener" href="https://perfetto.dev/docs/getting-started/android-trace-analysis">Perfetto 官方 Android Trace 分析示例</a>，用于采集调度、唤醒和频率信息。按设备支持情况选择数据源；没有录到的事件，分析阶段无法补回。</p>
+<figure class="highlight yaml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br></pre></td><td class="code"><pre><span class="line"><span class="string">data_sources</span> &#123;</span><br><span class="line">  <span class="string">config</span> &#123;</span><br><span class="line">    <span class="attr">name:</span> <span class="string">&quot;linux.ftrace&quot;</span></span><br><span class="line">    <span class="string">ftrace_config</span> &#123;</span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;sched/sched_process_exit&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;sched/sched_process_free&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;task/task_newtask&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;task/task_rename&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;sched/sched_switch&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;power/suspend_resume&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;sched/sched_blocked_reason&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;sched/sched_wakeup&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;sched/sched_wakeup_new&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;sched/sched_waking&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;power/cpu_frequency&quot;</span></span><br><span class="line">      <span class="attr">ftrace_events:</span> <span class="string">&quot;power/cpu_idle&quot;</span></span><br><span class="line">      <span class="attr">symbolize_ksyms:</span> <span class="literal">true</span></span><br><span class="line">      <span class="attr">disable_generic_events:</span> <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"><span class="string">data_sources</span> &#123;</span><br><span class="line">  <span class="string">config</span> &#123;</span><br><span class="line">    <span class="attr">name:</span> <span class="string">&quot;linux.process_stats&quot;</span></span><br><span class="line">    <span class="string">process_stats_config</span> &#123;</span><br><span class="line">      <span class="attr">scan_all_processes_on_start:</span> <span class="literal">true</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"><span class="string">data_sources</span> &#123;</span><br><span class="line">  <span class="string">config</span> &#123;</span><br><span class="line">    <span class="attr">name:</span> <span class="string">&quot;linux.sys_stats&quot;</span></span><br><span class="line">    <span class="string">sys_stats_config</span> &#123;</span><br><span class="line">      <span class="attr">cpufreq_period_ms:</span> <span class="number">250</span></span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
 <p>这个配置启用了包括 <code>sched</code>（调度）、<code>power</code>（频率和空闲）、<code>task</code>（任务生命周期）在内的关键 ftrace 事件，是进行深度 CPU 分析的基础。</p>
 <p><a id="biglittle"></a></p>
-<h2 id="CPU-核心架构：big-LITTLE"><a href="#CPU-核心架构：big-LITTLE" class="headerlink" title="CPU 核心架构：big.LITTLE"></a>CPU 核心架构：big.LITTLE</h2><p>在深入分析前，必须了解现代手机 SoC 的 CPU 核心架构。目前主流的移动处理器普遍采用 <code>big.LITTLE</code> 异构多核架构，或其变种，如 <code>big.Medium.LITTLE</code>（大中小核）。</p>
+<h2 id="CPU-核心架构：big-LITTLE"><a href="#CPU-核心架构：big-LITTLE" class="headerlink" title="CPU 核心架构：big.LITTLE"></a>CPU 核心架构：big.LITTLE</h2><p>分析调度之前，先确认设备的 CPU 拓扑。手机 SoC 常有不同容量的核簇，但核数、编号、频率上限和能耗曲线因芯片而异。</p>
 <ul>
 <li><strong>小核 (LITTLE cores)</strong>: 针对低功耗设计，频率较低，用于处理后台任务、轻量级计算，以保证续航。</li>
 <li><strong>大核 (big cores)</strong>: 针对高性能设计，频率更高，功耗也更大，用于处理用户交互、游戏、应用启动等重负载场景。</li>
 <li><strong>超大核 (Prime Core)</strong>: 部分旗舰芯片会有一个频率极高的超大核，用于应对最严苛的单核性能挑战。</li>
 </ul>
-<p>在 Perfetto 的 CPU 轨道中，CPU 通常从 0 开始编号。例如，在一个典型的八核处理器中，<code>CPU 0-3</code> 可能为小核，<code>CPU 4-6</code> 为大核，<code>CPU 7</code> 为超大核。<strong>识别核类型对性能分析很有帮助</strong>：一个计算密集型任务如果长时间运行在小核上，其耗时必然远超预期。分析时，需要将线程的运行 CPU 与其任务属性进行匹配，以判断调度器（Scheduler）的行为是否符合预期。</p>
+<p>Perfetto 的 CPU 轨道通常从 0 编号，但编号不等于性能排序。把线程的运行核与设备拓扑、频率和当时负载对应起来，再判断是否存在不合理的放置；小核运行时间长也可能是系统策略或任务负载所致。</p>
 <p>下面是一个典型的 4+4 的 CPU ：</p>
 <p><img src="/images/Android-Perfetto-09-CPU/image-20251112214626810.webp" alt="image-20251112214626810"></p>
-<p>下面是一个典型的 4+3+1 的 CPU （ MTK 的天玑 9500、9400 ，以及高通骁龙高端系列）：</p>
+<p>下面这张截图展示 4+3+1 的核簇分布。芯片型号与具体核编号应以目标设备读取结果为准：</p>
 <p><img src="/images/Android-Perfetto-09-CPU/image-20251112215105550.webp" alt="image-20251112215105550"></p>
-<p>下面是一个 5+2 的 CPU （高通 8Elite 1 阉割版，8Elite 1 的标准版 0-5 是小核，6-7 是大核，这里就不放图了）</p>
+<p>还有 5+2 等布局。不要把一份设备截图的编号套到另一款芯片上：</p>
 <p><img src="/images/Android-Perfetto-09-CPU/image-20251112214833158.webp" alt="image-20251112214833158"></p>
-<p>一般通过查阅 CPU 的 spec 就可以知道他的大中小核心的架构，或者 cat 对应的 CPU 节点也可以，这里就不再赘述了。</p>
+<p>可从设备规格、<code>/sys/devices/system/cpu/</code> 下的拓扑与容量信息核对，再回到 Trace 看线程落在哪些核上。</p>
 <p><a id="scheduling"></a></p>
 <h2 id="CPU-调度"><a href="#CPU-调度" class="headerlink" title="CPU 调度"></a>CPU 调度</h2><p><code>CPU Scheduling</code> 轨道是最常用且最重要的部分，它可视化了 Linux 内核调度器的决策过程。其数据来源于内核 ftrace 中的 <code>sched/sched_switch</code> 事件。</p>
 <p><img src="/images/Android-Perfetto-09-CPU/image-20251112215332310.webp" alt="CPU 调度区域"></p>
@@ -440,7 +440,7 @@ loading="lazy"             decoding="async"
 <p><img src="/images/Android-Perfetto-09-CPU/image-20251112215705017.webp" alt="image-20251112215705017"></p>
 <p><strong>分析要点</strong>：</p>
 <ul>
-<li><strong>执行时长</strong>：过长的 <code>Running</code> 状态，尤其是在关键线程上，通常意味着密集的计算任务，例如复杂的算法或循环。这会增加任务耗时，并可能阻塞其他线程的执行。</li>
+<li><strong>执行时长</strong>：长时间 Running 说明线程占用了 CPU，但可能是计算、系统调用或忙等。下一步要用采样或代码埋点定位具体工作。</li>
 <li><strong>运行核心</strong>：结合 CPU 的核心架构（例如 big.LITTLE）进行分析。一个计算密集型任务是否被调度到了预期的性能核心（大核）上，是评估调度策略是否合理的重要依据。</li>
 <li><strong>运行频率</strong>：线程的实际执行速度也受 CPU 频率影响。即使线程运行在大核上，如果因为温控等原因导致降频，其性能表现也会下降。因此需要结合 <code>CPU Frequency</code> 轨道进行综合分析。</li>
 </ul>
@@ -448,18 +448,18 @@ loading="lazy"             decoding="async"
 <p><img src="/images/Android-Perfetto-09-CPU/image-20251112220248837.webp" alt="image-20251112220248837"></p>
 <p><strong>分析要点</strong>：</p>
 <ul>
-<li><strong><code>Runnable</code> 与卡顿</strong>：对于 UI 线程这类对响应时间敏感的线程，长时间处于 <code>Runnable</code> 状态是造成卡顿的直接原因。它意味着线程无法及时获得 CPU 时间来处理任务（如 UI 绘制），从而导致掉帧。</li>
+<li><strong><code>Runnable</code> 与卡顿</strong>：UI 线程长时间处于 Runnable，说明已经可以运行却尚未拿到 CPU。若它与晚帧时间窗口重合，才进一步判断这段排队对帧截止时间的影响。</li>
 </ul>
 <p><strong><code>Runnable</code> 的三种类型</strong>:<br>仔细观察会发现，线程进入 <code>Runnable</code> 状态的“前身”各不相同。根据内核的调度时机，我们可以将其分为三种情况：</p>
 <ol>
 <li><p><strong>从睡眠中唤醒-Wake-up</strong>：这是最常见的一种。线程因等待的资源（如锁、I&#x2F;O、Binder 回复）已经就绪，从 <code>S</code> 或 <code>D</code> 状态被唤醒，进入 <code>Runnable</code> 状态，等待被调度器选中执行。</p>
 </li>
-<li><p><strong>用户抢占-User Preemption</strong>：指线程的运行时间片用完，或出现更高优先级的任务，导致调度器在<strong>从内核态返回用户态时</strong>（如系统调用、中断返回后）决定换下当前线程。此时，被换下的线程从 <code>Running</code> 变为 <code>Runnable</code>。在底层的 <code>sched_switch</code> trace 中，它的 <code>prev_state</code> 标记为 <code>R</code>。</p>
+<li><p><strong>运行后仍可运行</strong>：线程从 Running 被换下后保持 Runnable，<code>sched_switch</code> 中的 <code>prev_state</code> 可记为 <code>R</code>。单看这个状态不足以还原具体调度原因。</p>
 </li>
-<li><p><strong>内核抢占-Kernel Preemption</strong>：指一个更高优先级的任务或中断，在当前线程<strong>正在执行内核态代码期间</strong>，就“强行”将其打断，使其让出 CPU。这种情况通常意味着一次更紧急的调度。此时，被换下的线程从 <code>Running</code> 变为 <code>Runnable (Preempted)</code>。在底层 trace 中，它的 <code>prev_state</code> 标记为 <code>R+</code>，Perfetto 据此进行了解析和展示。</p>
+<li><p><strong>被抢占</strong>：<code>prev_state</code> 为 <code>R+</code> 时，Perfetto 展示为 <code>Runnable (Preempted)</code>。这说明线程被换下时仍可运行，不能据此断定一定发生在内核态，也不能直接归因于某个高优先级线程。</p>
 </li>
 </ol>
-<p>理解这三种类型的区别，有助于更精细地判断调度延迟的原因。例如，大量的 <code>Runnable (Preempted)</code> 可能暗示着系统中存在频繁的、高优先级的唤醒源，导致关键线程在内核态中被频繁打断，或者当时的 CPU 已经满载了（比较常见的情况），这时候优先级比较低的 Task 就很容易被其他优先级高的 Task 抢占，被迫让出 CPU 。如果你的关键 Task 总是被抢占，那就需要调整优先级。</p>
+<p>出现大量 <code>Runnable (Preempted)</code> 时，对齐同一 CPU 上接着运行的线程、优先级和系统负载，才知道是竞争、时间片还是其他调度条件。改线程优先级之前，还要确认它是否属于用户可感知的关键路径。</p>
 <p><img src="/images/Android-Perfetto-09-CPU/image-20251112220534899.webp" alt="image-20251112220534899"></p>
 <h4 id="S-Sleep-x2F-可中断睡眠"><a href="#S-Sleep-x2F-可中断睡眠" class="headerlink" title="S (Sleep &#x2F; 可中断睡眠)"></a>S (Sleep &#x2F; 可中断睡眠)</h4><p><strong>状态定义</strong>：线程因等待某个事件而进入睡眠，可以被信号中断。这是最常见的睡眠状态，通常情况下是良性的，因为它在等待期间不消耗 CPU 资源。</p>
 <p><img src="/images/Android-Perfetto-09-CPU/image-20251112221122170.webp" alt="image-20251112221122170"></p>
@@ -472,25 +472,25 @@ loading="lazy"             decoding="async"
 <li><strong>显式休眠</strong>：代码中调用了 <code>Thread.sleep()</code> 或 <code>Object.wait()</code>。</li>
 <li><strong>依赖分析</strong>：在 Perfetto 中，选中 CPU 区域被唤醒正在 Running 的 Task，就会有 UI 标识他是被哪个 CPU 上的哪个 Task 唤醒的，这有助于快速定位线程间的依赖关系。结合函数调用栈，可以进一步定位导致睡眠的具体代码。<br><img src="/images/Android-Perfetto-09-CPU/image-20251112221703122.webp" alt="image-20251112221703122"></li>
 </ul>
-<h4 id="D-Uninterruptible-Sleep-x2F-不可中断睡眠"><a href="#D-Uninterruptible-Sleep-x2F-不可中断睡眠" class="headerlink" title="D (Uninterruptible Sleep &#x2F; 不可中断睡眠)"></a>D (Uninterruptible Sleep &#x2F; 不可中断睡眠)</h4><p><strong>状态定义</strong>：线程在等待硬件 I&#x2F;O 操作完成，期间不能被任何信号中断。此状态旨在保护进程与设备交互过程中的数据一致性。在 Perfetto 中，该状态通常显示为橙色或红色，是需要重点关注的信号。</p>
+<h4 id="D-Uninterruptible-Sleep-x2F-不可中断睡眠"><a href="#D-Uninterruptible-Sleep-x2F-不可中断睡眠" class="headerlink" title="D (Uninterruptible Sleep &#x2F; 不可中断睡眠)"></a>D (Uninterruptible Sleep &#x2F; 不可中断睡眠)</h4><p><strong>状态定义</strong>：<code>D</code> 表示不可中断睡眠，常见于内核等待路径，但不只对应硬件 I&#x2F;O。Perfetto 的颜色会随轨道和主题变化，排查时以状态字段、<code>io_wait</code> 和 <code>blocked_function</code> 为准。</p>
 <p><img src="/images/Android-Perfetto-09-CPU/image-20251112220738143.webp" alt="image-20251112220738143"></p>
 <p><strong>分析要点</strong>：</p>
 <ul>
 <li><strong>严重的性能瓶颈</strong>：长时间的 <code>D</code> 状态意味着线程被完全阻塞，无法响应任何事件。如果发生在 UI 线程，极易导致 ANR。</li>
 <li><strong>常见原因</strong>：<ol>
 <li><strong>磁盘 I&#x2F;O</strong>：频繁或单次大量的文件读写操作。</li>
-<li><strong>内存压力</strong>：系统物理内存不足，导致频繁的页面换入&#x2F;换出 (swap)，其本质是高频的磁盘 I&#x2F;O。</li>
+<li><strong>内存压力</strong>：回收或换页可能延长内核等待；是否涉及存储 I&#x2F;O 要继续查具体事件和设备实现。</li>
 <li><strong>内核驱动问题</strong>：部分内核驱动的实现缺陷也可能导致线程陷入 <code>D</code> 状态。</li>
 </ol>
 </li>
-<li><strong>排查方向</strong>：在 <code>Current State</code> 面板中，如果 <code>D</code> 状态伴有 <code>(iowait)</code> 标记，则明确表示在等待 I&#x2F;O。需要检查应用的 I&#x2F;O 模式，评估其合理性，例如是否将耗时 I&#x2F;O 操作置于主线程，或是否存在可优化的空间（如减少 I&#x2F;O 次数和数据量）。</li>
+<li><strong>排查方向</strong>：<code>io_wait</code> 标记是重要线索，但不能单独给出文件或设备原因。结合 <code>blocked_function</code>、I&#x2F;O 事件和目标线程调用栈继续定位。</li>
 </ul>
 <h3 id="唤醒关系分析"><a href="#唤醒关系分析" class="headerlink" title="唤醒关系分析"></a>唤醒关系分析</h3><p>线程间的依赖关系是性能分析中的一个难点。一个线程长时间 <code>Sleep</code>，关键在于找出它在“等谁”。Perfetto 提供了强大的唤醒关系可视化功能。</p>
 <ul>
 <li><strong>UI 操作</strong>：在 Perfetto 的 CPU 区域中，用鼠标左键单击选中一个处于 <code>Running</code>  状态的线程 Task 。Perfetto 会自动绘制一条从“唤醒者”到“被唤醒者”的依赖箭头，并高亮显示唤醒源所在的线程切片。<br><img src="/images/Android-Perfetto-09-CPU/image-20251112221703122.webp" alt="image-20251112221703122"></li>
 <li><strong>底层原理</strong>：该功能依赖于内核的 <code>sched_wakeup</code> ftrace 事件。当线程 T1 释放了某个资源（如解锁、完成 Binder 调用），而线程 T2 正在等待该资源时，内核会将 T2 标记为 <code>Runnable</code> 状态，并记录下 T1 -&gt; T2 的这次唤醒事件。Perfetto 解析这些事件，从而构建出线程间的依赖链。</li>
 </ul>
-<p>通过唤醒分析，可以清晰地追踪复杂的调用链，例如：UI 线程等待一个 Binder 调用 -&gt; Binder 线程执行任务 -&gt; Binder 线程等待另一个锁 -&gt; 持锁线程释放锁并唤醒 Binder 线程 -&gt; Binder 线程完成任务并唤醒 UI 线程。整个过程中的瓶颈点将一目了然。</p>
+<p>唤醒关系能指出一个线程何时让另一个线程变为 Runnable。Binder 调用、锁等待和资源归属还需要各自的 trace 事件或调用栈核对；一条唤醒箭头不足以还原完整调用链。</p>
 <h4 id="调度唤醒与延迟分析"><a href="#调度唤醒与延迟分析" class="headerlink" title="调度唤醒与延迟分析"></a>调度唤醒与延迟分析</h4><p>当线程 A 在 <code>wait()</code> 上挂起时，它进入 <code>S</code>（Sleeping）并从 CPU 运行队列移除。线程 B 调用 <code>notify()</code> 后，内核会把线程 A 转换为 <code>R</code>（Runnable）。此时线程 A“有资格”被放回某个 CPU 的运行队列，但这并不意味着“立刻”运行。</p>
 <p><img src="/images/Android-Perfetto-09-CPU/image-20251112222240991.webp" alt="image-20251112222240991"></p>
 <p>常见等待原因包括：</p>
@@ -549,7 +549,7 @@ loading="lazy"             decoding="async"
 <h3 id="频率数据采集与平台差异"><a href="#频率数据采集与平台差异" class="headerlink" title="频率数据采集与平台差异"></a>频率数据采集与平台差异</h3><ul>
 <li>两种获取方式：</li>
 <li>事件驱动：启用 <code>power/cpu_frequency</code>，在内核 cpufreq 驱动变更频率时记录事件。并非所有平台支持，在多数 ARM SoC 上可靠，在大量现代 Intel 平台上常无数据。</li>
-<li>轮询采样：启用 <code>linux.sys_stats</code> 并设置 <code>cpufreq_period_ms &gt; 0</code>，定期读取 <code>/sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_cur_freq</code>，ARM&#x2F;Intel 均可用。建议与事件驱动组合使用以补齐“初始频率快照”。</li>
+<li>轮询采样：启用 <code>linux.sys_stats</code> 并设置 <code>cpufreq_period_ms &gt; 0</code>，定期读取 <code>/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq</code>，ARM&#x2F;Intel 均可用。建议与事件驱动组合使用以补齐“初始频率快照”。</li>
 <li>Android 设备常以“簇”为单位调频，常见现象是同簇内多个 CPU 同步变频。</li>
 <li>已知问题：</li>
 <li>事件仅在频率变化时产生，短 Trace 或稳定场景可能出现左侧“空白”。此时需依赖轮询补足。</li>
@@ -558,7 +558,7 @@ loading="lazy"             decoding="async"
 </ul>
 <h3 id="big-LITTLE：相同频率不等于相同性能或能耗"><a href="#big-LITTLE：相同频率不等于相同性能或能耗" class="headerlink" title="big.LITTLE：相同频率不等于相同性能或能耗"></a>big.LITTLE：相同频率不等于相同性能或能耗</h3><ul>
 <li>在异构 CPU 上，同为 2.0GHz，小核与大核的实际算力和能耗并不等价。频率必须结合核心类型理解。</li>
-<li>核心容量（capacity）与 IPC：大核通常具备更宽的乱序执行、更多执行端口、更大的缓存与更激进的预取&#x2F;分支预测，单位周期完成的指令数（IPC）更高；同频下，大核完成同样工作所需时间更短、能量更少。</li>
+<li>核心容量（capacity）与 IPC：大核通常能在同频下更快完成计算，但不保证同一任务总能耗更低；还要计入电压、工作时间和空闲状态。</li>
 <li>簇级 DVFS（cluster-level DVFS）：移动 SoC 多以“簇”为单位调频。小核簇的高频并不等同于大核簇的中频性能输出；不同簇的电压-频率-能量曲线不同，同一频点无法横向类比“每瓦性能”。</li>
 <li>内存&#x2F;缓存&#x2F;互联瓶颈：热点若受制于内存带宽、LLC 命中率或系统互联（NoC），单纯提升小核频率收益有限；大核更大的缓存&#x2F;更强预取可显著降低同任务的访存等待，体现“同频不同效”。</li>
 <li>能效曲线非线性：小核在接近最高频时常进入能效陡降区（电压抬升使边际能耗激增），而大核在中等频点可能达到“更高单位能效”。同频比较忽略了“电压-频率-能量”的三维权衡。</li>
@@ -653,8 +653,8 @@ loading="lazy"             decoding="async"
 <h3 id="2-分析单个线程的时间状态分布"><a href="#2-分析单个线程的时间状态分布" class="headerlink" title="2. 分析单个线程的时间状态分布"></a>2. 分析单个线程的时间状态分布</h3><p>此查询基于 <code>thread_state</code> 表，可用于分析特定线程（示例为 <code>surfaceflinger</code>）在各种状态下的时间分布，从而判断其主要瓶颈。</p>
 <figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  <span class="keyword">CASE</span> state</span><br><span class="line">    <span class="keyword">WHEN</span> <span class="string">&#x27;Running&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;Running&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> <span class="string">&#x27;R&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;Runnable&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> <span class="string">&#x27;S&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;Interruptible Sleep&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> <span class="string">&#x27;D&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;Uninterruptible Sleep&#x27;</span></span><br><span class="line">    <span class="keyword">ELSE</span> state</span><br><span class="line">  <span class="keyword">END</span> <span class="keyword">AS</span> human_state,</span><br><span class="line">  <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> total_time_ms</span><br><span class="line"><span class="keyword">FROM</span> thread_state</span><br><span class="line"><span class="keyword">WHERE</span> utid <span class="operator">=</span> (<span class="keyword">SELECT</span> utid <span class="keyword">FROM</span> thread <span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;surfaceflinger&#x27;</span> LIMIT <span class="number">1</span>)</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> human_state</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> total_time_ms <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure>
 
-<h3 id="3-查找特定时间段内-CPU-消耗最高的线程"><a href="#3-查找特定时间段内-CPU-消耗最高的线程" class="headerlink" title="3. 查找特定时间段内 CPU 消耗最高的线程"></a>3. 查找特定时间段内 CPU 消耗最高的线程</h3><p>此查询用于分析特定场景（如应用启动的 2-5s 时间段）中，消耗 CPU 时间最长的线程。</p>
-<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  thread.name,</span><br><span class="line">  <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> cpu_time_s</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">JOIN</span> thread <span class="keyword">ON</span> sched.utid <span class="operator">=</span> thread.utid</span><br><span class="line"><span class="keyword">WHERE</span> sched.utid <span class="operator">!=</span> <span class="number">0</span> <span class="comment">-- 排除 swapper/idle</span></span><br><span class="line"><span class="comment">-- 时间戳单位为纳秒，可以再加上 AND ts &gt; 2e9 AND ts &lt; 5e9 来取某一段时间</span></span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> thread.name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cpu_time_s <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">20</span>;</span><br></pre></td></tr></table></figure>
+<h3 id="3-查找整份-Trace-中-CPU-消耗最高的线程"><a href="#3-查找整份-Trace-中-CPU-消耗最高的线程" class="headerlink" title="3. 查找整份 Trace 中 CPU 消耗最高的线程"></a>3. 查找整份 Trace 中 CPU 消耗最高的线程</h3><p>此查询统计整份 Trace 中 CPU 时间最长的线程。若要分析特定场景（如应用启动后的 2–5 秒），还需按目标窗口裁剪跨越边界的 <code>sched</code> 切片，不能只筛选切片的起始 <code>ts</code>。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  thread.tid,</span><br><span class="line">  thread.name,</span><br><span class="line">  <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> cpu_time_s</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">JOIN</span> thread <span class="keyword">ON</span> sched.utid <span class="operator">=</span> thread.utid</span><br><span class="line"><span class="keyword">WHERE</span> sched.utid <span class="operator">!=</span> <span class="number">0</span> <span class="comment">-- 排除 swapper/idle</span></span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> thread.utid, thread.tid, thread.name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cpu_time_s <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">20</span>;</span><br></pre></td></tr></table></figure>
 
 <h3 id="4-查看线程在各-CPU-核心上的运行时间分布"><a href="#4-查看线程在各-CPU-核心上的运行时间分布" class="headerlink" title="4. 查看线程在各 CPU 核心上的运行时间分布"></a>4. 查看线程在各 CPU 核心上的运行时间分布</h3><p>此查询有助于了解一个线程的 CPU 亲和性，以及它是否在预期的大小核上运行。</p>
 <figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  cpu,</span><br><span class="line">  <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> time_on_cpu_ms</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">WHERE</span> utid <span class="operator">=</span> (<span class="keyword">SELECT</span> utid <span class="keyword">FROM</span> thread <span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;system_server&#x27;</span> LIMIT <span class="number">1</span>)</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> cpu</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cpu;</span><br></pre></td></tr></table></figure>
@@ -663,7 +663,7 @@ loading="lazy"             decoding="async"
 <figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  process.name <span class="keyword">AS</span> process_name,</span><br><span class="line">  <span class="number">100</span> <span class="operator">*</span> <span class="built_in">sum</span>(dur) <span class="operator">/</span> (<span class="built_in">CAST</span>(TRACE_END() <span class="operator">-</span> TRACE_START() <span class="keyword">AS</span> <span class="type">REAL</span>)</span><br><span class="line">    <span class="operator">*</span> (<span class="keyword">SELECT</span> <span class="built_in">COUNT</span>(<span class="keyword">DISTINCT</span> cpu) <span class="keyword">FROM</span> sched)) <span class="keyword">AS</span> cpu_utilization_percent</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">JOIN</span> thread <span class="keyword">ON</span> thread.utid <span class="operator">=</span> sched.utid</span><br><span class="line"><span class="keyword">JOIN</span> process <span class="keyword">ON</span> process.upid <span class="operator">=</span> thread.upid</span><br><span class="line"><span class="keyword">WHERE</span> sched.utid <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> process.name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cpu_utilization_percent <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure>
 
 <p><a id="summary"></a></p>
-<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>对 Perfetto 中 CPU 信息的熟练分析，是 Android 性能优化的关键技能。通过深度理解 <strong>核心架构</strong>、<strong>线程状态</strong>、<strong>唤醒关系</strong> 和 <strong>频率限制</strong>，并结合强大的 <strong>SQL 查询</strong>进行量化分析，开发者可以精准地定位并解决各类性能与功耗问题。</p>
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>排查 CPU 问题时，先在目标窗口里分开计算 Running、Runnable 和 Sleep；Runnable 长先查调度与竞争，Running 长再看采样热点，Sleep&#x2F;D 长则查等待对象。频率和核簇提供背景，但单个频点不能替代线程状态与业务窗口的证据。</p>
 <h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p>
 <ol>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li>
@@ -682,7 +682,7 @@ loading="lazy"             decoding="async"
             <p>Author：<a href="https://androidperformance.com">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/2025/11/12/Android-Perfetto-09-CPU/">https://androidperformance.com/2025/11/12/Android-Perfetto-09-CPU/</a>
             <p>Publish date：<a href="https://androidperformance.com/2025/11/12/Android-Perfetto-09-CPU/">November 12th 2025, 10:00:00 am</a>
-            <p>Update date：<a href="https://androidperformance.com/2025/11/12/Android-Perfetto-09-CPU/">September 19th 2026, 8:41:55 pm</a>
+            <p>Update date：<a href="https://androidperformance.com/2025/11/12/Android-Perfetto-09-CPU/">September 27th 2026, 1:26:25 pm</a>
             <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     <!-- paginator -->
@@ -759,7 +759,7 @@ loading="lazy"             decoding="async"
                 <div class="toc-catalog">
                     <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
                 </div>
-                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%9C%AC%E6%96%87%E7%9B%AE%E5%BD%95"><span class="toc-number">1.</span> <span class="toc-text">本文目录</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0"><span class="toc-number">2.</span> <span class="toc-text">Perfetto 系列文章</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-%E4%B8%AD%E7%9A%84-CPU-%E4%BF%A1%E6%81%AF%E6%A6%82%E8%A7%88"><span class="toc-number">3.</span> <span class="toc-text">Perfetto 中的 CPU 信息概览</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%8A%93%E5%8F%96-CPU-%E4%BF%A1%E6%81%AF%E6%89%80%E9%9C%80%E8%A6%81%E7%9A%84-Trace-Config"><span class="toc-number">4.</span> <span class="toc-text">抓取 CPU 信息所需要的 Trace Config</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-%E6%A0%B8%E5%BF%83%E6%9E%B6%E6%9E%84%EF%BC%9Abig-LITTLE"><span class="toc-number">5.</span> <span class="toc-text">CPU 核心架构：big.LITTLE</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-%E8%B0%83%E5%BA%A6"><span class="toc-number">6.</span> <span class="toc-text">CPU 调度</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%BA%BF%E7%A8%8B%E7%8A%B6%E6%80%81%E6%B7%B1%E5%BA%A6%E8%A7%A3%E6%9E%90"><span class="toc-number">6.1.</span> <span class="toc-text">线程状态深度解析</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#Running-%E7%BB%BF%E8%89%B2"><span class="toc-number">6.1.1.</span> <span class="toc-text">Running (绿色)</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#R-Runnable-x2F-%E5%8F%AF%E8%BF%90%E8%A1%8C"><span class="toc-number">6.1.2.</span> <span class="toc-text">R (Runnable &#x2F; 可运行)</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#S-Sleep-x2F-%E5%8F%AF%E4%B8%AD%E6%96%AD%E7%9D%A1%E7%9C%A0"><span class="toc-number">6.1.3.</span> <span class="toc-text">S (Sleep &#x2F; 可中断睡眠)</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#D-Uninterruptible-Sleep-x2F-%E4%B8%8D%E5%8F%AF%E4%B8%AD%E6%96%AD%E7%9D%A1%E7%9C%A0"><span class="toc-number">6.1.4.</span> <span class="toc-text">D (Uninterruptible Sleep &#x2F; 不可中断睡眠)</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%94%A4%E9%86%92%E5%85%B3%E7%B3%BB%E5%88%86%E6%9E%90"><span class="toc-number">6.2.</span> <span class="toc-text">唤醒关系分析</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#%E8%B0%83%E5%BA%A6%E5%94%A4%E9%86%92%E4%B8%8E%E5%BB%B6%E8%BF%9F%E5%88%86%E6%9E%90"><span class="toc-number">6.2.1.</span> <span class="toc-text">调度唤醒与延迟分析</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#sched-waking-%E4%B8%8E-sched-wakeup-%E7%9A%84%E5%B7%AE%E5%BC%82%E4%B8%8E%E9%9D%9E%E4%B8%A5%E6%A0%BC-work-conserving"><span class="toc-number">6.2.2.</span> <span class="toc-text">sched_waking 与 sched_wakeup 的差异与非严格 work-conserving</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%94%A8%E6%88%B7%E6%80%81%E4%B8%8E%E5%86%85%E6%A0%B8%E6%80%81%EF%BC%9Asys-%E5%88%87%E7%89%87%E5%AE%9A%E4%BD%8D%E7%A9%BA%E7%81%AB%E7%84%B0%E5%9B%BE"><span class="toc-number">6.3.</span> <span class="toc-text">用户态与内核态：sys_* 切片定位空火焰图</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#CPU-%E6%97%B6%E9%97%B4%E4%B8%8E%E5%A2%99%E4%B8%8A%E6%97%B6%E9%97%B4"><span class="toc-number">6.4.</span> <span class="toc-text">CPU 时间与墙上时间</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-Frequency-CPU-%E9%A2%91%E7%8E%87-%E6%B7%B1%E5%BA%A6%E8%A7%A3%E6%9E%90"><span class="toc-number">7.</span> <span class="toc-text">CPU Frequency (CPU 频率) 深度解析</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%BD%B1%E5%93%8D-CPU-%E9%A2%91%E7%8E%87%E7%9A%84%E6%A0%B8%E5%BF%83%E5%9B%A0%E7%B4%A0"><span class="toc-number">7.1.</span> <span class="toc-text">影响 CPU 频率的核心因素</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%A2%91%E7%8E%87%E6%95%B0%E6%8D%AE%E9%87%87%E9%9B%86%E4%B8%8E%E5%B9%B3%E5%8F%B0%E5%B7%AE%E5%BC%82"><span class="toc-number">7.2.</span> <span class="toc-text">频率数据采集与平台差异</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#big-LITTLE%EF%BC%9A%E7%9B%B8%E5%90%8C%E9%A2%91%E7%8E%87%E4%B8%8D%E7%AD%89%E4%BA%8E%E7%9B%B8%E5%90%8C%E6%80%A7%E8%83%BD%E6%88%96%E8%83%BD%E8%80%97"><span class="toc-number">7.3.</span> <span class="toc-text">big.LITTLE：相同频率不等于相同性能或能耗</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#P-States-%E4%B8%8E-governor"><span class="toc-number">7.3.1.</span> <span class="toc-text">P-States 与 governor</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#ADPF-x2F-Performance-Hint-%E5%BA%94%E8%AF%A5%E6%80%8E%E4%B9%88%E7%9C%8B"><span class="toc-number">7.4.</span> <span class="toc-text">ADPF &#x2F; Performance Hint 应该怎么看</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-Profiling%E3%80%81%E7%81%AB%E7%84%B0%E5%9B%BE%E4%B8%8E%E7%AC%A6%E5%8F%B7%E5%8C%96"><span class="toc-number">8.</span> <span class="toc-text">CPU Profiling、火焰图与符号化</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Linux-%E5%86%85%E6%A0%B8%E8%B0%83%E5%BA%A6%E7%AD%96%E7%95%A5%EF%BC%9A%E9%80%89%E6%A0%B8%E4%B8%8E%E8%BF%81%E7%A7%BB"><span class="toc-number">9.</span> <span class="toc-text">Linux 内核调度策略：选核与迁移</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%80%89%E6%A0%B8%E9%80%BB%E8%BE%91-Task-Placement"><span class="toc-number">9.1.</span> <span class="toc-text">选核逻辑 (Task Placement)</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%A0%B8%E5%BF%83%E8%BF%81%E7%A7%BB%E9%80%BB%E8%BE%91-Task-Migration"><span class="toc-number">9.2.</span> <span class="toc-text">核心迁移逻辑 (Task Migration)</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%AE%9E%E6%88%98%E4%B8%8E-SQL"><span class="toc-number">10.</span> <span class="toc-text">实战与 SQL</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%BD%BF%E7%94%A8-SQL-%E8%BF%9B%E8%A1%8C%E9%87%8F%E5%8C%96%E5%88%86%E6%9E%90"><span class="toc-number">10.1.</span> <span class="toc-text">使用 SQL 进行量化分析</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#1-%E8%AE%A1%E7%AE%97%E5%90%84%E8%BF%9B%E7%A8%8B%E7%9A%84-CPU-%E6%80%BB%E6%97%B6%E9%95%BF"><span class="toc-number">10.2.</span> <span class="toc-text">1. 计算各进程的 CPU 总时长</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-%E5%88%86%E6%9E%90%E5%8D%95%E4%B8%AA%E7%BA%BF%E7%A8%8B%E7%9A%84%E6%97%B6%E9%97%B4%E7%8A%B6%E6%80%81%E5%88%86%E5%B8%83"><span class="toc-number">10.3.</span> <span class="toc-text">2. 分析单个线程的时间状态分布</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-%E6%9F%A5%E6%89%BE%E7%89%B9%E5%AE%9A%E6%97%B6%E9%97%B4%E6%AE%B5%E5%86%85-CPU-%E6%B6%88%E8%80%97%E6%9C%80%E9%AB%98%E7%9A%84%E7%BA%BF%E7%A8%8B"><span class="toc-number">10.4.</span> <span class="toc-text">3. 查找特定时间段内 CPU 消耗最高的线程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#4-%E6%9F%A5%E7%9C%8B%E7%BA%BF%E7%A8%8B%E5%9C%A8%E5%90%84-CPU-%E6%A0%B8%E5%BF%83%E4%B8%8A%E7%9A%84%E8%BF%90%E8%A1%8C%E6%97%B6%E9%97%B4%E5%88%86%E5%B8%83"><span class="toc-number">10.5.</span> <span class="toc-text">4. 查看线程在各 CPU 核心上的运行时间分布</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#5-%E8%AE%A1%E7%AE%97%E5%90%84%E8%BF%9B%E7%A8%8B%E7%9A%84-CPU-%E5%88%A9%E7%94%A8%E7%8E%87"><span class="toc-number">10.6.</span> <span class="toc-text">5. 计算各进程的 CPU 利用率</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%80%BB%E7%BB%93"><span class="toc-number">11.</span> <span class="toc-text">总结</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number"></span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%9C%AC%E6%96%87%E7%9B%AE%E5%BD%95"><span class="toc-number">1.</span> <span class="toc-text">本文目录</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0"><span class="toc-number">2.</span> <span class="toc-text">Perfetto 系列文章</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-%E4%B8%AD%E7%9A%84-CPU-%E4%BF%A1%E6%81%AF%E6%A6%82%E8%A7%88"><span class="toc-number">3.</span> <span class="toc-text">Perfetto 中的 CPU 信息概览</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%8A%93%E5%8F%96-CPU-%E4%BF%A1%E6%81%AF%E6%89%80%E9%9C%80%E8%A6%81%E7%9A%84-Trace-Config"><span class="toc-number">4.</span> <span class="toc-text">抓取 CPU 信息所需要的 Trace Config</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-%E6%A0%B8%E5%BF%83%E6%9E%B6%E6%9E%84%EF%BC%9Abig-LITTLE"><span class="toc-number">5.</span> <span class="toc-text">CPU 核心架构：big.LITTLE</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-%E8%B0%83%E5%BA%A6"><span class="toc-number">6.</span> <span class="toc-text">CPU 调度</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%BA%BF%E7%A8%8B%E7%8A%B6%E6%80%81%E6%B7%B1%E5%BA%A6%E8%A7%A3%E6%9E%90"><span class="toc-number">6.1.</span> <span class="toc-text">线程状态深度解析</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#Running-%E7%BB%BF%E8%89%B2"><span class="toc-number">6.1.1.</span> <span class="toc-text">Running (绿色)</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#R-Runnable-x2F-%E5%8F%AF%E8%BF%90%E8%A1%8C"><span class="toc-number">6.1.2.</span> <span class="toc-text">R (Runnable &#x2F; 可运行)</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#S-Sleep-x2F-%E5%8F%AF%E4%B8%AD%E6%96%AD%E7%9D%A1%E7%9C%A0"><span class="toc-number">6.1.3.</span> <span class="toc-text">S (Sleep &#x2F; 可中断睡眠)</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#D-Uninterruptible-Sleep-x2F-%E4%B8%8D%E5%8F%AF%E4%B8%AD%E6%96%AD%E7%9D%A1%E7%9C%A0"><span class="toc-number">6.1.4.</span> <span class="toc-text">D (Uninterruptible Sleep &#x2F; 不可中断睡眠)</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%94%A4%E9%86%92%E5%85%B3%E7%B3%BB%E5%88%86%E6%9E%90"><span class="toc-number">6.2.</span> <span class="toc-text">唤醒关系分析</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#%E8%B0%83%E5%BA%A6%E5%94%A4%E9%86%92%E4%B8%8E%E5%BB%B6%E8%BF%9F%E5%88%86%E6%9E%90"><span class="toc-number">6.2.1.</span> <span class="toc-text">调度唤醒与延迟分析</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#sched-waking-%E4%B8%8E-sched-wakeup-%E7%9A%84%E5%B7%AE%E5%BC%82%E4%B8%8E%E9%9D%9E%E4%B8%A5%E6%A0%BC-work-conserving"><span class="toc-number">6.2.2.</span> <span class="toc-text">sched_waking 与 sched_wakeup 的差异与非严格 work-conserving</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%94%A8%E6%88%B7%E6%80%81%E4%B8%8E%E5%86%85%E6%A0%B8%E6%80%81%EF%BC%9Asys-%E5%88%87%E7%89%87%E5%AE%9A%E4%BD%8D%E7%A9%BA%E7%81%AB%E7%84%B0%E5%9B%BE"><span class="toc-number">6.3.</span> <span class="toc-text">用户态与内核态：sys_* 切片定位空火焰图</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#CPU-%E6%97%B6%E9%97%B4%E4%B8%8E%E5%A2%99%E4%B8%8A%E6%97%B6%E9%97%B4"><span class="toc-number">6.4.</span> <span class="toc-text">CPU 时间与墙上时间</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-Frequency-CPU-%E9%A2%91%E7%8E%87-%E6%B7%B1%E5%BA%A6%E8%A7%A3%E6%9E%90"><span class="toc-number">7.</span> <span class="toc-text">CPU Frequency (CPU 频率) 深度解析</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%BD%B1%E5%93%8D-CPU-%E9%A2%91%E7%8E%87%E7%9A%84%E6%A0%B8%E5%BF%83%E5%9B%A0%E7%B4%A0"><span class="toc-number">7.1.</span> <span class="toc-text">影响 CPU 频率的核心因素</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%A2%91%E7%8E%87%E6%95%B0%E6%8D%AE%E9%87%87%E9%9B%86%E4%B8%8E%E5%B9%B3%E5%8F%B0%E5%B7%AE%E5%BC%82"><span class="toc-number">7.2.</span> <span class="toc-text">频率数据采集与平台差异</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#big-LITTLE%EF%BC%9A%E7%9B%B8%E5%90%8C%E9%A2%91%E7%8E%87%E4%B8%8D%E7%AD%89%E4%BA%8E%E7%9B%B8%E5%90%8C%E6%80%A7%E8%83%BD%E6%88%96%E8%83%BD%E8%80%97"><span class="toc-number">7.3.</span> <span class="toc-text">big.LITTLE：相同频率不等于相同性能或能耗</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#P-States-%E4%B8%8E-governor"><span class="toc-number">7.3.1.</span> <span class="toc-text">P-States 与 governor</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#ADPF-x2F-Performance-Hint-%E5%BA%94%E8%AF%A5%E6%80%8E%E4%B9%88%E7%9C%8B"><span class="toc-number">7.4.</span> <span class="toc-text">ADPF &#x2F; Performance Hint 应该怎么看</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-Profiling%E3%80%81%E7%81%AB%E7%84%B0%E5%9B%BE%E4%B8%8E%E7%AC%A6%E5%8F%B7%E5%8C%96"><span class="toc-number">8.</span> <span class="toc-text">CPU Profiling、火焰图与符号化</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Linux-%E5%86%85%E6%A0%B8%E8%B0%83%E5%BA%A6%E7%AD%96%E7%95%A5%EF%BC%9A%E9%80%89%E6%A0%B8%E4%B8%8E%E8%BF%81%E7%A7%BB"><span class="toc-number">9.</span> <span class="toc-text">Linux 内核调度策略：选核与迁移</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%80%89%E6%A0%B8%E9%80%BB%E8%BE%91-Task-Placement"><span class="toc-number">9.1.</span> <span class="toc-text">选核逻辑 (Task Placement)</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%A0%B8%E5%BF%83%E8%BF%81%E7%A7%BB%E9%80%BB%E8%BE%91-Task-Migration"><span class="toc-number">9.2.</span> <span class="toc-text">核心迁移逻辑 (Task Migration)</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%AE%9E%E6%88%98%E4%B8%8E-SQL"><span class="toc-number">10.</span> <span class="toc-text">实战与 SQL</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%BD%BF%E7%94%A8-SQL-%E8%BF%9B%E8%A1%8C%E9%87%8F%E5%8C%96%E5%88%86%E6%9E%90"><span class="toc-number">10.1.</span> <span class="toc-text">使用 SQL 进行量化分析</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#1-%E8%AE%A1%E7%AE%97%E5%90%84%E8%BF%9B%E7%A8%8B%E7%9A%84-CPU-%E6%80%BB%E6%97%B6%E9%95%BF"><span class="toc-number">10.2.</span> <span class="toc-text">1. 计算各进程的 CPU 总时长</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-%E5%88%86%E6%9E%90%E5%8D%95%E4%B8%AA%E7%BA%BF%E7%A8%8B%E7%9A%84%E6%97%B6%E9%97%B4%E7%8A%B6%E6%80%81%E5%88%86%E5%B8%83"><span class="toc-number">10.3.</span> <span class="toc-text">2. 分析单个线程的时间状态分布</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-%E6%9F%A5%E6%89%BE%E6%95%B4%E4%BB%BD-Trace-%E4%B8%AD-CPU-%E6%B6%88%E8%80%97%E6%9C%80%E9%AB%98%E7%9A%84%E7%BA%BF%E7%A8%8B"><span class="toc-number">10.4.</span> <span class="toc-text">3. 查找整份 Trace 中 CPU 消耗最高的线程</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#4-%E6%9F%A5%E7%9C%8B%E7%BA%BF%E7%A8%8B%E5%9C%A8%E5%90%84-CPU-%E6%A0%B8%E5%BF%83%E4%B8%8A%E7%9A%84%E8%BF%90%E8%A1%8C%E6%97%B6%E9%97%B4%E5%88%86%E5%B8%83"><span class="toc-number">10.5.</span> <span class="toc-text">4. 查看线程在各 CPU 核心上的运行时间分布</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#5-%E8%AE%A1%E7%AE%97%E5%90%84%E8%BF%9B%E7%A8%8B%E7%9A%84-CPU-%E5%88%A9%E7%94%A8%E7%8E%87"><span class="toc-number">10.6.</span> <span class="toc-text">5. 计算各进程的 CPU 利用率</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%80%BB%E7%BB%93"><span class="toc-number">11.</span> <span class="toc-text">总结</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number"></span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a>
             </div>
         <!-- sidebar -->
         <div class="sidebar sidebar-hide">
@@ -1576,22 +1576,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 随笔
             </span>
-            <span class="sidebar-tag-name" data-tags="ANR">
-                <span class="iconfont-archer">&#xe606;</span>
-                ANR
-            </span>
-            <span class="sidebar-tag-name" data-tags="Tools">
-                <span class="iconfont-archer">&#xe606;</span>
-                Tools
-            </span>
-            <span class="sidebar-tag-name" data-tags="Java">
-                <span class="iconfont-archer">&#xe606;</span>
-                Java
-            </span>
-            <span class="sidebar-tag-name" data-tags="RenderThread">
-                <span class="iconfont-archer">&#xe606;</span>
-                RenderThread
-            </span>
             <span class="sidebar-tag-name" data-tags="Agent OS">
                 <span class="iconfont-archer">&#xe606;</span>
                 Agent OS
@@ -1608,9 +1592,25 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Mobile OS
             </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
             <span class="sidebar-tag-name" data-tags="Linux">
                 <span class="iconfont-archer">&#xe606;</span>
                 Linux
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
             </span>
             <span class="sidebar-tag-name" data-tags="BlastBufferQueue">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1652,14 +1652,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 TraceProcessor
             </span>
-            <span class="sidebar-tag-name" data-tags="Trace">
-                <span class="iconfont-archer">&#xe606;</span>
-                Trace
-            </span>
-            <span class="sidebar-tag-name" data-tags="DataFlow">
-                <span class="iconfont-archer">&#xe606;</span>
-                DataFlow
-            </span>
             <span class="sidebar-tag-name" data-tags="SDK">
                 <span class="iconfont-archer">&#xe606;</span>
                 SDK
@@ -1668,21 +1660,17 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 TraceEvent
             </span>
-            <span class="sidebar-tag-name" data-tags="Field">
+            <span class="sidebar-tag-name" data-tags="Trace">
                 <span class="iconfont-archer">&#xe606;</span>
-                Field
+                Trace
+            </span>
+            <span class="sidebar-tag-name" data-tags="DataFlow">
+                <span class="iconfont-archer">&#xe606;</span>
+                DataFlow
             </span>
             <span class="sidebar-tag-name" data-tags="heapprofd">
                 <span class="iconfont-archer">&#xe606;</span>
                 heapprofd
-            </span>
-            <span class="sidebar-tag-name" data-tags="Input">
-                <span class="iconfont-archer">&#xe606;</span>
-                Input
-            </span>
-            <span class="sidebar-tag-name" data-tags="Latency">
-                <span class="iconfont-archer">&#xe606;</span>
-                Latency
             </span>
             <span class="sidebar-tag-name" data-tags="GPU">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1700,6 +1688,18 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Audio
             </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
+            <span class="sidebar-tag-name" data-tags="Input">
+                <span class="iconfont-archer">&#xe606;</span>
+                Input
+            </span>
+            <span class="sidebar-tag-name" data-tags="Latency">
+                <span class="iconfont-archer">&#xe606;</span>
+                Latency
+            </span>
             <span class="sidebar-tag-name" data-tags="MAT">
                 <span class="iconfont-archer">&#xe606;</span>
                 MAT
@@ -1708,33 +1708,25 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 DelayLoad
             </span>
-            <span class="sidebar-tag-name" data-tags="HashMap">
-                <span class="iconfont-archer">&#xe606;</span>
-                HashMap
-            </span>
             <span class="sidebar-tag-name" data-tags="程序员">
                 <span class="iconfont-archer">&#xe606;</span>
                 程序员
+            </span>
+            <span class="sidebar-tag-name" data-tags="HashMap">
+                <span class="iconfont-archer">&#xe606;</span>
+                HashMap
             </span>
             <span class="sidebar-tag-name" data-tags="Singleton">
                 <span class="iconfont-archer">&#xe606;</span>
                 Singleton
             </span>
-            <span class="sidebar-tag-name" data-tags="OpenClaw">
-                <span class="iconfont-archer">&#xe606;</span>
-                OpenClaw
-            </span>
-            <span class="sidebar-tag-name" data-tags="效率工具">
-                <span class="iconfont-archer">&#xe606;</span>
-                效率工具
-            </span>
-            <span class="sidebar-tag-name" data-tags="本地模型">
-                <span class="iconfont-archer">&#xe606;</span>
-                本地模型
-            </span>
             <span class="sidebar-tag-name" data-tags="Nexus">
                 <span class="iconfont-archer">&#xe606;</span>
                 Nexus
+            </span>
+            <span class="sidebar-tag-name" data-tags="OpenClaw">
+                <span class="iconfont-archer">&#xe606;</span>
+                OpenClaw
             </span>
             <span class="sidebar-tag-name" data-tags="AI Agent">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1751,6 +1743,14 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Android Performance">
                 <span class="iconfont-archer">&#xe606;</span>
                 Android Performance
+            </span>
+            <span class="sidebar-tag-name" data-tags="效率工具">
+                <span class="iconfont-archer">&#xe606;</span>
+                效率工具
+            </span>
+            <span class="sidebar-tag-name" data-tags="本地模型">
+                <span class="iconfont-archer">&#xe606;</span>
+                本地模型
             </span>
             <span class="sidebar-tag-name" data-tags="Gracker">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1784,13 +1784,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 程序员的修炼
             </span>
-            <span class="sidebar-tag-name" data-tags="设计原则">
-                <span class="iconfont-archer">&#xe606;</span>
-                设计原则
-            </span>
             <span class="sidebar-tag-name" data-tags="测试">
                 <span class="iconfont-archer">&#xe606;</span>
                 测试
+            </span>
+            <span class="sidebar-tag-name" data-tags="设计原则">
+                <span class="iconfont-archer">&#xe606;</span>
+                设计原则
             </span>
             <span class="sidebar-tag-name" data-tags="了解你的用户">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1854,13 +1854,13 @@ loading="lazy"             decoding="async"
             <span class="iconfont-archer">&#xe60a;</span>
             Android
         </span>
-        <span class="sidebar-category-name" data-categories="Java">
-            <span class="iconfont-archer">&#xe60a;</span>
-            Java
-        </span>
         <span class="sidebar-category-name" data-categories="AI">
             <span class="iconfont-archer">&#xe60a;</span>
             AI
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
         </span>
         <span class="sidebar-category-name" data-categories="Android性能优化">
             <span class="iconfont-archer">&#xe60a;</span>

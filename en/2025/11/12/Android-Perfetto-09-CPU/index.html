@@ -36,7 +36,7 @@
 <meta property="og:image" content="https://androidperformance.com/en/images/Android-Perfetto-09-CPU/image-20251112223237018.webp">
 <meta property="og:image" content="https://androidperformance.com/en/images/WechatIMG581.webp">
 <meta property="article:published_time" content="2025-11-12T02:00:00.000Z">
-<meta property="article:modified_time" content="2026-09-19T16:41:56.930Z">
+<meta property="article:modified_time" content="2026-09-27T05:34:34.717Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Android">
 <meta property="article:tag" content="Perfetto">
@@ -287,7 +287,7 @@ loading="lazy"             decoding="async"
 
                 <!-- 文章字数统计 -->
                     <div class="post-intro-read">
-                        <span>Word count: <span class="post-count word-count">4.9k</span>Reading time: <span class="post-count reading-time">30 min</span></span>
+                        <span>Word count: <span class="post-count word-count">4.7k</span>Reading time: <span class="post-count reading-time">29 min</span></span>
                     </div>
                 <div class="post-intro-meta">
                     <!-- 撰写日期 -->
@@ -439,7 +439,7 @@ loading="lazy"             decoding="async"
 <p><img src="/en/images/Android-Perfetto-09-CPU/image-20251112215705017.webp" alt="image-20251112215705017"></p>
 <p><strong>Analysis Points</strong>:</p>
 <ul>
-<li><strong>Execution Duration</strong>: Excessively long <code>Running</code> states, especially on critical threads, usually mean intensive computational tasks, such as complex algorithms or loops. This increases task duration and may block other threads’ execution.</li>
+<li><strong>Execution Duration</strong>: A long <code>Running</code> interval shows CPU occupancy, which may come from computation, a system call, or busy waiting. Use profiling or trace markers to identify the actual work.</li>
 <li><strong>Running Core</strong>: Analyze in combination with the CPU’s core architecture (e.g., big.LITTLE). Whether a compute-intensive task is scheduled to the expected performance core (big core) is an important basis for evaluating whether the scheduling strategy is reasonable.</li>
 <li><strong>Running Frequency</strong>: The thread’s actual execution speed is also affected by CPU frequency. Even if the thread runs on a big core, if frequency is reduced due to thermal throttling or other reasons, its performance will decline. Therefore, comprehensive analysis is needed in combination with the <code>CPU Frequency</code> track.</li>
 </ul>
@@ -447,18 +447,18 @@ loading="lazy"             decoding="async"
 <p><img src="/en/images/Android-Perfetto-09-CPU/image-20251112220248837.webp" alt="image-20251112220248837"></p>
 <p><strong>Analysis Points</strong>:</p>
 <ul>
-<li><strong><code>Runnable</code> and Jank</strong>: For threads sensitive to response time like UI threads, long periods in <code>Runnable</code> state are a direct cause of jank. It means the thread cannot get CPU time in time to handle tasks (such as UI drawing), leading to frame drops.</li>
+<li><strong><code>Runnable</code> and Jank</strong>: A long <code>Runnable</code> interval means the thread was eligible to run but had not received CPU time. Compare it with the target frame deadline before attributing visible jank to this delay.</li>
 </ul>
 <p><strong>Three Types of <code>Runnable</code></strong>:<br>Careful observation reveals that the “predecessor” of threads entering <code>Runnable</code> state varies. Based on the kernel’s scheduling timing, we can divide it into three situations:</p>
 <ol>
 <li><p><strong>Wake-up from Sleep</strong>: This is the most common type. The thread is awakened from <code>S</code> or <code>D</code> state because the resource it was waiting for (such as lock, I&#x2F;O, Binder reply) is ready, enters <code>Runnable</code> state, waiting to be selected by the scheduler for execution.</p>
 </li>
-<li><p><strong>User Preemption</strong>: Refers to the thread’s running time slice expiring, or a higher priority task appearing, causing the scheduler to decide to swap out the current thread <strong>when returning from kernel mode to user mode</strong> (such as after system call, interrupt return). At this time, the swapped-out thread changes from <code>Running</code> to <code>Runnable</code>. In the underlying <code>sched_switch</code> trace, its <code>prev_state</code> is marked as <code>R</code>.</p>
+<li><p><strong>Still Runnable After Descheduling</strong>: A running thread can be switched out while remaining runnable. <code>sched_switch</code> may record <code>prev_state=R</code>; that field alone does not establish the precise scheduling cause or whether the thread was in user mode.</p>
 </li>
-<li><p><strong>Kernel Preemption</strong>: Refers to a higher priority task or interrupt “forcibly” interrupting the current thread <strong>while it’s executing kernel mode code</strong>, making it yield the CPU. This situation usually means a more urgent scheduling. At this time, the swapped-out thread changes from <code>Running</code> to <code>Runnable (Preempted)</code>. In the underlying trace, its <code>prev_state</code> is marked as <code>R+</code>, which Perfetto parses and displays accordingly.</p>
+<li><p><strong>Preempted While Runnable</strong>: <code>prev_state=R+</code> is shown as <code>Runnable (Preempted)</code>. It does not prove the thread was executing kernel-mode code or identify the thread that preempted it.</p>
 </li>
 </ol>
-<p>Understanding the differences between these three types helps more precisely judge the causes of scheduling delays. For example, a large number of <code>Runnable (Preempted)</code> may suggest the system has frequent, high-priority wakeup sources, causing critical threads to be frequently interrupted in kernel mode, or the CPU is already fully loaded (a more common situation). At this time, lower priority Tasks are easily preempted by higher priority Tasks and forced to yield the CPU. If your critical Task is always being preempted, you need to adjust priorities.</p>
+<p>To investigate repeated <code>Runnable (Preempted)</code> periods, compare the next thread on the same CPU, priorities, and system load. Do not infer kernel-mode preemption or change thread priorities from <code>R+</code> alone.</p>
 <p><img src="/en/images/Android-Perfetto-09-CPU/image-20251112220534899.webp" alt="image-20251112220534899"></p>
 <h4 id="S-Sleep-x2F-Interruptible-Sleep"><a href="#S-Sleep-x2F-Interruptible-Sleep" class="headerlink" title="S (Sleep &#x2F; Interruptible Sleep)"></a>S (Sleep &#x2F; Interruptible Sleep)</h4><p><strong>State Definition</strong>: The thread enters sleep while waiting for an event and can be interrupted by signals. This is the most common sleep state and is usually benign because it doesn’t consume CPU resources while waiting.</p>
 <p><img src="/en/images/Android-Perfetto-09-CPU/image-20251112221122170.webp" alt="image-20251112221122170"></p>
@@ -473,25 +473,25 @@ loading="lazy"             decoding="async"
 </li>
 <li><strong>Dependency Analysis</strong>: In Perfetto, selecting a Task that is Running in the CPU area will show UI indicating which Task on which CPU woke it up. This helps quickly locate inter-thread dependencies. Combined with function call stacks, you can further locate the specific code causing sleep.<br><img src="/en/images/Android-Perfetto-09-CPU/image-20251112221703122.webp" alt="image-20251112221703122"></li>
 </ul>
-<h4 id="D-Uninterruptible-Sleep"><a href="#D-Uninterruptible-Sleep" class="headerlink" title="D (Uninterruptible Sleep)"></a>D (Uninterruptible Sleep)</h4><p><strong>State Definition</strong>: The thread is waiting for hardware I&#x2F;O operations to complete and cannot be interrupted by any signal during this period. This state is designed to protect data consistency during process-device interactions. In Perfetto, this state is usually displayed as orange or red and is a signal requiring key attention.</p>
+<h4 id="D-Uninterruptible-Sleep"><a href="#D-Uninterruptible-Sleep" class="headerlink" title="D (Uninterruptible Sleep)"></a>D (Uninterruptible Sleep)</h4><p><strong>State Definition</strong>: <code>D</code> means uninterruptible sleep in a kernel wait path. It can involve I&#x2F;O, but is not limited to hardware I&#x2F;O; use the state field and blocked-function evidence rather than track color alone.</p>
 <p><img src="/en/images/Android-Perfetto-09-CPU/image-20251112220738143.webp" alt="image-20251112220738143"></p>
 <p><strong>Analysis Points</strong>:</p>
 <ul>
 <li><strong>Serious Performance Bottleneck</strong>: Long periods in <code>D</code> state mean the thread is completely blocked and cannot respond to any events. If it occurs on the UI thread, it easily leads to ANR.</li>
 <li><strong>Common Causes</strong>:<ol>
 <li><strong>Disk I&#x2F;O</strong>: Frequent or single large file read&#x2F;write operations.</li>
-<li><strong>Memory Pressure</strong>: Insufficient system physical memory, leading to frequent page swap in&#x2F;out, which is essentially high-frequency disk I&#x2F;O.</li>
+<li><strong>Memory Pressure</strong>: Reclaim or paging may extend a kernel wait; check the events before attributing it to storage I&#x2F;O.</li>
 <li><strong>Kernel Driver Issues</strong>: Implementation defects in some kernel drivers may also cause threads to fall into <code>D</code> state.</li>
 </ol>
 </li>
-<li><strong>Investigation Direction</strong>: In the <code>Current State</code> panel, if <code>D</code> state is accompanied by <code>(iowait)</code> marking, it clearly indicates waiting for I&#x2F;O. You need to check the application’s I&#x2F;O patterns, evaluate their reasonableness, such as whether time-consuming I&#x2F;O operations are placed on the main thread, or whether there’s room for optimization (such as reducing I&#x2F;O frequency and data volume).</li>
+<li><strong>Investigation Direction</strong>: An <code>io_wait</code> flag is a useful clue, not proof of a particular file or device. Check <code>blocked_function</code>, I&#x2F;O events, and the target thread’s call stack.</li>
 </ul>
 <h3 id="Wakeup-Relationship-Analysis"><a href="#Wakeup-Relationship-Analysis" class="headerlink" title="Wakeup Relationship Analysis"></a>Wakeup Relationship Analysis</h3><p>Inter-thread dependencies are a difficult point in performance analysis. For a thread sleeping for a long time, the key is finding out “who it’s waiting for”. Perfetto provides powerful wakeup relationship visualization functionality.</p>
 <ul>
 <li><strong>UI Operation</strong>: In Perfetto’s CPU area, left-click to select a thread Task in <code>Running</code> state. Perfetto will automatically draw a dependency arrow from “waker” to “wakee” and highlight the thread slice where the wakeup source is located.<br><img src="/en/images/Android-Perfetto-09-CPU/image-20251112221703122.webp" alt="image-20251112221703122"></li>
 <li><strong>Underlying Principle</strong>: This functionality depends on the kernel’s <code>sched_wakeup</code> ftrace event. When thread T1 releases a resource (such as unlocking, completing Binder call), and thread T2 is waiting for that resource, the kernel marks T2 as <code>Runnable</code> state and records this T1 -&gt; T2 wakeup event. Perfetto parses these events to build the dependency chain between threads.</li>
 </ul>
-<p>Through wakeup analysis, you can clearly track complex call chains, for example: UI thread waits for a Binder call -&gt; Binder thread executes task -&gt; Binder thread waits for another lock -&gt; Lock-holding thread releases lock and wakes Binder thread -&gt; Binder thread completes task and wakes UI thread. Bottleneck points in the entire process will be clear at a glance.</p>
+<p>A wakeup arrow shows when one thread made another runnable. A Binder transaction or lock-owner chain requires the corresponding Binder, contention, or call-stack evidence; one wakeup arrow cannot reconstruct the full dependency chain.</p>
 <h4 id="Scheduling-Wakeup-and-Latency-Analysis"><a href="#Scheduling-Wakeup-and-Latency-Analysis" class="headerlink" title="Scheduling Wakeup and Latency Analysis"></a>Scheduling Wakeup and Latency Analysis</h4><p>When thread A suspends on <code>wait()</code>, it enters <code>S</code> (Sleeping) and is removed from the CPU run queue. After thread B calls <code>notify()</code>, the kernel converts thread A to <code>R</code> (Runnable). At this time thread A is “eligible” to be put back into some CPU’s run queue, but this doesn’t mean “immediate” running.</p>
 <p><img src="/en/images/Android-Perfetto-09-CPU/image-20251112222240991.webp" alt="image-20251112222240991"></p>
 <p>Common waiting reasons include:</p>
@@ -503,14 +503,14 @@ loading="lazy"             decoding="async"
 <ul>
 <li>In the target thread’s <code>thread_state</code> track, filter <code>state=R</code> slices as direct evidence of “scheduling delay”.</li>
 <li>Synchronously compare other heavy-load threads and IRQ&#x2F;SoftIRQ traces on the same CPU to verify whether there’s time overlap of preemption or high-priority suppression.</li>
-<li>If frequently queuing in <code>R</code> state and ending with <code>end_state=R+</code>, view as serious involuntary preemption, need to evaluate priority, placement, and load balancing strategies.</li>
+<li>If <code>R+</code> appears frequently, inspect the next running thread, priority, placement, and load before deciding whether scheduling policy needs adjustment.</li>
 </ul>
 <h4 id="Differences-Between-sched-waking-and-sched-wakeup-and-Non-strict-Work-conserving"><a href="#Differences-Between-sched-waking-and-sched-wakeup-and-Non-strict-Work-conserving" class="headerlink" title="Differences Between sched_waking and sched_wakeup and Non-strict Work-conserving"></a>Differences Between sched_waking and sched_wakeup and Non-strict Work-conserving</h4><ul>
 <li><code>sched_waking</code> is issued when a thread is marked as runnable (R), <code>sched_wakeup</code> is related to cross-CPU wakeup and may be recorded on source or destination CPU; for most latency analysis, only <code>sched_waking</code> is sufficient (see official explanation).</li>
 <li>Most Linux scheduling configurations under general priority are not strictly “work-conserving”. The scheduler sometimes “waits for current CPU to idle” to avoid extra overhead and power consumption from cross-core migration. This causes waiting time in R state (queuing delay) which is not abnormal but a result of trade-offs (see <a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/cpu-scheduling">Perfetto CPU Scheduling</a>).</li>
 </ul>
 <h3 id="User-Mode-and-Kernel-Mode-sys-Slices-Locate-Empty-Flame-Graphs"><a href="#User-Mode-and-Kernel-Mode-sys-Slices-Locate-Empty-Flame-Graphs" class="headerlink" title="User Mode and Kernel Mode: sys_* Slices Locate Empty Flame Graphs"></a>User Mode and Kernel Mode: sys_* Slices Locate Empty Flame Graphs</h3><ul>
-<li>Not all green <code>Running</code> slices are application code busy. If a thread falls into a single long system call like <code>sys_read</code>, <code>sys_futex</code>, user mode sampling flame graphs may be almost empty.</li>
+<li><code>sys_*</code> slices require syscall tracing, usually <code>raw_syscalls/sys_enter</code> and <code>raw_syscalls/sys_exit</code> on a supported build; this article’s base config does not enable them. A <code>Running</code> slice may include kernel work, so a user-space flame graph can be sparse.</li>
 <li>If a UI thread’s某段 <code>sched_slice</code> is very long, but CPU flame graph hotspots are few or almost none:<ol>
 <li>Open that thread’s <code>slice</code> view, check if there are long <code>sys_*</code> slices;</li>
 <li>If exists: Bottleneck is mostly in I&#x2F;O or synchronization primitives, prioritize checking I&#x2F;O paths, lock granularity, and access patterns;</li>
@@ -522,7 +522,7 @@ loading="lazy"             decoding="async"
 <h3 id="CPU-Time-and-Wall-Time"><a href="#CPU-Time-and-Wall-Time" class="headerlink" title="CPU Time and Wall Time"></a>CPU Time and Wall Time</h3><p><img src="/en/images/Android-Perfetto-09-CPU/image-20251112223105996.webp" alt="image-20251112223105996"></p>
 <ul>
 <li><code>Wall</code> is the real-world time from slice start to end, <code>CPU</code> is the time actually running on CPU.</li>
-<li>Relationship: <code>Wall = CPU + Runnable + Sleep</code>.<ol>
+<li>With complete, non-overlapping thread-state coverage, wall time is approximately the sum of Running, Runnable, and all sleeping&#x2F;blocked states; missing trace data breaks that accounting.<ol>
 <li>Select target slice (e.g., <code>Choreographer#doFrame</code>), compare <code>Wall</code> with <code>CPU</code>;</li>
 <li>If <code>Wall ≈ CPU</code>, it’s computation-heavy, use flame graph to locate hotspots;</li>
 <li>If <code>Wall &gt;&gt; CPU</code>, it’s scheduling or dependency waiting, check <code>thread_state</code>‘s <code>R/S/D</code> distribution and wakeup chain.</li>
@@ -541,13 +541,13 @@ loading="lazy"             decoding="async"
 <li><p><strong>Power Limitation and Power Saving Mode</strong>: In low battery or power saving mode enabled, the system similarly limits maximum performance output by lowering ceiling frequency to extend battery life.</p>
 </li>
 </ol>
-<p>Therefore, when finding a heavy task running with CPU frequency not increasing, you should not only look at current frequency but also pay attention to whether <code>scaling_max_freq</code> is limited. This usually means the root cause of the performance bottleneck is not in the application code itself but in the system’s thermal or power consumption policy.</p>
+<p>If a heavy task runs while frequency remains low, check current frequency, cluster placement, and <code>scaling_max_freq</code>. A frequency limit may be one contributor; it does not exclude an app-side bottleneck.</p>
 <p><img src="/en/images/Android-Perfetto-09-CPU/image-20251112223237018.webp" alt="image-20251112223237018"></p>
 <p>The above image is a marker diagram of the CPU frequency area. Hovering the mouse over it shows the current frequency. CPU frequency changes very quickly. In the image, CPU has colored and non-colored parts. Colored parts indicate the current CPU has Tasks running, non-colored parts indicate the current CPU is empty with no Tasks.</p>
 <h3 id="Frequency-Data-Collection-and-Platform-Differences"><a href="#Frequency-Data-Collection-and-Platform-Differences" class="headerlink" title="Frequency Data Collection and Platform Differences"></a>Frequency Data Collection and Platform Differences</h3><ul>
 <li>Two acquisition methods:<ul>
 <li>Event-driven: Enable <code>power/cpu_frequency</code>, record events when kernel cpufreq driver changes frequency. Not all platforms support it, reliable on most ARM SoCs, often no data on many modern Intel platforms.</li>
-<li>Polling sampling: Enable <code>linux.sys_stats</code> and set <code>cpufreq_period_ms &gt; 0</code>, periodically read <code>/sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_cur_freq</code>, works on both ARM&#x2F;Intel. Recommended to combine with event-driven to fill “initial frequency snapshot”.</li>
+<li>Polling sampling: Enable <code>linux.sys_stats</code> and set <code>cpufreq_period_ms &gt; 0</code> to sample <code>/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq</code>. Combine it with event-driven tracing for an initial frequency snapshot where supported.</li>
 </ul>
 </li>
 <li>Android devices often scale frequency by “cluster”, common phenomenon is multiple CPUs within the same cluster synchronously changing frequency.</li>
@@ -560,7 +560,7 @@ loading="lazy"             decoding="async"
 </ul>
 <h3 id="big-LITTLE-Same-Frequency-Doesn’t-Equal-Same-Performance-or-Power-Consumption"><a href="#big-LITTLE-Same-Frequency-Doesn’t-Equal-Same-Performance-or-Power-Consumption" class="headerlink" title="big.LITTLE: Same Frequency Doesn’t Equal Same Performance or Power Consumption"></a>big.LITTLE: Same Frequency Doesn’t Equal Same Performance or Power Consumption</h3><ul>
 <li>On heterogeneous CPUs, both at 2.0GHz, LITTLE cores and big cores’ actual computing power and energy consumption are not equivalent. Frequency must be understood in combination with core type.</li>
-<li>Core capacity and IPC: Big cores usually have wider out-of-order execution, more execution ports, larger cache, and more aggressive prefetch&#x2F;branch prediction, higher instructions per cycle (IPC); at the same frequency, big cores need less time and energy to complete the same work.</li>
+<li>Core capacity and IPC: Big cores often complete the same work faster at the same frequency, but their total energy use is not guaranteed to be lower; voltage, duration, and idle behavior also matter.</li>
 <li>Cluster-level DVFS: Mobile SoCs mostly scale frequency by “cluster”. LITTLE core cluster’s high frequency doesn’t equal big core cluster’s medium frequency performance output; different clusters have different voltage-frequency-energy curves, same frequency point cannot be horizontally compared for “performance per watt”.</li>
 <li>Memory&#x2F;cache&#x2F;interconnect bottleneck: If hotspot is constrained by memory bandwidth, LLC hit rate, or system interconnect (NoC), simply raising LITTLE core frequency has limited benefit; big cores’ larger cache&#x2F;stronger prefetch can significantly reduce same task’s memory access waiting, reflecting “same frequency different effect”.</li>
 <li>Energy efficiency curve is non-linear: LITTLE cores approaching maximum frequency often enter energy efficiency steep decline zone (voltage elevation causes marginal energy consumption surge), while big cores at medium frequency points may achieve “higher unit energy efficiency”. Same frequency comparison ignores “voltage-frequency-energy” three-dimensional trade-off.</li>
@@ -602,14 +602,14 @@ loading="lazy"             decoding="async"
 <h3 id="2-Analyze-Single-Thread’s-Time-State-Distribution"><a href="#2-Analyze-Single-Thread’s-Time-State-Distribution" class="headerlink" title="2. Analyze Single Thread’s Time State Distribution"></a>2. Analyze Single Thread’s Time State Distribution</h3><p>This query based on the <code>thread_state</code> table can be used to analyze a specific thread’s (example <code>surfaceflinger</code>) time distribution in various states, thus judging its main bottleneck.</p>
 <figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  <span class="keyword">CASE</span> state</span><br><span class="line">    <span class="keyword">WHEN</span> <span class="string">&#x27;Running&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;Running&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> <span class="string">&#x27;R&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;Runnable&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> <span class="string">&#x27;S&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;Interruptible Sleep&#x27;</span></span><br><span class="line">    <span class="keyword">WHEN</span> <span class="string">&#x27;D&#x27;</span> <span class="keyword">THEN</span> <span class="string">&#x27;Uninterruptible Sleep&#x27;</span></span><br><span class="line">    <span class="keyword">ELSE</span> state</span><br><span class="line">  <span class="keyword">END</span> <span class="keyword">AS</span> human_state,</span><br><span class="line">  <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> total_time_ms</span><br><span class="line"><span class="keyword">FROM</span> thread_state</span><br><span class="line"><span class="keyword">WHERE</span> utid <span class="operator">=</span> (<span class="keyword">SELECT</span> utid <span class="keyword">FROM</span> thread <span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;surfaceflinger&#x27;</span> LIMIT <span class="number">1</span>)</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> human_state</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> total_time_ms <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure>
 
-<h3 id="3-Find-Threads-with-Highest-CPU-Consumption-in-Specific-Time-Period"><a href="#3-Find-Threads-with-Highest-CPU-Consumption-in-Specific-Time-Period" class="headerlink" title="3. Find Threads with Highest CPU Consumption in Specific Time Period"></a>3. Find Threads with Highest CPU Consumption in Specific Time Period</h3><p>This query is used to analyze threads consuming the longest CPU time in specific scenarios (such as 2-5s time period during app launch).</p>
-<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  thread.name,</span><br><span class="line">  <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> cpu_time_s</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">JOIN</span> thread <span class="keyword">ON</span> sched.utid <span class="operator">=</span> thread.utid</span><br><span class="line"><span class="comment">-- Timestamp unit is nanoseconds, you can add WHERE ts &gt; 2e9 AND ts &lt; 5e9 to get a certain time period</span></span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> thread.name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cpu_time_s <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">20</span>;</span><br></pre></td></tr></table></figure>
+<h3 id="3-Find-Threads-with-Highest-CPU-Consumption-Across-the-Trace"><a href="#3-Find-Threads-with-Highest-CPU-Consumption-Across-the-Trace" class="headerlink" title="3. Find Threads with Highest CPU Consumption Across the Trace"></a>3. Find Threads with Highest CPU Consumption Across the Trace</h3><p>This query covers the entire trace. For a specific window, clip any <code>sched</code> slices that cross its boundaries; filtering only the slice start timestamp is not an exact windowed CPU-time calculation.</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  thread.tid,</span><br><span class="line">  thread.name,</span><br><span class="line">  <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="number">1e9</span> <span class="keyword">AS</span> cpu_time_s</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">JOIN</span> thread <span class="keyword">ON</span> sched.utid <span class="operator">=</span> thread.utid</span><br><span class="line"><span class="keyword">WHERE</span> sched.utid <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> thread.utid, thread.tid, thread.name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cpu_time_s <span class="keyword">DESC</span></span><br><span class="line">LIMIT <span class="number">20</span>;</span><br></pre></td></tr></table></figure>
 
 <h3 id="4-View-Thread’s-Running-Time-Distribution-on-Each-CPU-Core"><a href="#4-View-Thread’s-Running-Time-Distribution-on-Each-CPU-Core" class="headerlink" title="4. View Thread’s Running Time Distribution on Each CPU Core"></a>4. View Thread’s Running Time Distribution on Each CPU Core</h3><p>This query helps understand a thread’s CPU affinity and whether it runs on expected big&#x2F;LITTLE cores.</p>
 <figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  cpu,</span><br><span class="line">  <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="number">1e6</span> <span class="keyword">AS</span> time_on_cpu_ms</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">WHERE</span> utid <span class="operator">=</span> (<span class="keyword">SELECT</span> utid <span class="keyword">FROM</span> thread <span class="keyword">WHERE</span> name <span class="operator">=</span> <span class="string">&#x27;system_server&#x27;</span> LIMIT <span class="number">1</span>)</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> cpu</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cpu;</span><br></pre></td></tr></table></figure>
 
-<h3 id="5-Calculate-CPU-Utilization-for-Each-Process"><a href="#5-Calculate-CPU-Utilization-for-Each-Process" class="headerlink" title="5. Calculate CPU Utilization for Each Process"></a>5. Calculate CPU Utilization for Each Process</h3><p>This query calculates each process’s CPU utilization within the entire Trace time range.</p>
-<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  process.name <span class="keyword">AS</span> process_name,</span><br><span class="line">  <span class="number">100</span> <span class="operator">*</span> <span class="built_in">sum</span>(dur) <span class="operator">/</span> <span class="built_in">CAST</span>(TRACE_END() <span class="operator">-</span> TRACE_START() <span class="keyword">AS</span> <span class="type">REAL</span>) <span class="keyword">AS</span> cpu_utilization_percent</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">JOIN</span> thread <span class="keyword">ON</span> thread.utid <span class="operator">=</span> sched.utid</span><br><span class="line"><span class="keyword">JOIN</span> process <span class="keyword">ON</span> process.upid <span class="operator">=</span> thread.upid</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> process.name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cpu_utilization_percent <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure>
+<h3 id="5-Calculate-CPU-Utilization-for-Each-Process"><a href="#5-Calculate-CPU-Utilization-for-Each-Process" class="headerlink" title="5. Calculate CPU Utilization for Each Process"></a>5. Calculate CPU Utilization for Each Process</h3><p>This query divides observed CPU time by trace duration and the number of observed CPU tracks, so all observed CPUs fully busy would be 100%. Without that core-count normalization, a multicore process can exceed 100%.</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">  process.name <span class="keyword">AS</span> process_name,</span><br><span class="line">  <span class="number">100</span> <span class="operator">*</span> <span class="built_in">sum</span>(dur) <span class="operator">/</span> (<span class="built_in">CAST</span>(TRACE_END() <span class="operator">-</span> TRACE_START() <span class="keyword">AS</span> <span class="type">REAL</span>)</span><br><span class="line">    <span class="operator">*</span> (<span class="keyword">SELECT</span> <span class="built_in">COUNT</span>(<span class="keyword">DISTINCT</span> cpu) <span class="keyword">FROM</span> sched)) <span class="keyword">AS</span> cpu_utilization_percent</span><br><span class="line"><span class="keyword">FROM</span> sched</span><br><span class="line"><span class="keyword">JOIN</span> thread <span class="keyword">ON</span> thread.utid <span class="operator">=</span> sched.utid</span><br><span class="line"><span class="keyword">JOIN</span> process <span class="keyword">ON</span> process.upid <span class="operator">=</span> thread.upid</span><br><span class="line"><span class="keyword">WHERE</span> sched.utid <span class="operator">!=</span> <span class="number">0</span></span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> process.name</span><br><span class="line"><span class="keyword">ORDER</span> <span class="keyword">BY</span> cpu_utilization_percent <span class="keyword">DESC</span>;</span><br></pre></td></tr></table></figure>
 
 <p><a id="summary"></a></p>
 <h2 id="Summary"><a href="#Summary" class="headerlink" title="Summary"></a>Summary</h2><p>Proficient analysis of CPU information in Perfetto is a key skill for Android performance optimization. By deeply understanding <strong>core architecture</strong>, <strong>thread states</strong>, <strong>wakeup relationships</strong>, <strong>frequency limitations</strong>, and <strong>C-State</strong>, combined with powerful <strong>SQL queries</strong> for quantitative analysis, developers can precisely locate and solve various performance and power consumption issues.</p>
@@ -631,7 +631,7 @@ loading="lazy"             decoding="async"
             <p>Author：<a href="https://androidperformance.com/en">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/en/2025/11/12/Android-Perfetto-09-CPU/">https://androidperformance.com/en/2025/11/12/Android-Perfetto-09-CPU/</a>
             <p>Publish date：<a href="https://androidperformance.com/en/2025/11/12/Android-Perfetto-09-CPU/">November 12th 2025, 10:00:00 am</a>
-            <p>Update date：<a href="https://androidperformance.com/en/2025/11/12/Android-Perfetto-09-CPU/">September 20th 2026, 12:41:56 am</a>
+            <p>Update date：<a href="https://androidperformance.com/en/2025/11/12/Android-Perfetto-09-CPU/">September 27th 2026, 1:34:34 pm</a>
             <p>License：This work is licensed under <a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a></p>
         </div>
     <!-- paginator -->
@@ -709,7 +709,7 @@ loading="lazy"             decoding="async"
                 <div class="toc-catalog">
                     <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
                 </div>
-                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Table-of-Contents"><span class="toc-number">1.</span> <span class="toc-text">Table of Contents</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-Series-Articles"><span class="toc-number">2.</span> <span class="toc-text">Perfetto Series Articles</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-Information-Overview-in-Perfetto"><span class="toc-number">3.</span> <span class="toc-text">CPU Information Overview in Perfetto</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Trace-Config-Required-for-Capturing-CPU-Information"><span class="toc-number">4.</span> <span class="toc-text">Trace Config Required for Capturing CPU Information</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-Core-Architecture-big-LITTLE"><span class="toc-number">5.</span> <span class="toc-text">CPU Core Architecture: big.LITTLE</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-Scheduling"><span class="toc-number">6.</span> <span class="toc-text">CPU Scheduling</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Thread-State-Deep-Dive"><span class="toc-number">6.1.</span> <span class="toc-text">Thread State Deep Dive</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#Running-Green"><span class="toc-number">6.1.1.</span> <span class="toc-text">Running (Green)</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#R-Runnable"><span class="toc-number">6.1.2.</span> <span class="toc-text">R (Runnable)</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#S-Sleep-x2F-Interruptible-Sleep"><span class="toc-number">6.1.3.</span> <span class="toc-text">S (Sleep &#x2F; Interruptible Sleep)</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#D-Uninterruptible-Sleep"><span class="toc-number">6.1.4.</span> <span class="toc-text">D (Uninterruptible Sleep)</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Wakeup-Relationship-Analysis"><span class="toc-number">6.2.</span> <span class="toc-text">Wakeup Relationship Analysis</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#Scheduling-Wakeup-and-Latency-Analysis"><span class="toc-number">6.2.1.</span> <span class="toc-text">Scheduling Wakeup and Latency Analysis</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#Differences-Between-sched-waking-and-sched-wakeup-and-Non-strict-Work-conserving"><span class="toc-number">6.2.2.</span> <span class="toc-text">Differences Between sched_waking and sched_wakeup and Non-strict Work-conserving</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#User-Mode-and-Kernel-Mode-sys-Slices-Locate-Empty-Flame-Graphs"><span class="toc-number">6.3.</span> <span class="toc-text">User Mode and Kernel Mode: sys_* Slices Locate Empty Flame Graphs</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#CPU-Time-and-Wall-Time"><span class="toc-number">6.4.</span> <span class="toc-text">CPU Time and Wall Time</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-Frequency-Deep-Dive"><span class="toc-number">7.</span> <span class="toc-text">CPU Frequency Deep Dive</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Core-Factors-Affecting-CPU-Frequency"><span class="toc-number">7.1.</span> <span class="toc-text">Core Factors Affecting CPU Frequency</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Frequency-Data-Collection-and-Platform-Differences"><span class="toc-number">7.2.</span> <span class="toc-text">Frequency Data Collection and Platform Differences</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#big-LITTLE-Same-Frequency-Doesn%E2%80%99t-Equal-Same-Performance-or-Power-Consumption"><span class="toc-number">7.3.</span> <span class="toc-text">big.LITTLE: Same Frequency Doesn’t Equal Same Performance or Power Consumption</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#P-States-and-governor"><span class="toc-number">7.3.1.</span> <span class="toc-text">P-States and governor</span></a></li></ol></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Linux-Kernel-Scheduling-Strategy-Core-Selection-and-Migration"><span class="toc-number">8.</span> <span class="toc-text">Linux Kernel Scheduling Strategy: Core Selection and Migration</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Core-Selection-Logic-Task-Placement"><span class="toc-number">8.1.</span> <span class="toc-text">Core Selection Logic (Task Placement)</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Core-Migration-Logic-Task-Migration"><span class="toc-number">8.2.</span> <span class="toc-text">Core Migration Logic (Task Migration)</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Practice-and-SQL"><span class="toc-number">9.</span> <span class="toc-text">Practice and SQL</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Using-SQL-for-Quantitative-Analysis"><span class="toc-number">9.1.</span> <span class="toc-text">Using SQL for Quantitative Analysis</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#1-Calculate-Total-CPU-Time-for-Each-Process"><span class="toc-number">9.2.</span> <span class="toc-text">1. Calculate Total CPU Time for Each Process</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-Analyze-Single-Thread%E2%80%99s-Time-State-Distribution"><span class="toc-number">9.3.</span> <span class="toc-text">2. Analyze Single Thread’s Time State Distribution</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-Find-Threads-with-Highest-CPU-Consumption-in-Specific-Time-Period"><span class="toc-number">9.4.</span> <span class="toc-text">3. Find Threads with Highest CPU Consumption in Specific Time Period</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#4-View-Thread%E2%80%99s-Running-Time-Distribution-on-Each-CPU-Core"><span class="toc-number">9.5.</span> <span class="toc-text">4. View Thread’s Running Time Distribution on Each CPU Core</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#5-Calculate-CPU-Utilization-for-Each-Process"><span class="toc-number">9.6.</span> <span class="toc-text">5. Calculate CPU Utilization for Each Process</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Summary"><span class="toc-number">10.</span> <span class="toc-text">Summary</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#About-Me-amp-amp-Blog"><span class="toc-number"></span> <span class="toc-text">About Me &amp;&amp; Blog</span></a>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Table-of-Contents"><span class="toc-number">1.</span> <span class="toc-text">Table of Contents</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto-Series-Articles"><span class="toc-number">2.</span> <span class="toc-text">Perfetto Series Articles</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-Information-Overview-in-Perfetto"><span class="toc-number">3.</span> <span class="toc-text">CPU Information Overview in Perfetto</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Trace-Config-Required-for-Capturing-CPU-Information"><span class="toc-number">4.</span> <span class="toc-text">Trace Config Required for Capturing CPU Information</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-Core-Architecture-big-LITTLE"><span class="toc-number">5.</span> <span class="toc-text">CPU Core Architecture: big.LITTLE</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-Scheduling"><span class="toc-number">6.</span> <span class="toc-text">CPU Scheduling</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Thread-State-Deep-Dive"><span class="toc-number">6.1.</span> <span class="toc-text">Thread State Deep Dive</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#Running-Green"><span class="toc-number">6.1.1.</span> <span class="toc-text">Running (Green)</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#R-Runnable"><span class="toc-number">6.1.2.</span> <span class="toc-text">R (Runnable)</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#S-Sleep-x2F-Interruptible-Sleep"><span class="toc-number">6.1.3.</span> <span class="toc-text">S (Sleep &#x2F; Interruptible Sleep)</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#D-Uninterruptible-Sleep"><span class="toc-number">6.1.4.</span> <span class="toc-text">D (Uninterruptible Sleep)</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Wakeup-Relationship-Analysis"><span class="toc-number">6.2.</span> <span class="toc-text">Wakeup Relationship Analysis</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#Scheduling-Wakeup-and-Latency-Analysis"><span class="toc-number">6.2.1.</span> <span class="toc-text">Scheduling Wakeup and Latency Analysis</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#Differences-Between-sched-waking-and-sched-wakeup-and-Non-strict-Work-conserving"><span class="toc-number">6.2.2.</span> <span class="toc-text">Differences Between sched_waking and sched_wakeup and Non-strict Work-conserving</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#User-Mode-and-Kernel-Mode-sys-Slices-Locate-Empty-Flame-Graphs"><span class="toc-number">6.3.</span> <span class="toc-text">User Mode and Kernel Mode: sys_* Slices Locate Empty Flame Graphs</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#CPU-Time-and-Wall-Time"><span class="toc-number">6.4.</span> <span class="toc-text">CPU Time and Wall Time</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CPU-Frequency-Deep-Dive"><span class="toc-number">7.</span> <span class="toc-text">CPU Frequency Deep Dive</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Core-Factors-Affecting-CPU-Frequency"><span class="toc-number">7.1.</span> <span class="toc-text">Core Factors Affecting CPU Frequency</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Frequency-Data-Collection-and-Platform-Differences"><span class="toc-number">7.2.</span> <span class="toc-text">Frequency Data Collection and Platform Differences</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#big-LITTLE-Same-Frequency-Doesn%E2%80%99t-Equal-Same-Performance-or-Power-Consumption"><span class="toc-number">7.3.</span> <span class="toc-text">big.LITTLE: Same Frequency Doesn’t Equal Same Performance or Power Consumption</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#P-States-and-governor"><span class="toc-number">7.3.1.</span> <span class="toc-text">P-States and governor</span></a></li></ol></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Linux-Kernel-Scheduling-Strategy-Core-Selection-and-Migration"><span class="toc-number">8.</span> <span class="toc-text">Linux Kernel Scheduling Strategy: Core Selection and Migration</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Core-Selection-Logic-Task-Placement"><span class="toc-number">8.1.</span> <span class="toc-text">Core Selection Logic (Task Placement)</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Core-Migration-Logic-Task-Migration"><span class="toc-number">8.2.</span> <span class="toc-text">Core Migration Logic (Task Migration)</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Practice-and-SQL"><span class="toc-number">9.</span> <span class="toc-text">Practice and SQL</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Using-SQL-for-Quantitative-Analysis"><span class="toc-number">9.1.</span> <span class="toc-text">Using SQL for Quantitative Analysis</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#1-Calculate-Total-CPU-Time-for-Each-Process"><span class="toc-number">9.2.</span> <span class="toc-text">1. Calculate Total CPU Time for Each Process</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-Analyze-Single-Thread%E2%80%99s-Time-State-Distribution"><span class="toc-number">9.3.</span> <span class="toc-text">2. Analyze Single Thread’s Time State Distribution</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-Find-Threads-with-Highest-CPU-Consumption-Across-the-Trace"><span class="toc-number">9.4.</span> <span class="toc-text">3. Find Threads with Highest CPU Consumption Across the Trace</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#4-View-Thread%E2%80%99s-Running-Time-Distribution-on-Each-CPU-Core"><span class="toc-number">9.5.</span> <span class="toc-text">4. View Thread’s Running Time Distribution on Each CPU Core</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#5-Calculate-CPU-Utilization-for-Each-Process"><span class="toc-number">9.6.</span> <span class="toc-text">5. Calculate CPU Utilization for Each Process</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Summary"><span class="toc-number">10.</span> <span class="toc-text">Summary</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#About-Me-amp-amp-Blog"><span class="toc-number"></span> <span class="toc-text">About Me &amp;&amp; Blog</span></a>
             </div>
         <!-- sidebar -->
         <div class="sidebar sidebar-hide">
@@ -903,19 +903,15 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
-            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</a>
-        </li>
-        <li class="archive-post-item">
-            <span class="archive-post-date">05/04</span>
             <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto Series 14: heapprofd and Memory Profiling</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
-            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</a>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
-            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</a>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
@@ -924,6 +920,10 @@ loading="lazy"             decoding="async"
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
             <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto Series 18: Response Latency in Practice, from Input Events to First-Frame Feedback</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/29</span>
@@ -986,11 +986,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/08</span>
-            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/08</span>
-            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
         </li>
                 </ul>
             <div class="archive-year"> 2024 </div>
@@ -1001,11 +1001,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/21</span>
-            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/21</span>
-            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/27</span>
@@ -1082,11 +1082,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
-            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
-            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
@@ -1144,11 +1144,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">11/18</span>
-            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">11/18</span>
-            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">11/06</span>
@@ -1176,11 +1176,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
-            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
-            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
@@ -1356,11 +1356,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">07/20</span>
-            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">07/20</span>
-            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/29</span>
@@ -1396,15 +1396,19 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/11</span>
-            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/11</span>
-            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/31</span>
             <a class="archive-post-title" href="/en/2015/03/31/android-performance-case-study-follow-up/">Android Performance Case Study Follow-up</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/15</span>
@@ -1413,10 +1417,6 @@ loading="lazy"             decoding="async"
         <li class="archive-post-item">
             <span class="archive-post-date">03/15</span>
             <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-4/">Android Tips Round-Up, Part 4</a>
-        </li>
-        <li class="archive-post-item">
-            <span class="archive-post-date">03/15</span>
-            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/04</span>
@@ -1471,41 +1471,25 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-tags">
     <div class="sidebar-tags-name">
-            <span class="sidebar-tag-name" data-tags="Android">
-                <span class="iconfont-archer">&#xe606;</span>
-                Android
-            </span>
-            <span class="sidebar-tag-name" data-tags="Perfetto">
-                <span class="iconfont-archer">&#xe606;</span>
-                Perfetto
-            </span>
-            <span class="sidebar-tag-name" data-tags="Systrace">
-                <span class="iconfont-archer">&#xe606;</span>
-                Systrace
-            </span>
-            <span class="sidebar-tag-name" data-tags="Startup">
-                <span class="iconfont-archer">&#xe606;</span>
-                Startup
-            </span>
             <span class="sidebar-tag-name" data-tags="Jank">
                 <span class="iconfont-archer">&#xe606;</span>
                 Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
             </span>
             <span class="sidebar-tag-name" data-tags="Yearly Recommendations">
                 <span class="iconfont-archer">&#xe606;</span>
                 Yearly Recommendations
             </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
             <span class="sidebar-tag-name" data-tags="Memory">
                 <span class="iconfont-archer">&#xe606;</span>
                 Memory
-            </span>
-            <span class="sidebar-tag-name" data-tags="Year in Review">
-                <span class="iconfont-archer">&#xe606;</span>
-                Year in Review
-            </span>
-            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
-                <span class="iconfont-archer">&#xe606;</span>
-                Knowledge Planet
             </span>
             <span class="sidebar-tag-name" data-tags="Performance">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1535,17 +1519,9 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 ANR
             </span>
-            <span class="sidebar-tag-name" data-tags="RenderThread">
+            <span class="sidebar-tag-name" data-tags="Perfetto">
                 <span class="iconfont-archer">&#xe606;</span>
-                RenderThread
-            </span>
-            <span class="sidebar-tag-name" data-tags="DelayLoad">
-                <span class="iconfont-archer">&#xe606;</span>
-                DelayLoad
-            </span>
-            <span class="sidebar-tag-name" data-tags="Java">
-                <span class="iconfont-archer">&#xe606;</span>
-                Java
+                Perfetto
             </span>
             <span class="sidebar-tag-name" data-tags="Agent OS">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1563,9 +1539,25 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Mobile OS
             </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
             <span class="sidebar-tag-name" data-tags="Tools">
                 <span class="iconfont-archer">&#xe606;</span>
                 Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
             </span>
             <span class="sidebar-tag-name" data-tags="Linux">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1595,18 +1587,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Page Response
             </span>
-            <span class="sidebar-tag-name" data-tags="Binder">
-                <span class="iconfont-archer">&#xe606;</span>
-                Binder
-            </span>
-            <span class="sidebar-tag-name" data-tags="Locking">
-                <span class="iconfont-archer">&#xe606;</span>
-                Locking
-            </span>
-            <span class="sidebar-tag-name" data-tags="Scheduling">
-                <span class="iconfont-archer">&#xe606;</span>
-                Scheduling
-            </span>
             <span class="sidebar-tag-name" data-tags="SQL">
                 <span class="iconfont-archer">&#xe606;</span>
                 SQL
@@ -1623,21 +1603,17 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 DataFlow
             </span>
-            <span class="sidebar-tag-name" data-tags="SDK">
-                <span class="iconfont-archer">&#xe606;</span>
-                SDK
-            </span>
-            <span class="sidebar-tag-name" data-tags="TraceEvent">
-                <span class="iconfont-archer">&#xe606;</span>
-                TraceEvent
-            </span>
             <span class="sidebar-tag-name" data-tags="heapprofd">
                 <span class="iconfont-archer">&#xe606;</span>
                 heapprofd
             </span>
-            <span class="sidebar-tag-name" data-tags="Field">
+            <span class="sidebar-tag-name" data-tags="Year in Review">
                 <span class="iconfont-archer">&#xe606;</span>
-                Field
+                Year in Review
+            </span>
+            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Knowledge Planet
             </span>
             <span class="sidebar-tag-name" data-tags="GPU">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1647,6 +1623,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Power
             </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
             <span class="sidebar-tag-name" data-tags="Camera">
                 <span class="iconfont-archer">&#xe606;</span>
                 Camera
@@ -1654,6 +1634,22 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Audio">
                 <span class="iconfont-archer">&#xe606;</span>
                 Audio
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="Locking">
+                <span class="iconfont-archer">&#xe606;</span>
+                Locking
+            </span>
+            <span class="sidebar-tag-name" data-tags="Scheduling">
+                <span class="iconfont-archer">&#xe606;</span>
+                Scheduling
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
             </span>
             <span class="sidebar-tag-name" data-tags="Input">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1663,9 +1659,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Latency
             </span>
-            <span class="sidebar-tag-name" data-tags="MAT">
+            <span class="sidebar-tag-name" data-tags="SDK">
                 <span class="iconfont-archer">&#xe606;</span>
-                MAT
+                SDK
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceEvent">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceEvent
             </span>
             <span class="sidebar-tag-name" data-tags="HashMap">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1683,10 +1683,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Annual Recommendations
             </span>
-            <span class="sidebar-tag-name" data-tags="Nexus">
-                <span class="iconfont-archer">&#xe606;</span>
-                Nexus
-            </span>
             <span class="sidebar-tag-name" data-tags="OpenClaw">
                 <span class="iconfont-archer">&#xe606;</span>
                 OpenClaw
@@ -1699,17 +1695,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Local Models
             </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
             <span class="sidebar-tag-name" data-tags="AI Agent">
                 <span class="iconfont-archer">&#xe606;</span>
                 AI Agent
-            </span>
-            <span class="sidebar-tag-name" data-tags="Sharp Tools">
-                <span class="iconfont-archer">&#xe606;</span>
-                Sharp Tools
-            </span>
-            <span class="sidebar-tag-name" data-tags="Productivity">
-                <span class="iconfont-archer">&#xe606;</span>
-                Productivity
             </span>
             <span class="sidebar-tag-name" data-tags="SmartPerfetto">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1727,25 +1719,33 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Design Specs
             </span>
-            <span class="sidebar-tag-name" data-tags="Kotlin">
-                <span class="iconfont-archer">&#xe606;</span>
-                Kotlin
-            </span>
             <span class="sidebar-tag-name" data-tags="Compose">
                 <span class="iconfont-archer">&#xe606;</span>
                 Compose
             </span>
-            <span class="sidebar-tag-name" data-tags="Process">
+            <span class="sidebar-tag-name" data-tags="Kotlin">
                 <span class="iconfont-archer">&#xe606;</span>
-                Process
+                Kotlin
             </span>
             <span class="sidebar-tag-name" data-tags="Stutter">
                 <span class="iconfont-archer">&#xe606;</span>
                 Stutter
             </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
             <span class="sidebar-tag-name" data-tags="Overdraw">
                 <span class="iconfont-archer">&#xe606;</span>
                 Overdraw
+            </span>
+            <span class="sidebar-tag-name" data-tags="Sharp Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Sharp Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity
             </span>
             <span class="sidebar-tag-name" data-tags="Reading Notes">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1766,10 +1766,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="User Experience">
                 <span class="iconfont-archer">&#xe606;</span>
                 User Experience
-            </span>
-            <span class="sidebar-tag-name" data-tags="Reading">
-                <span class="iconfont-archer">&#xe606;</span>
-                Reading
             </span>
             <span class="sidebar-tag-name" data-tags="Internet">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1795,6 +1791,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Experience Optimization
             </span>
+            <span class="sidebar-tag-name" data-tags="Reading">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading
+            </span>
     </div>
     <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
     <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
@@ -1805,29 +1805,29 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-categories">
     <div class="sidebar-categories-name">
-        <span class="sidebar-category-name" data-categories="Essays">
+        <span class="sidebar-category-name" data-categories="Reading Notes">
             <span class="iconfont-archer">&#xe60a;</span>
-            Essays
+            Reading Notes
         </span>
         <span class="sidebar-category-name" data-categories="Casual Notes">
             <span class="iconfont-archer">&#xe60a;</span>
             Casual Notes
         </span>
-        <span class="sidebar-category-name" data-categories="Reading Notes">
-            <span class="iconfont-archer">&#xe60a;</span>
-            Reading Notes
-        </span>
         <span class="sidebar-category-name" data-categories="Android">
             <span class="iconfont-archer">&#xe60a;</span>
             Android
         </span>
-        <span class="sidebar-category-name" data-categories="Java">
+        <span class="sidebar-category-name" data-categories="Essays">
             <span class="iconfont-archer">&#xe60a;</span>
-            Java
+            Essays
         </span>
         <span class="sidebar-category-name" data-categories="AI">
             <span class="iconfont-archer">&#xe60a;</span>
             AI
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
         </span>
         <span class="sidebar-category-name" data-categories="Android Performance Optimization">
             <span class="iconfont-archer">&#xe60a;</span>

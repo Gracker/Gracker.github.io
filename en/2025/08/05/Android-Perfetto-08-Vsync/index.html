@@ -42,12 +42,12 @@
 <meta property="og:image" content="https://androidperformance.com/en/images/Android-Perfetto-08-Vsync/image-20250918223532482.webp">
 <meta property="og:image" content="https://androidperformance.com/en/images/WechatIMG581.webp">
 <meta property="article:published_time" content="2025-08-05T02:15:30.000Z">
-<meta property="article:modified_time" content="2026-09-19T16:41:56.943Z">
+<meta property="article:modified_time" content="2026-09-29T01:29:10.866Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Android">
+<meta property="article:tag" content="Performance">
 <meta property="article:tag" content="Perfetto">
 <meta property="article:tag" content="Systrace">
-<meta property="article:tag" content="Performance">
 <meta property="article:tag" content="RenderThread">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:image" content="https://androidperformance.com/en/images/Android-Perfetto-08-Vsync/image-20250811221826847.webp">
@@ -277,9 +277,9 @@ loading="lazy"             decoding="async"
             </span>
         </span>
         <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Systrace">Systrace</a>
-        <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="RenderThread">RenderThread</a>
 </div>
 
@@ -354,7 +354,7 @@ loading="lazy"             decoding="async"
         <p>This is the eighth article in the Perfetto series, providing an in-depth introduction to the Vsync mechanism in Android and its representation in Perfetto. The article will analyze how the Android system performs frame rendering and composition based on Vsync signals from Perfetto’s perspective, covering core concepts such as Vsync, Vsync-app, Vsync-sf, and VsyncWorkDuration.</p>
 <p>With the popularization of high refresh rate screens, understanding the Vsync mechanism has become increasingly important. This article uses 120Hz refresh rate as the main narrative thread to help developers understand the working principles of Vsync in modern Android devices, and how to observe and analyze Vsync-related performance issues in Perfetto.</p>
 <blockquote>
-<p><strong>Note: This article is based on the public evolution from Android 13 to Android 16. Code snippets are aligned to AOSP main signatures, with <code>...</code> used in a few places to omit non-critical branches. Always verify against your target branch.</strong></p>
+<p><strong>Version note:</strong> Android 17 (API 37) is the current technical reference; Android 13 is mentioned where a major mechanism was introduced. Code snippets are abbreviated AOSP main excerpts, with <code>...</code> omitting some branches. They are not verbatim Android 17 release source; verify against your target branch.</p>
 </blockquote>
 <span id="more"></span>
 
@@ -403,7 +403,7 @@ loading="lazy"             decoding="async"
 <h3 id="What-Problems-Does-Vsync-Solve"><a href="#What-Problems-Does-Vsync-Solve" class="headerlink" title="What Problems Does Vsync Solve?"></a>What Problems Does Vsync Solve?</h3><p>The core idea of the Vsync mechanism is very simple: <strong>make all rendering work proceed according to the display’s refresh beat</strong>. Specifically:</p>
 <ol>
 <li><strong>Synchronization Signal</strong>: The display emits a Vsync signal every time it starts a new refresh cycle.</li>
-<li><strong>Frame Beat and Production</strong>: On the application side, when Vsync arrives, Choreographer drives the production of a frame (Input&#x2F;Animation&#x2F;Traversal); after the CPU submits rendering commands, the GPU executes asynchronously in a pipeline. On the SurfaceFlinger side, when Vsync arrives, Buffer composition operations are performed.</li>
+<li><strong>Frame Beat and Production</strong>: An app with pending frame callbacks can request Vsync through Choreographer; a Vsync does not make every app draw. After CPU submission, the GPU may execute asynchronously. SurfaceFlinger composites when it has work scheduled for a display opportunity.</li>
 <li><strong>Buffering Mechanism</strong>: Using double buffering or triple buffering technology ensures the display always reads complete frame data.</li>
 </ol>
 <p>This way, frame production and display are aligned with Vsync as the beat. Taking 120Hz as an example, there’s a display opportunity every 8.333ms; the application needs to submit a compositable Buffer to SurfaceFlinger before this window. The key constraint is the timing of <code>queueBuffer</code>&#x2F;<code>acquire_fence</code>&#x2F;<code>present_fence</code>; if it doesn’t catch up with this cycle, it will be delayed to the next cycle for display.</p>
@@ -422,7 +422,7 @@ loading="lazy"             decoding="async"
 <h2 id="Observing-Vsync-in-Perfetto"><a href="#Observing-Vsync-in-Perfetto" class="headerlink" title="Observing Vsync in Perfetto"></a>Observing Vsync in Perfetto</h2><p>Perfetto traces contain multiple Vsync-related Tracks. Understanding the meaning of these Tracks helps analyze performance issues.</p>
 <p><strong>In the SurfaceFlinger Process</strong>:</p>
 <ol>
-<li><p><strong>vsync-app</strong><br>Displays application Vsync signal status, with values changing between 0 and 1. Each value change represents a Vsync signal.<br><img src="/en/images/Android-Perfetto-08-Vsync/image-20250811221826847.webp" alt="image-20250811221826847"></p>
+<li><p><strong>vsync-app</strong><br>In this trace, the counter alternates between 0 and 1; its transitions help show the recorded scheduling cadence. It does not prove that any particular app received a callback.<br><img src="/en/images/Android-Perfetto-08-Vsync/image-20250811221826847.webp" alt="image-20250811221826847"></p>
 </li>
 <li><p><strong>vsync-sf</strong><br>Displays SurfaceFlinger Vsync signal status. When there’s no Vsync Offset, it changes synchronously with <code>vsync-app</code>.<br><img src="/en/images/Android-Perfetto-08-Vsync/image-20250811221902646.webp" alt="image-20250811221902646"></p>
 </li>
@@ -447,11 +447,11 @@ loading="lazy"             decoding="async"
 <li>Receive Vsync: After <code>DisplayEventReceiver.onVsync()</code> receives Vsync, it posts an asynchronous message to the main thread message queue</li>
 <li>Main Thread Frame Processing: <code>Choreographer.doFrame()</code> executes five types of callbacks in order: <code>INPUT → ANIMATION → INSETS_ANIMATION → TRAVERSAL → COMMIT</code></li>
 <li>Rendering Submission: <code>RenderThread</code> executes <code>syncAndDrawFrame/DrawFrame</code>, CPU records GPU commands, <code>queueBuffer</code> submits to BufferQueue</li>
-<li>Composition Display: <code>SurfaceFlinger</code> composites (GPU&#x2F;or HWC) when <code>vsync-sf</code> arrives, generates <code>present_fence</code>, outputs to display</li>
+<li>Composition Display: With pending updates, <code>SurfaceFlinger</code> schedules composition (GPU or HWC) around <code>vsync-sf</code>, generates <code>present_fence</code>, and outputs to display</li>
 <li>Frame Completion Measurement: Determines whether displayed on schedule through <code>FrameTimeline</code> (PresentType&#x2F;JankType) and <code>acquire/present_fence</code></li>
 </ol>
 <p>Below we’ll expand on each step’s key implementation and Perfetto observation points.</p>
-<h3 id="When-Does-App-Request-Vsync-Signals"><a href="#When-Does-App-Request-Vsync-Signals" class="headerlink" title="When Does App Request Vsync Signals"></a>When Does App Request Vsync Signals</h3><p>Applications don’t request Vsync signals all the time. Vsync signals are requested on-demand, only in the following situations will applications request the next Vsync from the system:</p>
+<h3 id="When-Does-App-Request-Vsync-Signals"><a href="#When-Does-App-Request-Vsync-Signals" class="headerlink" title="When Does App Request Vsync Signals"></a>When Does App Request Vsync Signals</h3><p>Applications don’t request Vsync signals all the time. The following are common reasons an app may request the next Vsync:</p>
 <p><strong>Scenarios Triggering Vsync Request</strong>:</p>
 <ol>
 <li><strong>UI Update Needs</strong>: When View calls <code>invalidate()</code></li>
@@ -470,7 +470,7 @@ loading="lazy"             decoding="async"
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/base/core/java/android/view/Choreographer.java</span></span><br><span class="line"><span class="keyword">private</span> <span class="keyword">final</span> <span class="keyword">class</span> <span class="title class_">FrameDisplayEventReceiver</span> <span class="keyword">extends</span> <span class="title class_">DisplayEventReceiver</span></span><br><span class="line">        <span class="keyword">implements</span> <span class="title class_">Runnable</span> &#123;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">public</span> <span class="title function_">FrameDisplayEventReceiver</span><span class="params">(Looper looper, <span class="type">int</span> vsyncSource, <span class="type">long</span> layerHandle)</span> &#123;</span><br><span class="line">        <span class="built_in">super</span>(looper, vsyncSource, <span class="comment">/* eventRegistration */</span> <span class="number">0</span>, layerHandle);</span><br><span class="line">        <span class="comment">// Establish connection with SurfaceFlinger during construction</span></span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
 <p><strong>2. Receive Vsync Signal</strong>:</p>
-<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@Override</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">onVsync</span><span class="params">(<span class="type">long</span> timestampNanos, <span class="type">long</span> physicalDisplayId, <span class="type">int</span> frame,</span></span><br><span class="line"><span class="params">        VsyncEventData vsyncEventData)</span> &#123;</span><br><span class="line">    <span class="comment">// Received Vsync signal, but note: doFrame is not executed directly here</span></span><br><span class="line">    mTimestampNanos = timestampNanos;</span><br><span class="line">    mFrame = frame;</span><br><span class="line">    mLastVsyncEventData.copyFrom(vsyncEventData);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// Key: Post work to main thread&#x27;s MessageQueue</span></span><br><span class="line">    <span class="type">Message</span> <span class="variable">msg</span> <span class="operator">=</span> Message.obtain(mHandler, <span class="built_in">this</span>);</span><br><span class="line">    msg.setAsynchronous(<span class="literal">true</span>);  <span class="comment">// Set as asynchronous message, priority processing</span></span><br><span class="line">    mHandler.sendMessageAtTime(msg, timestampNanos / TimeUtils.NANOS_PER_MS);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="meta">@Override</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">run</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="comment">// This is where the work for one frame actually begins</span></span><br><span class="line">    doFrame(mTimestampNanos, mFrame, mLastVsyncEventData);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@Override</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">onVsync</span><span class="params">(<span class="type">long</span> timestampNanos, <span class="type">long</span> physicalDisplayId, <span class="type">int</span> frame,</span></span><br><span class="line"><span class="params">        VsyncEventData vsyncEventData)</span> &#123;</span><br><span class="line">    <span class="comment">// Received Vsync signal, but note: doFrame is not executed directly here</span></span><br><span class="line">    mTimestampNanos = timestampNanos;</span><br><span class="line">    mFrame = frame;</span><br><span class="line">    mLastVsyncEventData.copyFrom(vsyncEventData);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// Key: Post work to main thread&#x27;s MessageQueue</span></span><br><span class="line">    <span class="type">Message</span> <span class="variable">msg</span> <span class="operator">=</span> Message.obtain(mHandler, <span class="built_in">this</span>);</span><br><span class="line">    msg.setAsynchronous(<span class="literal">true</span>);  <span class="comment">// Bypasses sync barriers; not globally higher priority</span></span><br><span class="line">    mHandler.sendMessageAtTime(msg, timestampNanos / TimeUtils.NANOS_PER_MS);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="meta">@Override</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title function_">run</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="comment">// This is where the work for one frame actually begins</span></span><br><span class="line">    doFrame(mTimestampNanos, mFrame, mLastVsyncEventData);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
 <h3 id="Several-Remaining-Questions"><a href="#Several-Remaining-Questions" class="headerlink" title="Several Remaining Questions"></a>Several Remaining Questions</h3><p><strong>Q1: Why not execute <code>doFrame()</code> directly in <code>onVsync()</code>?</strong><br><img src="/en/images/Android-Perfetto-08-Vsync/image-20250918221936675.webp" alt="image-20250918221936675"></p>
 <ul>
@@ -495,9 +495,7 @@ loading="lazy"             decoding="async"
 </li>
 </ul>
 </li>
-<li><p>GPU asynchronous pipeline; the key is whether <code>queueBuffer</code> catches up with SF composition window. Multi-buffering can mask single frame delays but may introduce additional latency. As shown in the figure below, both App-side BufferQueue and SurfaceFlinger-side Buffers are sufficient with redundancy, so no frames are dropped.</p>
-</li>
-<li><p>However, if the App hasn’t accumulated Buffers before, frame drops will still occur.</p>
+<li><p>GPU work is asynchronous, and multi-buffering can overlap production and consumption but may add queueing latency. Buffer counters alone cannot prove that no frame was dropped; align the target layer’s FrameTimeline with actual presentation.</p>
 </li>
 </ul>
 <p><img src="/en/images/Android-Perfetto-08-Vsync/image-20250918222258536.webp" alt="image-20250918222258536"></p>
@@ -513,8 +511,8 @@ loading="lazy"             decoding="async"
 </ul>
 <p><strong>Q6: What is the real role of Vsync Phase (phase difference)?</strong>:</p>
 <ul>
-<li><strong>Improve touch responsiveness</strong>: By adjusting sf vsync’s phase difference, the time from when an application starts drawing to displaying on screen can be shortened from 3 Vsync cycles to 2 Vsync cycles. This is very important for interaction scenarios like touch response.</li>
-<li><strong>Solve application drawing timeout issues</strong>: When application drawing times out, a reasonable sf phase difference can buy more processing time for the application, avoiding frame drops due to improper timing.</li>
+<li><strong>Shift the available window</strong>: Changing the app&#x2F;SF phase can sometimes let a frame reach an earlier composition opportunity, but it does not universally reduce latency from three cycles to two.</li>
+<li><strong>Move the deadline</strong>: A different phase changes available time; it cannot replace reducing excessive app or GPU work.</li>
 <li><code>VsyncWorkDuration</code> is closer to scheduling budget visualization (<code>workDuration</code>&#x2F;<code>readyDuration</code>) and is not a 1:1 mapping to a single app offset value. Correlate it with <code>vsync-app/sf</code> and FrameTimeline.</li>
 <li>The time period shown in the figure below is the app offset (13.3ms) configured on my phone</li>
 </ul>
@@ -528,7 +526,7 @@ loading="lazy"             decoding="async"
 <li><code>app/sf offset</code>: still useful as an analysis lens, but it is an outcome of config sets plus scheduler model</li>
 <li>In common practice, “app&#x2F;sf offset delta” means their phase gap (often viewed as <code>|sfOffset - appOffset|</code>; sign conventions depend on device implementation and metric definition)</li>
 </ul>
-<h3 id="Actual-Optimization-Effects"><a href="#Actual-Optimization-Effects" class="headerlink" title="Actual Optimization Effects"></a>Actual Optimization Effects</h3><p>Taking a 120Hz device as an example, the effect of configuring 3ms Offset:</p>
+<h3 id="Simplified-Phase-Timing-Example"><a href="#Simplified-Phase-Timing-Example" class="headerlink" title="Simplified Phase-Timing Example"></a>Simplified Phase-Timing Example</h3><p>The following 120Hz timeline uses hypothetical times to illustrate how phase can change a presentation opportunity; it is not a device measurement:</p>
 <p><strong>Without Offset (Traditional Method)</strong>:</p>
 <ul>
 <li>T0: Application and SurfaceFlinger receive Vsync simultaneously</li>
@@ -544,13 +542,13 @@ loading="lazy"             decoding="async"
 <li>T0+6ms: SurfaceFlinger completes composition</li>
 <li>T0+8.333ms: User sees the image (total latency 8.333ms)</li>
 </ul>
-<p>Through reasonable Offset configuration, latency can be reduced from 16.666ms to 8.333ms, doubling response performance.</p>
+<p>In this idealized schedule, the changed phase lets the frame reach an earlier display opportunity. It is not a measured or universal halving of input-to-display latency.</p>
 <p><strong>Actual Time Budget Allocation</strong>:</p>
-<p>Taking a 120Hz device as an example (8.333ms cycle):</p>
+<p>For a 120Hz mode (8.333ms nominal interval):</p>
 <ul>
-<li><strong>Ideal case</strong>: Application 4ms + SurfaceFlinger 2ms + buffer 2.333ms</li>
-<li><strong>But actually acceptable</strong>: Application 6ms + SurfaceFlinger 3ms (if there’s enough Buffer buffering)</li>
-<li><strong>GPU limitation</strong>: On low-end devices, GPU rendering may need 10-15ms, becoming the real bottleneck</li>
+<li><strong>App and SF windows</strong>: Their deadlines depend on the scheduler’s phases; adding their durations as if all work ran serially in one interval gives the wrong budget.</li>
+<li><strong>Overlapping work</strong>: Different frames can be in the App, GPU, and SurfaceFlinger stages at the same time; buffering does not guarantee an on-time present.</li>
+<li><strong>GPU limitation</strong>: Sustained late GPU completion can delay the acquire fence; measure the target device rather than assuming a fixed GPU duration.</li>
 </ul>
 <p><strong>Real Causes of Frame Drops</strong>:</p>
 <ol>
@@ -580,7 +578,7 @@ loading="lazy"             decoding="async"
 
 <h3 id="Key-Timing-Point-Analysis"><a href="#Key-Timing-Point-Analysis" class="headerlink" title="Key Timing Point Analysis"></a>Key Timing Point Analysis</h3><p>Through the above code flow, we can see the complete timing chain:</p>
 <ol>
-<li><strong>HWC emits hardware Vsync</strong> → SurfaceFlinger Scheduler captures display cadence</li>
+<li><strong>HWC hardware callbacks or software-predicted timing</strong> → SurfaceFlinger Scheduler updates display cadence</li>
 <li><strong>Scheduler computes wakeup window</strong> → <code>VSyncDispatch::schedule(...)</code></li>
 <li><strong>EventThread creates&#x2F;distributes events</strong> → <code>DisplayEventReceiver::Event</code> via <code>BitTube</code></li>
 <li><strong>App-side Native receives event</strong> → <code>DisplayEventDispatcher::dispatchVsync(...)</code></li>
@@ -619,7 +617,7 @@ loading="lazy"             decoding="async"
 </ul>
 </li>
 <li><strong>Multi-display&#x2F;External Display</strong>: Hardware can report vsync per <code>physicalDisplayId</code>; however, app-side Choreographer usually still follows internal&#x2F;pacesetter timing (details vary by branch and version). Confirm whether you’re reading HWC&#x2F;SF tracks or app tracks before drawing conclusions;<ul>
-<li>Version difference: official docs state per-display VSYNC was not supported on Android 10 and below; this limitation is removed at the framework&#x2F;HWC capability level on Android 11+, but app-side <code>Choreographer</code> request paths still need branch-specific verification (AOSP main still has internal-display related notes)</li>
+<li>On Android 12–17, distinguish framework&#x2F;HWC per-display VSYNC capability from app-side <code>Choreographer</code> request paths; the latter may depend on internal-display or pacesetter implementation, so verify against the target branch and device trace</li>
 <li>Perfetto: Filter related Counter&#x2F;Slice by display ID</li>
 </ul>
 </li>
@@ -647,7 +645,7 @@ loading="lazy"             decoding="async"
 </li>
 <li><strong>BufferQueue and Fence</strong><ul>
 <li>Producer: After RenderThread <code>queueBuffer</code>, the Buffer enters the consumable queue. Whether SF can latch it immediately still depends on <code>acquire fence</code>. <code>present fence</code> is mainly for confirming when the frame is actually presented. Newer versions may advance with unsignaled buffers under specific policy, then wait later when needed.<br><img src="/en/images/Android-Perfetto-08-Vsync/image-20250918224205093.webp" alt="image-20250918224205093"></li>
-<li>Consumer SF and BufferTX: At each composition beat, SF tries to fetch the latest available Buffer for a target layer. If BufferTX for a layer is 0, that layer usually has no new Buffer, so SF keeps composing with old content. For that app, this appears as visual stall&#x2F;jank, but SF does not globally “stop composing.”<br><img src="/en/images/Android-Perfetto-08-Vsync/image-20250918223441117.webp" alt="image-20250918223441117"></li>
+<li>Consumer SF and BufferTX: When there is a pending update, SF may use a new Buffer for the target layer. BufferTX at 0 usually means no pending Buffer on that layer. This is normal for static content; investigate app starvation only if the layer was expected to update. It does not mean SF globally stopped compositing.<br><img src="/en/images/Android-Perfetto-08-Vsync/image-20250918223441117.webp" alt="image-20250918223441117"></li>
 </ul>
 </li>
 <li><strong>Composition Strategy and Display</strong><ul>
@@ -701,7 +699,7 @@ loading="lazy"             decoding="async"
             <p>Author：<a href="https://androidperformance.com/en">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/en/2025/08/05/Android-Perfetto-08-Vsync/">https://androidperformance.com/en/2025/08/05/Android-Perfetto-08-Vsync/</a>
             <p>Publish date：<a href="https://androidperformance.com/en/2025/08/05/Android-Perfetto-08-Vsync/">August 5th 2025, 10:15:30 am</a>
-            <p>Update date：<a href="https://androidperformance.com/en/2025/08/05/Android-Perfetto-08-Vsync/">September 20th 2026, 12:41:56 am</a>
+            <p>Update date：<a href="https://androidperformance.com/en/2025/08/05/Android-Perfetto-08-Vsync/">September 29th 2026, 9:29:10 am</a>
             <p>License：This work is licensed under <a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a></p>
         </div>
     <!-- paginator -->
@@ -779,7 +777,7 @@ loading="lazy"             decoding="async"
                 <div class="toc-catalog">
                     <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
                 </div>
-                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Table-of-Contents"><span class="toc-number">1.</span> <span class="toc-text">Table of Contents</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Series-Catalog"><span class="toc-number"></span> <span class="toc-text">Series Catalog</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#What-is-Vsync"><span class="toc-number">1.</span> <span class="toc-text">What is Vsync</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#What-Problems-Does-Vsync-Solve"><span class="toc-number">1.1.</span> <span class="toc-text">What Problems Does Vsync Solve?</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Basic-Working-Principles-of-Vsync-in-Android"><span class="toc-number">2.</span> <span class="toc-text">Basic Working Principles of Vsync in Android</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Layered-Architecture-of-Vsync-Signals"><span class="toc-number">2.1.</span> <span class="toc-text">Layered Architecture of Vsync Signals</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Observing-Vsync-in-Perfetto"><span class="toc-number">3.</span> <span class="toc-text">Observing Vsync in Perfetto</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#How-Android-App-Frames-Work-Based-on-Vsync"><span class="toc-number">4.</span> <span class="toc-text">How Android App Frames Work Based on Vsync</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Process-Overview-In-Order"><span class="toc-number">4.1.</span> <span class="toc-text">Process Overview (In Order)</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#When-Does-App-Request-Vsync-Signals"><span class="toc-number">4.2.</span> <span class="toc-text">When Does App Request Vsync Signals</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Complete-Process-of-App-Requesting-Vsync"><span class="toc-number">4.3.</span> <span class="toc-text">Complete Process of App Requesting Vsync</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#How-Main-Thread-Listens-for-Vsync-Signals"><span class="toc-number">4.4.</span> <span class="toc-text">How Main Thread Listens for Vsync Signals</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Several-Remaining-Questions"><span class="toc-number">4.5.</span> <span class="toc-text">Several Remaining Questions</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Technical-Implementation-of-Vsync-Offset-x2F-WorkDuration"><span class="toc-number">4.6.</span> <span class="toc-text">Technical Implementation of Vsync Offset &#x2F; WorkDuration</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Actual-Optimization-Effects"><span class="toc-number">4.7.</span> <span class="toc-text">Actual Optimization Effects</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Complete-Code-Flow-of-Vsync-Signals"><span class="toc-number">5.</span> <span class="toc-text">Complete Code Flow of Vsync Signals</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Key-Code-Paths-Aligned-with-AOSP-main-Condensed-Excerpts"><span class="toc-number">5.1.</span> <span class="toc-text">Key Code Paths Aligned with AOSP main (Condensed Excerpts)</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Key-Timing-Point-Analysis"><span class="toc-number">5.2.</span> <span class="toc-text">Key Timing Point Analysis</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#FrameTimeline"><span class="toc-number">5.3.</span> <span class="toc-text">FrameTimeline</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Impact-of-Refresh-Rate-x2F-Display-Mode-x2F-VRR-on-Vsync-and-Offset-x2F-Prediction"><span class="toc-number">5.4.</span> <span class="toc-text">Impact of Refresh Rate&#x2F;Display Mode&#x2F;VRR on Vsync and Offset&#x2F;Prediction</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Perfetto-Practice-Checklist-Recommended-Viewing-Order"><span class="toc-number">5.5.</span> <span class="toc-text">Perfetto Practice Checklist (Recommended Viewing Order)</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#References"><span class="toc-number">6.</span> <span class="toc-text">References</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#About-Me-amp-amp-Blog"><span class="toc-number"></span> <span class="toc-text">About Me &amp;&amp; Blog</span></a>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Table-of-Contents"><span class="toc-number">1.</span> <span class="toc-text">Table of Contents</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Series-Catalog"><span class="toc-number"></span> <span class="toc-text">Series Catalog</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#What-is-Vsync"><span class="toc-number">1.</span> <span class="toc-text">What is Vsync</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#What-Problems-Does-Vsync-Solve"><span class="toc-number">1.1.</span> <span class="toc-text">What Problems Does Vsync Solve?</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Basic-Working-Principles-of-Vsync-in-Android"><span class="toc-number">2.</span> <span class="toc-text">Basic Working Principles of Vsync in Android</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Layered-Architecture-of-Vsync-Signals"><span class="toc-number">2.1.</span> <span class="toc-text">Layered Architecture of Vsync Signals</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Observing-Vsync-in-Perfetto"><span class="toc-number">3.</span> <span class="toc-text">Observing Vsync in Perfetto</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#How-Android-App-Frames-Work-Based-on-Vsync"><span class="toc-number">4.</span> <span class="toc-text">How Android App Frames Work Based on Vsync</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Process-Overview-In-Order"><span class="toc-number">4.1.</span> <span class="toc-text">Process Overview (In Order)</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#When-Does-App-Request-Vsync-Signals"><span class="toc-number">4.2.</span> <span class="toc-text">When Does App Request Vsync Signals</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Complete-Process-of-App-Requesting-Vsync"><span class="toc-number">4.3.</span> <span class="toc-text">Complete Process of App Requesting Vsync</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#How-Main-Thread-Listens-for-Vsync-Signals"><span class="toc-number">4.4.</span> <span class="toc-text">How Main Thread Listens for Vsync Signals</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Several-Remaining-Questions"><span class="toc-number">4.5.</span> <span class="toc-text">Several Remaining Questions</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Technical-Implementation-of-Vsync-Offset-x2F-WorkDuration"><span class="toc-number">4.6.</span> <span class="toc-text">Technical Implementation of Vsync Offset &#x2F; WorkDuration</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Simplified-Phase-Timing-Example"><span class="toc-number">4.7.</span> <span class="toc-text">Simplified Phase-Timing Example</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Complete-Code-Flow-of-Vsync-Signals"><span class="toc-number">5.</span> <span class="toc-text">Complete Code Flow of Vsync Signals</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Key-Code-Paths-Aligned-with-AOSP-main-Condensed-Excerpts"><span class="toc-number">5.1.</span> <span class="toc-text">Key Code Paths Aligned with AOSP main (Condensed Excerpts)</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Key-Timing-Point-Analysis"><span class="toc-number">5.2.</span> <span class="toc-text">Key Timing Point Analysis</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#FrameTimeline"><span class="toc-number">5.3.</span> <span class="toc-text">FrameTimeline</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Impact-of-Refresh-Rate-x2F-Display-Mode-x2F-VRR-on-Vsync-and-Offset-x2F-Prediction"><span class="toc-number">5.4.</span> <span class="toc-text">Impact of Refresh Rate&#x2F;Display Mode&#x2F;VRR on Vsync and Offset&#x2F;Prediction</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Perfetto-Practice-Checklist-Recommended-Viewing-Order"><span class="toc-number">5.5.</span> <span class="toc-text">Perfetto Practice Checklist (Recommended Viewing Order)</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#References"><span class="toc-number">6.</span> <span class="toc-text">References</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#About-Me-amp-amp-Blog"><span class="toc-number"></span> <span class="toc-text">About Me &amp;&amp; Blog</span></a>
             </div>
         <!-- sidebar -->
         <div class="sidebar sidebar-hide">
@@ -973,19 +971,15 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
-            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</a>
-        </li>
-        <li class="archive-post-item">
-            <span class="archive-post-date">05/04</span>
             <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto Series 14: heapprofd and Memory Profiling</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
-            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</a>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
-            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</a>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
@@ -994,6 +988,10 @@ loading="lazy"             decoding="async"
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
             <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto Series 18: Response Latency in Practice, from Input Events to First-Frame Feedback</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/29</span>
@@ -1056,11 +1054,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/08</span>
-            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/08</span>
-            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
         </li>
                 </ul>
             <div class="archive-year"> 2024 </div>
@@ -1071,11 +1069,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/21</span>
-            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/21</span>
-            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/27</span>
@@ -1152,11 +1150,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
-            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
-            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
@@ -1214,11 +1212,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">11/18</span>
-            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">11/18</span>
-            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">11/06</span>
@@ -1246,11 +1244,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
-            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
-            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
@@ -1426,11 +1424,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">07/20</span>
-            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">07/20</span>
-            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/29</span>
@@ -1466,15 +1464,19 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/11</span>
-            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/11</span>
-            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/31</span>
             <a class="archive-post-title" href="/en/2015/03/31/android-performance-case-study-follow-up/">Android Performance Case Study Follow-up</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/15</span>
@@ -1483,10 +1485,6 @@ loading="lazy"             decoding="async"
         <li class="archive-post-item">
             <span class="archive-post-date">03/15</span>
             <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-4/">Android Tips Round-Up, Part 4</a>
-        </li>
-        <li class="archive-post-item">
-            <span class="archive-post-date">03/15</span>
-            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/04</span>
@@ -1541,41 +1539,25 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-tags">
     <div class="sidebar-tags-name">
-            <span class="sidebar-tag-name" data-tags="Android">
-                <span class="iconfont-archer">&#xe606;</span>
-                Android
-            </span>
-            <span class="sidebar-tag-name" data-tags="Perfetto">
-                <span class="iconfont-archer">&#xe606;</span>
-                Perfetto
-            </span>
-            <span class="sidebar-tag-name" data-tags="Systrace">
-                <span class="iconfont-archer">&#xe606;</span>
-                Systrace
-            </span>
-            <span class="sidebar-tag-name" data-tags="Startup">
-                <span class="iconfont-archer">&#xe606;</span>
-                Startup
-            </span>
             <span class="sidebar-tag-name" data-tags="Jank">
                 <span class="iconfont-archer">&#xe606;</span>
                 Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
             </span>
             <span class="sidebar-tag-name" data-tags="Yearly Recommendations">
                 <span class="iconfont-archer">&#xe606;</span>
                 Yearly Recommendations
             </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
             <span class="sidebar-tag-name" data-tags="Memory">
                 <span class="iconfont-archer">&#xe606;</span>
                 Memory
-            </span>
-            <span class="sidebar-tag-name" data-tags="Year in Review">
-                <span class="iconfont-archer">&#xe606;</span>
-                Year in Review
-            </span>
-            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
-                <span class="iconfont-archer">&#xe606;</span>
-                Knowledge Planet
             </span>
             <span class="sidebar-tag-name" data-tags="Performance">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1605,17 +1587,9 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 ANR
             </span>
-            <span class="sidebar-tag-name" data-tags="RenderThread">
+            <span class="sidebar-tag-name" data-tags="Perfetto">
                 <span class="iconfont-archer">&#xe606;</span>
-                RenderThread
-            </span>
-            <span class="sidebar-tag-name" data-tags="DelayLoad">
-                <span class="iconfont-archer">&#xe606;</span>
-                DelayLoad
-            </span>
-            <span class="sidebar-tag-name" data-tags="Java">
-                <span class="iconfont-archer">&#xe606;</span>
-                Java
+                Perfetto
             </span>
             <span class="sidebar-tag-name" data-tags="Agent OS">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1633,9 +1607,25 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Mobile OS
             </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
             <span class="sidebar-tag-name" data-tags="Tools">
                 <span class="iconfont-archer">&#xe606;</span>
                 Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
             </span>
             <span class="sidebar-tag-name" data-tags="Linux">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1665,18 +1655,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Page Response
             </span>
-            <span class="sidebar-tag-name" data-tags="Binder">
-                <span class="iconfont-archer">&#xe606;</span>
-                Binder
-            </span>
-            <span class="sidebar-tag-name" data-tags="Locking">
-                <span class="iconfont-archer">&#xe606;</span>
-                Locking
-            </span>
-            <span class="sidebar-tag-name" data-tags="Scheduling">
-                <span class="iconfont-archer">&#xe606;</span>
-                Scheduling
-            </span>
             <span class="sidebar-tag-name" data-tags="SQL">
                 <span class="iconfont-archer">&#xe606;</span>
                 SQL
@@ -1693,21 +1671,17 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 DataFlow
             </span>
-            <span class="sidebar-tag-name" data-tags="SDK">
-                <span class="iconfont-archer">&#xe606;</span>
-                SDK
-            </span>
-            <span class="sidebar-tag-name" data-tags="TraceEvent">
-                <span class="iconfont-archer">&#xe606;</span>
-                TraceEvent
-            </span>
             <span class="sidebar-tag-name" data-tags="heapprofd">
                 <span class="iconfont-archer">&#xe606;</span>
                 heapprofd
             </span>
-            <span class="sidebar-tag-name" data-tags="Field">
+            <span class="sidebar-tag-name" data-tags="Year in Review">
                 <span class="iconfont-archer">&#xe606;</span>
-                Field
+                Year in Review
+            </span>
+            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Knowledge Planet
             </span>
             <span class="sidebar-tag-name" data-tags="GPU">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1717,6 +1691,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Power
             </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
             <span class="sidebar-tag-name" data-tags="Camera">
                 <span class="iconfont-archer">&#xe606;</span>
                 Camera
@@ -1724,6 +1702,22 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Audio">
                 <span class="iconfont-archer">&#xe606;</span>
                 Audio
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="Locking">
+                <span class="iconfont-archer">&#xe606;</span>
+                Locking
+            </span>
+            <span class="sidebar-tag-name" data-tags="Scheduling">
+                <span class="iconfont-archer">&#xe606;</span>
+                Scheduling
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
             </span>
             <span class="sidebar-tag-name" data-tags="Input">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1733,9 +1727,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Latency
             </span>
-            <span class="sidebar-tag-name" data-tags="MAT">
+            <span class="sidebar-tag-name" data-tags="SDK">
                 <span class="iconfont-archer">&#xe606;</span>
-                MAT
+                SDK
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceEvent">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceEvent
             </span>
             <span class="sidebar-tag-name" data-tags="HashMap">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1753,10 +1751,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Annual Recommendations
             </span>
-            <span class="sidebar-tag-name" data-tags="Nexus">
-                <span class="iconfont-archer">&#xe606;</span>
-                Nexus
-            </span>
             <span class="sidebar-tag-name" data-tags="OpenClaw">
                 <span class="iconfont-archer">&#xe606;</span>
                 OpenClaw
@@ -1769,17 +1763,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Local Models
             </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
             <span class="sidebar-tag-name" data-tags="AI Agent">
                 <span class="iconfont-archer">&#xe606;</span>
                 AI Agent
-            </span>
-            <span class="sidebar-tag-name" data-tags="Sharp Tools">
-                <span class="iconfont-archer">&#xe606;</span>
-                Sharp Tools
-            </span>
-            <span class="sidebar-tag-name" data-tags="Productivity">
-                <span class="iconfont-archer">&#xe606;</span>
-                Productivity
             </span>
             <span class="sidebar-tag-name" data-tags="SmartPerfetto">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1797,25 +1787,33 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Design Specs
             </span>
-            <span class="sidebar-tag-name" data-tags="Kotlin">
-                <span class="iconfont-archer">&#xe606;</span>
-                Kotlin
-            </span>
             <span class="sidebar-tag-name" data-tags="Compose">
                 <span class="iconfont-archer">&#xe606;</span>
                 Compose
             </span>
-            <span class="sidebar-tag-name" data-tags="Process">
+            <span class="sidebar-tag-name" data-tags="Kotlin">
                 <span class="iconfont-archer">&#xe606;</span>
-                Process
+                Kotlin
             </span>
             <span class="sidebar-tag-name" data-tags="Stutter">
                 <span class="iconfont-archer">&#xe606;</span>
                 Stutter
             </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
             <span class="sidebar-tag-name" data-tags="Overdraw">
                 <span class="iconfont-archer">&#xe606;</span>
                 Overdraw
+            </span>
+            <span class="sidebar-tag-name" data-tags="Sharp Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Sharp Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity
             </span>
             <span class="sidebar-tag-name" data-tags="Reading Notes">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1836,10 +1834,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="User Experience">
                 <span class="iconfont-archer">&#xe606;</span>
                 User Experience
-            </span>
-            <span class="sidebar-tag-name" data-tags="Reading">
-                <span class="iconfont-archer">&#xe606;</span>
-                Reading
             </span>
             <span class="sidebar-tag-name" data-tags="Internet">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1865,6 +1859,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Experience Optimization
             </span>
+            <span class="sidebar-tag-name" data-tags="Reading">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading
+            </span>
     </div>
     <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
     <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
@@ -1875,29 +1873,29 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-categories">
     <div class="sidebar-categories-name">
-        <span class="sidebar-category-name" data-categories="Essays">
+        <span class="sidebar-category-name" data-categories="Reading Notes">
             <span class="iconfont-archer">&#xe60a;</span>
-            Essays
+            Reading Notes
         </span>
         <span class="sidebar-category-name" data-categories="Casual Notes">
             <span class="iconfont-archer">&#xe60a;</span>
             Casual Notes
         </span>
-        <span class="sidebar-category-name" data-categories="Reading Notes">
-            <span class="iconfont-archer">&#xe60a;</span>
-            Reading Notes
-        </span>
         <span class="sidebar-category-name" data-categories="Android">
             <span class="iconfont-archer">&#xe60a;</span>
             Android
         </span>
-        <span class="sidebar-category-name" data-categories="Java">
+        <span class="sidebar-category-name" data-categories="Essays">
             <span class="iconfont-archer">&#xe60a;</span>
-            Java
+            Essays
         </span>
         <span class="sidebar-category-name" data-categories="AI">
             <span class="iconfont-archer">&#xe60a;</span>
             AI
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
         </span>
         <span class="sidebar-category-name" data-categories="Android Performance Optimization">
             <span class="iconfont-archer">&#xe60a;</span>

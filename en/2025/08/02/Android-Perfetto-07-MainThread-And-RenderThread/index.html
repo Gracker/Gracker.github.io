@@ -30,13 +30,13 @@
 <meta property="og:image" content="https://androidperformance.com/en/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803173809421.webp">
 <meta property="og:image" content="https://androidperformance.com/en/images/WechatIMG581.webp">
 <meta property="article:published_time" content="2025-08-02T02:11:45.000Z">
-<meta property="article:modified_time" content="2026-09-19T16:41:56.937Z">
+<meta property="article:modified_time" content="2026-09-29T01:31:21.552Z">
 <meta property="article:author" content="Gracker">
+<meta property="article:tag" content="Jank">
 <meta property="article:tag" content="Android">
+<meta property="article:tag" content="Performance">
 <meta property="article:tag" content="Perfetto">
 <meta property="article:tag" content="Systrace">
-<meta property="article:tag" content="Jank">
-<meta property="article:tag" content="Performance">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:image" content="https://androidperformance.com/en/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803165650716.webp">
                             <meta http-equiv="Cache-control" content="no-cache">
@@ -264,16 +264,16 @@ loading="lazy"             decoding="async"
                 Android
             </span>
         </span>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Jank">Jank</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Systrace">Systrace</a>
-        <a class="post-tag" href="javascript:void(0);" data-tags="Jank">Jank</a>
-        <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
 </div>
 
                 <!-- 文章字数统计 -->
                     <div class="post-intro-read">
-                        <span>Word count: <span class="post-count word-count">5.5k</span>Reading time: <span class="post-count reading-time">34 min</span></span>
+                        <span>Word count: <span class="post-count word-count">5.6k</span>Reading time: <span class="post-count reading-time">35 min</span></span>
                     </div>
                 <div class="post-intro-meta">
                     <!-- 撰写日期 -->
@@ -394,32 +394,33 @@ loading="lazy"             decoding="async"
 <p>Welcome to join the WeChat group or community on the <a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">About Me</a> page to discuss your questions, what you’d most like to see about Perfetto, and all Android development-related topics with fellow group members.</p>
 <p>The trace files used in this article have been uploaded to Github: <a target="_blank" rel="noopener" href="https://github.com/Gracker/SystraceForBlog/tree/master/Android_Perfetto/demo_app_aosp_scroll.perfetto-trace">https://github.com/Gracker/SystraceForBlog/tree/master/Android_Perfetto/demo_app_aosp_scroll.perfetto-trace</a>, feel free to download them.</p>
 <blockquote>
-<p><strong>Note: This article is based on Android 16’s latest rendering architecture</strong></p>
+<p><strong>Version note:</strong> Android 17 (API 37) is the current technical reference, and the same analysis approach can be checked on Android 12 and later. Source excerpts were organized from AOSP main at writing time, while screenshots come from the attached device trace; illustrative excerpts are not verbatim Android 17 release source. Verify signatures and track names against the target branch and trace.</p>
 </blockquote>
 <p><a id="render-flow"></a></p>
-<h1 id="Rendering-Flow-Analysis-Based-on-Perfetto"><a href="#Rendering-Flow-Analysis-Based-on-Perfetto" class="headerlink" title="Rendering Flow Analysis Based on Perfetto"></a>Rendering Flow Analysis Based on Perfetto</h1><p>Using a scrolling list as an example, we’ll capture the workflow of the main thread and render thread for <strong>one frame</strong> through Perfetto (each frame follows this process, though some frames have more work to do than others). In the Perfetto UI, focus on observing the activities of the “UI Thread” and “RenderThread” threads.</p>
-<h2 id="Frame-Concept-and-Basic-Parameters"><a href="#Frame-Concept-and-Basic-Parameters" class="headerlink" title="Frame Concept and Basic Parameters"></a>Frame Concept and Basic Parameters</h2><p>Before analyzing Perfetto traces, you need to understand the basic concept of frames. The Android system refreshes screen content at fixed time intervals:</p>
+<h1 id="Rendering-Flow-Analysis-Based-on-Perfetto"><a href="#Rendering-Flow-Analysis-Based-on-Perfetto" class="headerlink" title="Rendering Flow Analysis Based on Perfetto"></a>Rendering Flow Analysis Based on Perfetto</h1><p>Using a scrolling list as an example, we’ll inspect main-thread and RenderThread activity near <strong>one frame</strong> in Perfetto. The phases vary by frame and rendering path, so check frame tokens before treating nearby slices as one frame.</p>
+<h2 id="Frame-Concept-and-Basic-Parameters"><a href="#Frame-Concept-and-Basic-Parameters" class="headerlink" title="Frame Concept and Basic Parameters"></a>Frame Concept and Basic Parameters</h2><p>Before analyzing Perfetto traces, distinguish the display’s nominal interval in a fixed mode from the number of distinct app frames actually presented:</p>
 <ul>
-<li><strong>60Hz devices</strong>: Refresh every 16.67ms, 60 frames per second</li>
-<li><strong>90Hz devices</strong>: Refresh every 11.11ms, 90 frames per second</li>
-<li><strong>120Hz devices</strong>: Refresh every 8.33ms, 120 frames per second</li>
+<li><strong>60Hz mode</strong>: Nominal refresh interval about 16.67ms</li>
+<li><strong>90Hz mode</strong>: Nominal refresh interval about 11.11ms</li>
+<li><strong>120Hz mode</strong>: Nominal refresh interval about 8.33ms</li>
 </ul>
+<p>The display can repeat the preceding frame; none of these modes proves that the app produced that many new frames per second.</p>
 <p>When analyzing rendering performance in Perfetto, focus on these two threads:</p>
 <ul>
 <li><strong>UI Thread</strong>: The application main thread, handling user input, business logic, and layout calculations</li>
-<li><strong>RenderThread</strong>: The rendering thread, executing GPU rendering commands and interacting with SurfaceFlinger</li>
+<li><strong>RenderThread</strong>: The rendering thread, preparing and submitting GPU commands and interacting with the buffer submission path; the GPU executes those commands</li>
 </ul>
 <h2 id="Main-Thread-and-RenderThread-Workflow"><a href="#Main-Thread-and-RenderThread-Workflow" class="headerlink" title="Main Thread and RenderThread Workflow"></a>Main Thread and RenderThread Workflow</h2><p><img src="/en/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803165650716.webp" alt="image-20250803165650716"></p>
-<p>Through the Perfetto screenshot above, you can see the complete rendering process for one frame. We can imagine the Perfetto diagram as a river: the main thread handles logic upstream, and the render thread executes drawing downstream. The river flows from left to right, with each segment representing a step.</p>
-<p><strong>Important Note</strong>: Not every frame executes all steps. Input, Animation, and Insets Animation are all on-demand. Traversal (measure, layout, draw) is also on-demand: only when <code>requestLayout</code>, <code>invalidate</code>, window attribute changes, or visibility changes happen will <code>scheduleTraversals()</code> post <code>CALLBACK_TRAVERSAL</code>. In continuous scrolling&#x2F;animation scenarios, it often <em>looks like</em> it runs every frame.</p>
+<p>The Perfetto screenshot shows main-thread and RenderThread activity near one frame. We can imagine the Perfetto diagram as a river: the main thread handles logic upstream, and the render thread submits drawing work downstream. Check frame tokens before treating adjacent slices as one frame.</p>
+<p><strong>Important Note</strong>: Not every frame executes all steps. Input, Animation, and Insets Animation are all on-demand. Traversal (measure, layout, draw) is also on-demand: <code>requestLayout</code>, <code>invalidate</code>, and window or visibility changes are common reasons for <code>scheduleTraversals()</code> to post <code>CALLBACK_TRAVERSAL</code>. In continuous scrolling&#x2F;animation scenarios, it often <em>looks like</em> it runs every frame.</p>
 <p>Try to “play” this complete process in your mind through the following description:</p>
 <h3 id="1-Main-Thread-Waits-for-Vsync-Signal"><a href="#1-Main-Thread-Waits-for-Vsync-Signal" class="headerlink" title="1. Main Thread Waits for Vsync Signal"></a>1. Main Thread Waits for Vsync Signal</h3><ul>
-<li><strong>Perfetto trace</strong>: Main thread in Sleep state (shown as idle block)</li>
-<li><strong>Process description</strong>: Main thread waits for the vertical sync signal (Vsync) to arrive, ensuring rendering synchronizes with screen refresh rate to avoid screen tearing</li>
+<li><strong>Perfetto trace</strong>: The main thread may be Sleeping between two periods of work</li>
+<li><strong>Process description</strong>: With a pending frame, Choreographer requests a Vsync callback. Sleeping alone does not prove the thread is waiting specifically for Vsync.</li>
 </ul>
 <h3 id="2-Vsync-app-Signal-Delivery-Process"><a href="#2-Vsync-app-Signal-Delivery-Process" class="headerlink" title="2. Vsync-app Signal Delivery Process"></a>2. Vsync-app Signal Delivery Process</h3><ul>
 <li><strong>Perfetto trace</strong>: <code>vsync-app</code> related events, SurfaceFlinger app thread activity</li>
-<li><strong>Process description</strong>: When hardware generates a Vsync signal, it’s first delivered to SurfaceFlinger. SurfaceFlinger’s app thread is awakened, responsible for managing and distributing Vsync signals to applications that need to render. This intermediary layer design allows for system-level Vsync scheduling and optimization</li>
+<li><strong>Process description</strong>: SurfaceFlinger’s scheduler uses display timing, including hardware callbacks and software prediction, to schedule events for applications that requested them</li>
 </ul>
 <p><strong>Important Notes</strong>:</p>
 <ul>
@@ -433,13 +434,13 @@ loading="lazy"             decoding="async"
 </ul>
 <h3 id="4-Processing-Input-Events-Input"><a href="#4-Processing-Input-Events-Input" class="headerlink" title="4. Processing Input Events (Input)"></a>4. Processing Input Events (Input)</h3><ul>
 <li><strong>Perfetto trace</strong>: <code>Input</code> block</li>
-<li><strong>Process description</strong>: Only executes when there are input events, mainly handling touch, scroll, and other user interactions</li>
+<li><strong>Process description</strong>: Runs when the frame has a registered Input callback; not every system input event is handled in this callback</li>
 <li><strong>Trigger conditions</strong>:<ul>
 <li><strong>Has Input callback</strong>: When finger presses and slides on screen (like list scrolling, page dragging)</li>
 <li><strong>No Input callback</strong>: During inertial scrolling after finger lift, static state</li>
 </ul>
 </li>
-<li><strong>Note</strong>: Input callback is determined by the previous frame’s user interaction behavior to decide whether to execute in the current frame</li>
+<li><strong>Note</strong>: Check whether the callback was registered for this frame; finger state alone does not determine whether the slice appears</li>
 </ul>
 <h3 id="5-Processing-Animations-Animation"><a href="#5-Processing-Animations-Animation" class="headerlink" title="5. Processing Animations (Animation)"></a>5. Processing Animations (Animation)</h3><ul>
 <li><strong>Perfetto trace</strong>: <code>Animation</code> block</li>
@@ -527,9 +528,9 @@ loading="lazy"             decoding="async"
 </ul>
 <p><strong>Identifying different rendering modes in Perfetto</strong>:</p>
 <ul>
-<li><strong>During finger sliding</strong>: Each frame has complete <code>Input</code> → <code>Traversal</code> → <code>RenderThread</code> chain</li>
-<li><strong>During inertial scrolling</strong>: Each frame has <code>Animation</code> → <code>Traversal</code> → <code>RenderThread</code>, no <code>Input</code></li>
-<li><strong>In static state</strong>: Occasionally appears <code>Animation</code> → <code>Traversal</code> → <code>RenderThread</code>, no <code>Input</code></li>
+<li><strong>During finger sliding</strong>: Look for <code>Input</code> and <code>Traversal</code>, then confirm whether RenderThread submitted a frame</li>
+<li><strong>During inertial scrolling</strong>: <code>Animation</code> and <code>Traversal</code> are common; whether Input also appears depends on the captured callbacks</li>
+<li><strong>In static state</strong>: The app may submit no new frame; background animation or another update can still trigger work</li>
 </ul>
 <h2 id="Software-Drawing-vs-Hardware-Acceleration"><a href="#Software-Drawing-vs-Hardware-Acceleration" class="headerlink" title="Software Drawing vs Hardware Acceleration"></a>Software Drawing vs Hardware Acceleration</h2><p>Although hardware-accelerated rendering is now basically standard, understanding the differences between the two rendering modes still helps understand Perfetto traces:</p>
 <table>
@@ -548,7 +549,7 @@ loading="lazy"             decoding="async"
 <tr>
 <td><strong>Drawing Engine</strong></td>
 <td>Skia (CPU)</td>
-<td>OpenGL&#x2F;Vulkan (GPU)</td>
+<td>Skia with an OpenGL&#x2F;Vulkan GPU backend</td>
 </tr>
 <tr>
 <td><strong>Perfetto Characteristics</strong></td>
@@ -557,8 +558,8 @@ loading="lazy"             decoding="async"
 </tr>
 <tr>
 <td><strong>Performance Impact</strong></td>
-<td>May block main thread</td>
-<td>Asynchronous rendering, better performance</td>
+<td>May occupy the main thread</td>
+<td>Some work moves to RenderThread, but synchronization can still block the main thread</td>
 </tr>
 </tbody></table>
 <p>The above introduces the basic rendering process. For more detailed Choreographer principles, refer to <a href="https://androidperformance.com/en/2025/03/26/Android-Perfetto-05-Chorergrapher/">Android Perfetto Series 5: Android App Rendering Flow Based on Choreographer</a>.</p>
@@ -572,17 +573,16 @@ loading="lazy"             decoding="async"
 </ol>
 <p><a id="evolution"></a></p>
 <h1 id="Evolution-of-Dual-Thread-Rendering-Architecture"><a href="#Evolution-of-Dual-Thread-Rendering-Architecture" class="headerlink" title="Evolution of Dual-Thread Rendering Architecture"></a>Evolution of Dual-Thread Rendering Architecture</h1><p>Android’s rendering system has undergone an important evolution from single-thread to dual-thread.</p>
-<h2 id="Single-Thread-Era-Before-Android-4-4"><a href="#Single-Thread-Era-Before-Android-4-4" class="headerlink" title="Single-Thread Era (Before Android 4.4)"></a>Single-Thread Era (Before Android 4.4)</h2><p>In early Android versions, all UI-related work was executed on the main thread:</p>
+<h2 id="Earlier-View-Rendering-Before-Android-5-0"><a href="#Earlier-View-Rendering-Before-Android-5-0" class="headerlink" title="Earlier View Rendering (Before Android 5.0)"></a>Earlier View Rendering (Before Android 5.0)</h2><p>In early software-drawn View paths, the main thread handled more UI drawing work:</p>
 <ul>
 <li>Processing user input events</li>
 <li>Executing measure, layout, draw</li>
-<li>Calling OpenGL for actual drawing</li>
-<li>Interacting with SurfaceFlinger</li>
+<li>Submitting software-drawn buffers; other graphics paths could use other threads</li>
 </ul>
 <p>Problems with this design:</p>
 <ol>
 <li><strong>Poor responsiveness</strong>: Main thread overloaded, prone to ANR</li>
-<li><strong>Performance bottleneck</strong>: CPU and GPU cannot work in parallel</li>
+<li><strong>Performance bottleneck</strong>: Drawing work competes with input and business messages on the main thread</li>
 <li><strong>Unstable frame rate</strong>: Complex interfaces easily cause frame drops</li>
 </ol>
 <h2 id="Dual-Thread-Era-Starting-from-Android-5-0-Lollipop"><a href="#Dual-Thread-Era-Starting-from-Android-5-0-Lollipop" class="headerlink" title="Dual-Thread Era (Starting from Android 5.0 Lollipop)"></a>Dual-Thread Era (Starting from Android 5.0 Lollipop)</h2><p>Android 5.0 introduced <strong>RenderThread</strong>, implementing separation of rendering work:</p>
@@ -596,14 +596,14 @@ loading="lazy"             decoding="async"
 <p><strong>Render Thread Responsibilities</strong>:</p>
 <ul>
 <li>Receiving and processing DisplayList</li>
-<li>Executing OpenGL&#x2F;Vulkan rendering commands</li>
+<li>Generating and submitting OpenGL&#x2F;Vulkan rendering commands for the GPU to execute</li>
 <li>Managing textures and rendering resources</li>
 <li>Interacting with SurfaceFlinger</li>
 </ul>
 <p>Advantages of this architecture:</p>
 <ol>
-<li><strong>Parallel processing</strong>: Main thread can process next frame while render thread works</li>
-<li><strong>Improved responsiveness</strong>: Main thread no longer blocked by rendering</li>
+<li><strong>Parallel opportunity</strong>: After the key sync point, the main thread can process other messages while RenderThread continues</li>
+<li><strong>Sync boundary</strong>: The main thread can still block at <code>syncAndDrawFrame</code>; the two threads are not fully independent</li>
 <li><strong>Performance optimization</strong>: Better utilization of GPU resources</li>
 </ol>
 <p><a id="main-thread-create"></a></p>
@@ -619,16 +619,16 @@ loading="lazy"             decoding="async"
 <p>For regular app processes, this goes through <code>zygoteInit</code> and eventually reaches <code>ActivityThread.main</code>. <code>childZygoteInit</code> is for child-zygote flow, not the normal app path.</p>
 <p>android&#x2F;app&#x2F;ActivityThread.java</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title function_">main</span><span class="params">(String[] args)</span> &#123;</span><br><span class="line">    Trace.traceBegin(Trace.TRACE_TAG_ACTIVITY_MANAGER, <span class="string">&quot;ActivityThreadMain&quot;</span>);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 1. Initialize Looper, MessageQueue</span></span><br><span class="line">    Looper.prepareMainLooper();</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 2. Initialize ActivityThread</span></span><br><span class="line">    <span class="type">long</span> <span class="variable">startSeq</span> <span class="operator">=</span> <span class="number">0</span>;</span><br><span class="line">    <span class="keyword">if</span> (args != <span class="literal">null</span>) &#123;</span><br><span class="line">        <span class="keyword">for</span> (<span class="type">int</span> <span class="variable">i</span> <span class="operator">=</span> args.length - <span class="number">1</span>; i &gt;= <span class="number">0</span>; --i) &#123;</span><br><span class="line">            <span class="keyword">if</span> (args[i] != <span class="literal">null</span> &amp;&amp; args[i].startsWith(PROC_START_SEQ_IDENT)) &#123;</span><br><span class="line">                startSeq = Long.parseLong(</span><br><span class="line">                        args[i].substring(PROC_START_SEQ_IDENT.length()));</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="type">ActivityThread</span> <span class="variable">thread</span> <span class="operator">=</span> <span class="keyword">new</span> <span class="title class_">ActivityThread</span>();</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 3. Mainly calls AMS.attachApplicationLocked, syncs process info, does some initialization</span></span><br><span class="line">    thread.attach(<span class="literal">false</span>, startSeq);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 4. Get main thread&#x27;s Handler, which is H, basically all App Messages are processed in this Handler</span></span><br><span class="line">    <span class="keyword">if</span> (sMainThreadHandler == <span class="literal">null</span>) &#123;</span><br><span class="line">        sMainThreadHandler = thread.getHandler();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    Trace.traceEnd(Trace.TRACE_TAG_ACTIVITY_MANAGER);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 5. Initialization complete, Looper starts working</span></span><br><span class="line">    Looper.loop();</span><br><span class="line"></span><br><span class="line">    <span class="keyword">throw</span> <span class="keyword">new</span> <span class="title class_">RuntimeException</span>(<span class="string">&quot;Main thread loop unexpectedly exited&quot;</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-<p>The comments are very clear, so I won’t elaborate here. After the main function finishes processing, the main thread is officially online and starts working.</p>
+<p>The comments are very clear, so I won’t elaborate here. Once <code>Looper.loop()</code> starts, the main thread begins dispatching messages; <code>ActivityThread.main()</code> does not normally return while the app is running.</p>
 <p><a id="activitythread"></a></p>
-<h2 id="ActivityThread-Functionality"><a href="#ActivityThread-Functionality" class="headerlink" title="ActivityThread Functionality"></a>ActivityThread Functionality</h2><p>Also, what we often say is that Android’s four major components all run on the main thread. This is actually easy to understand by looking at ActivityThread’s Handler Messages</p>
-<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> <span class="title class_">H</span> <span class="keyword">extends</span> <span class="title class_">Handler</span> &#123; <span class="comment">// Excerpt of some, based on Android 16 latest implementation</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">BIND_APPLICATION</span>        <span class="operator">=</span> <span class="number">110</span>; <span class="comment">// Application startup</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">CREATE_SERVICE</span>          <span class="operator">=</span> <span class="number">114</span>; <span class="comment">// Create Service</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">BIND_SERVICE</span>            <span class="operator">=</span> <span class="number">121</span>; <span class="comment">// Bind Service</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">RECEIVER</span>                <span class="operator">=</span> <span class="number">113</span>; <span class="comment">// Broadcast reception</span></span><br><span class="line">    <span class="comment">// ... and other four major component related message types</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-<p>You can see that process creation, Activity startup, Service management, Receiver management, and Provider management are all handled here, then proceed to specific handleXXX</p>
+<h2 id="ActivityThread-Functionality"><a href="#ActivityThread-Functionality" class="headerlink" title="ActivityThread Functionality"></a>ActivityThread Functionality</h2><p>ActivityThread’s Handler dispatches many component lifecycle messages on the main thread. Subsequent work in a Service or Receiver can move to other threads, so this does not mean every operation of all four component types runs on the main thread.</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> <span class="title class_">H</span> <span class="keyword">extends</span> <span class="title class_">Handler</span> &#123; <span class="comment">// Illustrative message types; check values in the target branch</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">BIND_APPLICATION</span>        <span class="operator">=</span> <span class="number">110</span>; <span class="comment">// Application startup</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">CREATE_SERVICE</span>          <span class="operator">=</span> <span class="number">114</span>; <span class="comment">// Create Service</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">BIND_SERVICE</span>            <span class="operator">=</span> <span class="number">121</span>; <span class="comment">// Bind Service</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">RECEIVER</span>                <span class="operator">=</span> <span class="number">113</span>; <span class="comment">// Broadcast reception</span></span><br><span class="line">    <span class="comment">// ... and other four major component related message types</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>You can see that process creation, Activity startup, Service management, Receiver management, and Provider management are all handled here, then proceed to specific handleXXX. On <a target="_blank" rel="noopener" href="https://developer.android.com/about/versions/17/behavior-changes-17">Android 17</a>, apps targeting API 37 or higher use a new lock-free <code>MessageQueue</code> implementation. <code>Looper</code> and <code>Handler</code> usage remains the same, but checks for queue-internal lock contention must account for the app’s <code>targetSdkVersion</code>.</p>
 <p><a id="render-thread"></a></p>
-<h1 id="RenderThread-Creation-and-Development"><a href="#RenderThread-Creation-and-Development" class="headerlink" title="RenderThread Creation and Development"></a>RenderThread Creation and Development</h1><p>After discussing the main thread, let’s talk about the render thread, which is RenderThread. The earliest Android versions didn’t have a render thread; rendering work was all done on the main thread using CPU, calling the libSkia library. RenderThread was a new component added in Android Lollipop, responsible for taking on part of the main thread’s previous rendering work, reducing the main thread’s burden.</p>
+<h1 id="RenderThread-Creation-and-Development"><a href="#RenderThread-Creation-and-Development" class="headerlink" title="RenderThread Creation and Development"></a>RenderThread Creation and Development</h1><p>After discussing the main thread, let’s talk about RenderThread. Early software-drawn View paths put more drawing work on the main thread through Skia; other graphics paths could already use GPU work. RenderThread was added in Android Lollipop to take on part of the View rendering work.</p>
 <h2 id="Software-Drawing"><a href="#Software-Drawing" class="headerlink" title="Software Drawing"></a>Software Drawing</h2><p>What we generally refer to as hardware acceleration means GPU acceleration, which can be understood as using RenderThread to call GPU for rendering acceleration. Hardware acceleration is enabled by default in current Android, so if we don’t set anything, our processes will have both main thread and render thread by default (with visible content). If we add this to the Application tag in the App’s AndroidManifest:</p>
 <figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">android:hardwareAccelerated=&quot;false&quot;</span><br></pre></td></tr></table></figure>
-<p>We can disable hardware acceleration. When the system detects that your App has disabled hardware acceleration, it won’t initialize RenderThread and will directly use CPU to call libSkia for rendering. Its Trace tracking performance is as follows <strong>(resources are older, using Systrace diagram)</strong></p>
+<p>We can disable hardware acceleration for ordinary View drawing. That path then relies more on main-thread software drawing; whether the process still has a RenderThread depends on other Surfaces or components. Its Trace tracking performance is as follows <strong>(resources are older, using Systrace diagram)</strong></p>
 <p><img src="/en/images/Android-Perfetto-07-MainThread-And-RenderThread/15717420572997.jpg" alt="img"></p>
 <p>Compared with the Perfetto diagram with hardware acceleration enabled at the beginning of this article, you can see that the main thread takes longer to execute because it needs to perform rendering work, making it more prone to jank. At the same time, the idle interval between frames becomes shorter, compressing the execution time of other Messages. In Perfetto, this difference can be clearly observed through the length and density of thread activity.</p>
 <h2 id="Hardware-Accelerated-Drawing"><a href="#Hardware-Accelerated-Drawing" class="headerlink" title="Hardware-Accelerated Drawing"></a>Hardware-Accelerated Drawing</h2><p>Under normal circumstances, hardware acceleration is enabled. Main thread draw mainly builds&#x2F;updates DisplayList (RenderNode tree), then syncs via <code>syncAndDrawFrame</code>. UI thread waits briefly on key sync path, returns quickly to process messages, and RenderThread continues rendering&#x2F;submission.</p>
@@ -670,35 +670,35 @@ loading="lazy"             decoding="async"
 <p><strong>Key Features of BlastBufferQueue:</strong></p>
 <ol>
 <li><strong>App-side management</strong>: Unlike traditional BufferQueue created by SurfaceFlinger, BlastBufferQueue is created and managed by the App side</li>
-<li><strong>Reduced sync waiting</strong>: Through producer-consumer model, reduces RenderThread’s wait time during dequeueBuffer</li>
-<li><strong>Efficient buffer rotation</strong>: Supports smarter buffer management strategies, especially adapted for high refresh rate displays</li>
+<li><strong>Buffer acquisition</strong>: Producer and consumer are local to the app, but <code>dequeueBuffer</code> can still wait when no buffer is available</li>
+<li><strong>Buffer rotation</strong>: Measure any waiting-time or high-refresh-rate benefit on the target device trace</li>
 <li><strong>Asynchronous submission</strong>: Asynchronously submits completed frames to SurfaceFlinger through transaction mechanism</li>
 <li><strong>Supports unsignaled buffer</strong>: Cooperating with SurfaceFlinger unsignaled-latch policies can reduce end-to-end latency in specific scenarios</li>
 </ol>
 <p><strong>In-depth Discussion on Latching Unsignaled Buffers</strong></p>
-<p>Modern Android systems have fine-grained control over <code>presentFence</code> handling, not always waiting. This mechanism is called <strong>“Latching Unsignaled Buffers”</strong> (capturing unready buffers).</p>
+<p>Modern Android systems can sometimes latch a Buffer before its <strong>acquire fence</strong> signals. This policy is called <strong>“Latching Unsignaled Buffers”</strong>. The present fence records a later presentation stage and must not be confused with the acquire fence.</p>
 <ul>
-<li><p><strong>Traditional mode</strong>: SurfaceFlinger must wait for App’s <code>presentFence</code> to be signaled by GPU before it can “latch” (capture) this Buffer for composition. This ensures safety but increases latency.</p>
+<li><p><strong>Traditional mode</strong>: SurfaceFlinger checks the Buffer’s acquire fence before reading content that the GPU may still be writing.</p>
 </li>
-<li><p><strong>Latch Unsignaled mode</strong>: In this mode, SurfaceFlinger can immediately latch a Buffer that GPU hasn’t finished rendering (i.e., fence unsignaled) and start partial composition work early. When it needs to actually use this Buffer’s content, it waits for <code>presentFence</code> internally. This further hides GPU rendering latency through pipelining, crucial for reducing input latency in fullscreen apps like games and videos.</p>
+<li><p><strong>Latch Unsignaled mode</strong>: Under the supported policy, SurfaceFlinger can latch a Buffer whose acquire fence has not yet signaled. It must still wait before actually reading unfinished content; whether this lowers latency depends on the device and scene.</p>
 </li>
 </ul>
 <p><strong>Control Switch and Policy (Android 13+)</strong>:</p>
 <p>This behavior can be globally debugged through system property <code>debug.sf.auto_latch_unsignaled</code>, but more importantly, it’s controlled by a layered policy called <code>LatchUnsignaledConfig</code>. A typical policy is <code>AutoSingleLayer</code>:</p>
 <ul>
-<li>When only a <strong>single layer</strong> on screen is updating (like fullscreen games or videos), the system automatically enables Latch Unsignaled mode, as there are no complex layer dependencies at this time, lowest risk, maximum benefit.</li>
-<li>When multiple layers are updating, the system falls back to safer traditional waiting mode to avoid potential visual errors.</li>
+<li>In Android 13’s default <code>AutoSingleLayer</code> policy, early latch requires a single updated layer with a Buffer-only update and no synchronizing transaction or geometry change.</li>
+<li>Multiple updated layers or other excluded transaction conditions do not take that early-latch path.</li>
 </ul>
-<p>Therefore, SurfaceFlinger doesn’t always blindly wait for <code>presentFence</code>, but decides whether to “jump the gun” based on precise policies, achieving a balance between stability and ultimate performance.</p>
-<h2 id="Division-of-Labor-Between-Main-Thread-and-Render-Thread"><a href="#Division-of-Labor-Between-Main-Thread-and-Render-Thread" class="headerlink" title="Division of Labor Between Main Thread and Render Thread"></a>Division of Labor Between Main Thread and Render Thread</h2><p>The main thread handles process Messages, Input events, Animation logic, Measure, Layout, Draw, and updates DisplayList, but doesn’t directly interact with SurfaceFlinger; the render thread handles rendering-related work, including interaction with BlastBufferQueue, GPU rendering command execution, and final interaction with SurfaceFlinger.</p>
+<p>SurfaceFlinger therefore follows an acquire-fence and layer-update policy; the present fence is used later to assess when presentation completed.</p>
+<h2 id="Division-of-Labor-Between-Main-Thread-and-Render-Thread"><a href="#Division-of-Labor-Between-Main-Thread-and-Render-Thread" class="headerlink" title="Division of Labor Between Main Thread and Render Thread"></a>Division of Labor Between Main Thread and Render Thread</h2><p>The main thread handles process Messages, Input events, Animation logic, Measure, Layout, Draw, and updates DisplayList, but doesn’t directly interact with SurfaceFlinger; the render thread handles rendering-related work, including interaction with BlastBufferQueue and submitting GPU commands. The GPU executes those commands.</p>
 <p>When hardware acceleration is enabled, in the Draw phase of Measure, Layout, Draw, Android uses DisplayList for drawing rather than directly using CPU to draw each frame. DisplayList is a record of a series of drawing operations, abstracted as the RenderNode class. The advantages of this indirect drawing operation are as follows:</p>
 <ol>
 <li>DisplayList can be drawn multiple times on demand without interacting with business logic</li>
 <li>Specific drawing operations (like translation, scale, etc.) can be applied to the entire DisplayList without redistributing drawing operations</li>
 <li>When all drawing operations are known, they can be optimized: for example, all text can be drawn together at once</li>
 <li>Processing of DisplayList can be transferred to another thread (i.e., RenderThread)</li>
-<li>After sync ends, the main thread can process other Messages without waiting for RenderThread to finish</li>
-<li>Through BlastBufferQueue, achieve more efficient buffer management, reducing rendering latency and main thread blocking</li>
+<li>After the key sync point releases the main thread, it can process other Messages; later work may still block it</li>
+<li>BlastBufferQueue associates Buffers with SurfaceControl transactions; measure whether it reduces waiting in the target trace</li>
 </ol>
 <h3 id="BlastBufferQueue-Working-Principle"><a href="#BlastBufferQueue-Working-Principle" class="headerlink" title="BlastBufferQueue Working Principle"></a>BlastBufferQueue Working Principle</h3><p>BlastBufferQueue is a key component in modern Android rendering architecture, changing traditional buffer management methods:</p>
 <p><strong>Traditional BufferQueue vs BlastBufferQueue:</strong></p>
@@ -711,14 +711,14 @@ loading="lazy"             decoding="async"
 </li>
 <li><p><strong>Buffer acquisition mechanism</strong>:</p>
 <ul>
-<li>Traditional method: RenderThread needs to request Buffer from SurfaceFlinger through Binder call, may block if no available Buffer</li>
-<li>BlastBufferQueue: App side pre-manages buffer pool, RenderThread can acquire Buffer more efficiently</li>
+<li>Traditional method: <code>dequeueBuffer</code> can block when no Buffer is available</li>
+<li>BlastBufferQueue: App side creates a local BufferQueue, but <code>dequeueBuffer</code> can still block when no Buffer is available</li>
 </ul>
 </li>
 <li><p><strong>Submission mechanism</strong>:</p>
 <ul>
 <li>Traditional method: Directly submits to SurfaceFlinger through queueBuffer</li>
-<li>BlastBufferQueue: Batch submits through transaction mechanism, reducing Binder call overhead</li>
+<li>BlastBufferQueue: Associates the Buffer with a SurfaceControl transaction before submission</li>
 </ul>
 </li>
 </ol>
@@ -766,14 +766,14 @@ loading="lazy"             decoding="async"
 <p><a id="performance"></a></p>
 <h1 id="Performance"><a href="#Performance" class="headerlink" title="Performance"></a>Performance</h1><p>If the main thread needs to handle all tasks, executing time-consuming operations (e.g., network access or database queries) will block the entire UI thread. Once blocked, the thread cannot dispatch any events, including drawing events. Main thread execution timeout typically brings two problems:</p>
 <ol>
-<li><strong>Jank</strong>: If main thread + render thread execution for each frame exceeds 8.33ms (in 120fps case), frame drops may occur (saying “may” because in some cases frames won’t actually drop, due to app duration, buffer accumulation, etc.).</li>
+<li><strong>Jank</strong>: At 120Hz the nominal display interval is 8.33ms, but main-thread, RenderThread, and GPU work overlap in a pipeline. Do not add the two thread durations and compare the sum directly with 8.33ms; use the frame deadline and actual presentation result.</li>
 <li><strong>Freeze</strong>: If the UI thread is blocked for more than a few seconds (this threshold varies depending on the component), users will see an “<a target="_blank" rel="noopener" href="http://developer.android.google.cn/guide/practices/responsiveness.html">Application Not Responding</a>“ (ANR) dialog (some manufacturers block this dialog and will directly crash to desktop)</li>
 </ol>
 <p>For users, both situations are undesirable, so for App developers, both issues must be resolved before release. ANR is relatively easy to locate due to detailed call stacks; but intermittent jank may require tools for analysis: <strong>Perfetto + Trace View (already integrated in Android Studio)</strong>. Therefore, understanding the relationship between main thread and render thread and their working principles is very important, which is also an original intention of this series.</p>
 <p><a id="frametimeline"></a></p>
 <h2 id="Perfetto’s-Unique-FrameTimeline-Feature"><a href="#Perfetto’s-Unique-FrameTimeline-Feature" class="headerlink" title="Perfetto’s Unique FrameTimeline Feature"></a>Perfetto’s Unique FrameTimeline Feature</h2><p>An important advantage of Perfetto over Systrace is providing the <strong>FrameTimeline</strong> feature, which allows you to see jank locations at a glance.</p>
 <blockquote>
-<p><strong>Note</strong>: FrameTimeline requires Android 12(S) or higher version support</p>
+<p><strong>Note</strong>: FrameTimeline requires Android 12 or later</p>
 </blockquote>
 <h3 id="Core-Concepts-of-FrameTimeline"><a href="#Core-Concepts-of-FrameTimeline" class="headerlink" title="Core Concepts of FrameTimeline"></a>Core Concepts of FrameTimeline</h3><p>According to <a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/frametimeline">Perfetto official documentation</a>, jank occurs when a frame’s actual presentation time on screen doesn’t match the scheduler’s expected presentation time. FrameTimeline adds two new tracks for each application with frames displayed on screen:</p>
 <p><img src="/en/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803172616453.webp" alt="image-20250803172616453"></p>
@@ -821,10 +821,10 @@ loading="lazy"             decoding="async"
 <tr>
 <td><strong>Blue</strong></td>
 <td>Dropped frame</td>
-<td>SurfaceFlinger discarded this frame, chose newer frame</td>
+<td>On the SF side a newer frame was chosen; on the app side, a UI state update may have missed RenderThread before it drew</td>
 </tr>
 </tbody></table>
-<p>Clicking different colored ActualTimeline shows the following description in the info bar, telling you the cause of jank:<br><img src="/en/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803173304026.webp" alt="image-20250803173304026"></p>
+<p>Clicking different colored ActualTimeline slices shows classifications such as <code>jank_type</code>; inspect threads and fences to identify the underlying cause:<br><img src="/en/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803173304026.webp" alt="image-20250803173304026"></p>
 <h3 id="Jank-Type-Analysis"><a href="#Jank-Type-Analysis" class="headerlink" title="Jank Type Analysis"></a>Jank Type Analysis</h3><p>FrameTimeline can identify multiple jank types:</p>
 <h4 id="App-side-jank"><a href="#App-side-jank" class="headerlink" title="App-side jank:"></a>App-side jank:</h4><ul>
 <li><strong>AppDeadlineMissed</strong>: App runtime exceeded expectations</li>
@@ -840,7 +840,7 @@ loading="lazy"             decoding="async"
 <figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">data_sources &#123;</span><br><span class="line">    config &#123;</span><br><span class="line">        name: &quot;android.surfaceflinger.frametimeline&quot;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
 <p><a id="vsync"></a></p>
-<h2 id="Vsync-Signals-in-Perfetto"><a href="#Vsync-Signals-in-Perfetto" class="headerlink" title="Vsync Signals in Perfetto"></a>Vsync Signals in Perfetto</h2><p>In Perfetto, <strong>Vsync signals are displayed using Counter type</strong>, which differs from many people’s intuitive understanding:</p>
+<h2 id="Vsync-Signals-in-Perfetto"><a href="#Vsync-Signals-in-Perfetto" class="headerlink" title="Vsync Signals in Perfetto"></a>Vsync Signals in Perfetto</h2><p>In this trace, <strong>VSYNC-app is displayed as a Counter</strong>, which differs from many people’s intuitive understanding:</p>
 <ul>
 <li><strong>0 → 1 change</strong>: Represents a Vsync signal</li>
 <li><strong>1 → 0 change</strong>: Also represents a Vsync signal</li>
@@ -850,7 +850,7 @@ loading="lazy"             decoding="async"
 <p><img src="/en/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803173809421.webp" alt="image-20250803173809421"></p>
 <p><strong>Key points</strong>:</p>
 <ol>
-<li><strong>Each value change is a Vsync</strong>: Whether 0→1 or 1→0</li>
+<li><strong>Each value change in this screenshot corresponds to a recorded Vsync marker</strong>: Whether 0→1 or 1→0; this is not a universal encoding for all Vsync tracks</li>
 <li><strong>Signal frequency</strong>: On 120Hz devices, there’s approximately one change every 8.33ms (actual may vary slightly due to system scheduling, referring to continuous frame output scenarios)</li>
 <li><strong>Multi-app scenario</strong>: Counter may remain active due to other apps’ requests</li>
 </ol>
@@ -889,7 +889,7 @@ loading="lazy"             decoding="async"
             <p>Author：<a href="https://androidperformance.com/en">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">https://androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/</a>
             <p>Publish date：<a href="https://androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">August 2nd 2025, 10:11:45 am</a>
-            <p>Update date：<a href="https://androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">September 20th 2026, 12:41:56 am</a>
+            <p>Update date：<a href="https://androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">September 29th 2026, 9:31:21 am</a>
             <p>License：This work is licensed under <a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a></p>
         </div>
     <!-- paginator -->
@@ -967,7 +967,7 @@ loading="lazy"             decoding="async"
                 <div class="toc-catalog">
                     <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
                 </div>
-                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Table-of-Contents"><span class="toc-number">1.</span> <span class="toc-text">Table of Contents</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Series-Catalog"><span class="toc-number"></span> <span class="toc-text">Series Catalog</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Rendering-Flow-Analysis-Based-on-Perfetto"><span class="toc-number"></span> <span class="toc-text">Rendering Flow Analysis Based on Perfetto</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#Frame-Concept-and-Basic-Parameters"><span class="toc-number">1.</span> <span class="toc-text">Frame Concept and Basic Parameters</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Main-Thread-and-RenderThread-Workflow"><span class="toc-number">2.</span> <span class="toc-text">Main Thread and RenderThread Workflow</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#1-Main-Thread-Waits-for-Vsync-Signal"><span class="toc-number">2.1.</span> <span class="toc-text">1. Main Thread Waits for Vsync Signal</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-Vsync-app-Signal-Delivery-Process"><span class="toc-number">2.2.</span> <span class="toc-text">2. Vsync-app Signal Delivery Process</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-SurfaceFlinger-Wakes-Up-App-Main-Thread"><span class="toc-number">2.3.</span> <span class="toc-text">3. SurfaceFlinger Wakes Up App Main Thread</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#4-Processing-Input-Events-Input"><span class="toc-number">2.4.</span> <span class="toc-text">4. Processing Input Events (Input)</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#5-Processing-Animations-Animation"><span class="toc-number">2.5.</span> <span class="toc-text">5. Processing Animations (Animation)</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#6-Processing-Insets-Animations"><span class="toc-number">2.6.</span> <span class="toc-text">6. Processing Insets Animations</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#7-Traversal-Measure-Layout-Draw-Preparation"><span class="toc-number">2.7.</span> <span class="toc-text">7. Traversal (Measure, Layout, Draw Preparation)</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#7-1-Measure-Phase"><span class="toc-number">2.7.1.</span> <span class="toc-text">7.1 Measure Phase</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#7-2-Layout-Phase"><span class="toc-number">2.7.2.</span> <span class="toc-text">7.2 Layout Phase</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#7-3-Draw-Phase"><span class="toc-number">2.7.3.</span> <span class="toc-text">7.3 Draw Phase</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#ViewRootImpl-performTraversals-Core-Code"><span class="toc-number">2.7.4.</span> <span class="toc-text">ViewRootImpl.performTraversals Core Code</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#8-Sync-DisplayList-to-Render-Thread"><span class="toc-number">2.8.</span> <span class="toc-text">8. Sync DisplayList to Render Thread</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#9-Render-Thread-Acquires-Buffer"><span class="toc-number">2.9.</span> <span class="toc-text">9. Render Thread Acquires Buffer</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#10-Process-Rendering-Instructions-and-Flush-to-GPU"><span class="toc-number">2.10.</span> <span class="toc-text">10. Process Rendering Instructions and Flush to GPU</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#11-Submit-Buffer-Possibly-Unsignaled"><span class="toc-number">2.11.</span> <span class="toc-text">11. Submit Buffer (Possibly Unsignaled)</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#12-Trigger-Transaction-to-SurfaceFlinger"><span class="toc-number">2.12.</span> <span class="toc-text">12. Trigger Transaction to SurfaceFlinger</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Software-Drawing-vs-Hardware-Acceleration"><span class="toc-number">3.</span> <span class="toc-text">Software Drawing vs Hardware Acceleration</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Evolution-of-Dual-Thread-Rendering-Architecture"><span class="toc-number"></span> <span class="toc-text">Evolution of Dual-Thread Rendering Architecture</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#Single-Thread-Era-Before-Android-4-4"><span class="toc-number">1.</span> <span class="toc-text">Single-Thread Era (Before Android 4.4)</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Dual-Thread-Era-Starting-from-Android-5-0-Lollipop"><span class="toc-number">2.</span> <span class="toc-text">Dual-Thread Era (Starting from Android 5.0 Lollipop)</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Main-Thread-Creation-Process"><span class="toc-number"></span> <span class="toc-text">Main Thread Creation Process</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#ActivityThread-Creation"><span class="toc-number">1.</span> <span class="toc-text">ActivityThread Creation</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#ActivityThread-Functionality"><span class="toc-number">2.</span> <span class="toc-text">ActivityThread Functionality</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#RenderThread-Creation-and-Development"><span class="toc-number"></span> <span class="toc-text">RenderThread Creation and Development</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#Software-Drawing"><span class="toc-number">1.</span> <span class="toc-text">Software Drawing</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Hardware-Accelerated-Drawing"><span class="toc-number">2.</span> <span class="toc-text">Hardware-Accelerated Drawing</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Render-Thread-Initialization"><span class="toc-number">3.</span> <span class="toc-text">Render Thread Initialization</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#UI-Thread-and-RenderThread-DisplayList-Synchronization-Mechanism"><span class="toc-number">3.1.</span> <span class="toc-text">UI Thread and RenderThread DisplayList Synchronization Mechanism</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#RenderThread-and-BlastBufferQueue-Interaction-Flow"><span class="toc-number">3.2.</span> <span class="toc-text">RenderThread and BlastBufferQueue Interaction Flow</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Division-of-Labor-Between-Main-Thread-and-Render-Thread"><span class="toc-number">4.</span> <span class="toc-text">Division of Labor Between Main Thread and Render Thread</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#BlastBufferQueue-Working-Principle"><span class="toc-number">4.1.</span> <span class="toc-text">BlastBufferQueue Working Principle</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#App-side-QueuedBuffer-Metric"><span class="toc-number">4.2.</span> <span class="toc-text">App-side QueuedBuffer Metric</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#QueuedBuffer-Value-Change-Timing"><span class="toc-number">4.3.</span> <span class="toc-text">QueuedBuffer Value Change Timing</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#SurfaceFlinger-side-BufferTX-Metric"><span class="toc-number">4.4.</span> <span class="toc-text">SurfaceFlinger-side BufferTX Metric</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Collaboration-Flow-Between-App-Side-and-SF-Side"><span class="toc-number">4.5.</span> <span class="toc-text">Collaboration Flow Between App Side and SF Side</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Key-Performance-Observation-Points"><span class="toc-number">4.6.</span> <span class="toc-text">Key Performance Observation Points</span></a></li></ol></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Performance"><span class="toc-number"></span> <span class="toc-text">Performance</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto%E2%80%99s-Unique-FrameTimeline-Feature"><span class="toc-number">1.</span> <span class="toc-text">Perfetto’s Unique FrameTimeline Feature</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Core-Concepts-of-FrameTimeline"><span class="toc-number">1.1.</span> <span class="toc-text">Core Concepts of FrameTimeline</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#1-Expected-Timeline"><span class="toc-number">1.1.1.</span> <span class="toc-text">1. Expected Timeline</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#2-Actual-Timeline"><span class="toc-number">1.1.2.</span> <span class="toc-text">2. Actual Timeline</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Color-Coding-System"><span class="toc-number">1.2.</span> <span class="toc-text">Color Coding System</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Jank-Type-Analysis"><span class="toc-number">1.3.</span> <span class="toc-text">Jank Type Analysis</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#App-side-jank"><span class="toc-number">1.3.1.</span> <span class="toc-text">App-side jank:</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#SurfaceFlinger-jank"><span class="toc-number">1.3.2.</span> <span class="toc-text">SurfaceFlinger jank:</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Configuring-FrameTimeline"><span class="toc-number">1.4.</span> <span class="toc-text">Configuring FrameTimeline</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Vsync-Signals-in-Perfetto"><span class="toc-number">2.</span> <span class="toc-text">Vsync Signals in Perfetto</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Correct-Vsync-Signal-Identification"><span class="toc-number">2.1.</span> <span class="toc-text">Correct Vsync Signal Identification</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Analysis-Techniques"><span class="toc-number">2.2.</span> <span class="toc-text">Analysis Techniques</span></a></li></ol></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#References"><span class="toc-number"></span> <span class="toc-text">References</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Attachments"><span class="toc-number"></span> <span class="toc-text">Attachments</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#About-Me-amp-amp-Blog"><span class="toc-number"></span> <span class="toc-text">About Me &amp;&amp; Blog</span></a>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#Table-of-Contents"><span class="toc-number">1.</span> <span class="toc-text">Table of Contents</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Series-Catalog"><span class="toc-number"></span> <span class="toc-text">Series Catalog</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Rendering-Flow-Analysis-Based-on-Perfetto"><span class="toc-number"></span> <span class="toc-text">Rendering Flow Analysis Based on Perfetto</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#Frame-Concept-and-Basic-Parameters"><span class="toc-number">1.</span> <span class="toc-text">Frame Concept and Basic Parameters</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Main-Thread-and-RenderThread-Workflow"><span class="toc-number">2.</span> <span class="toc-text">Main Thread and RenderThread Workflow</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#1-Main-Thread-Waits-for-Vsync-Signal"><span class="toc-number">2.1.</span> <span class="toc-text">1. Main Thread Waits for Vsync Signal</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-Vsync-app-Signal-Delivery-Process"><span class="toc-number">2.2.</span> <span class="toc-text">2. Vsync-app Signal Delivery Process</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-SurfaceFlinger-Wakes-Up-App-Main-Thread"><span class="toc-number">2.3.</span> <span class="toc-text">3. SurfaceFlinger Wakes Up App Main Thread</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#4-Processing-Input-Events-Input"><span class="toc-number">2.4.</span> <span class="toc-text">4. Processing Input Events (Input)</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#5-Processing-Animations-Animation"><span class="toc-number">2.5.</span> <span class="toc-text">5. Processing Animations (Animation)</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#6-Processing-Insets-Animations"><span class="toc-number">2.6.</span> <span class="toc-text">6. Processing Insets Animations</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#7-Traversal-Measure-Layout-Draw-Preparation"><span class="toc-number">2.7.</span> <span class="toc-text">7. Traversal (Measure, Layout, Draw Preparation)</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#7-1-Measure-Phase"><span class="toc-number">2.7.1.</span> <span class="toc-text">7.1 Measure Phase</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#7-2-Layout-Phase"><span class="toc-number">2.7.2.</span> <span class="toc-text">7.2 Layout Phase</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#7-3-Draw-Phase"><span class="toc-number">2.7.3.</span> <span class="toc-text">7.3 Draw Phase</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#ViewRootImpl-performTraversals-Core-Code"><span class="toc-number">2.7.4.</span> <span class="toc-text">ViewRootImpl.performTraversals Core Code</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#8-Sync-DisplayList-to-Render-Thread"><span class="toc-number">2.8.</span> <span class="toc-text">8. Sync DisplayList to Render Thread</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#9-Render-Thread-Acquires-Buffer"><span class="toc-number">2.9.</span> <span class="toc-text">9. Render Thread Acquires Buffer</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#10-Process-Rendering-Instructions-and-Flush-to-GPU"><span class="toc-number">2.10.</span> <span class="toc-text">10. Process Rendering Instructions and Flush to GPU</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#11-Submit-Buffer-Possibly-Unsignaled"><span class="toc-number">2.11.</span> <span class="toc-text">11. Submit Buffer (Possibly Unsignaled)</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#12-Trigger-Transaction-to-SurfaceFlinger"><span class="toc-number">2.12.</span> <span class="toc-text">12. Trigger Transaction to SurfaceFlinger</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Software-Drawing-vs-Hardware-Acceleration"><span class="toc-number">3.</span> <span class="toc-text">Software Drawing vs Hardware Acceleration</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Evolution-of-Dual-Thread-Rendering-Architecture"><span class="toc-number"></span> <span class="toc-text">Evolution of Dual-Thread Rendering Architecture</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#Earlier-View-Rendering-Before-Android-5-0"><span class="toc-number">1.</span> <span class="toc-text">Earlier View Rendering (Before Android 5.0)</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Dual-Thread-Era-Starting-from-Android-5-0-Lollipop"><span class="toc-number">2.</span> <span class="toc-text">Dual-Thread Era (Starting from Android 5.0 Lollipop)</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Main-Thread-Creation-Process"><span class="toc-number"></span> <span class="toc-text">Main Thread Creation Process</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#ActivityThread-Creation"><span class="toc-number">1.</span> <span class="toc-text">ActivityThread Creation</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#ActivityThread-Functionality"><span class="toc-number">2.</span> <span class="toc-text">ActivityThread Functionality</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#RenderThread-Creation-and-Development"><span class="toc-number"></span> <span class="toc-text">RenderThread Creation and Development</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#Software-Drawing"><span class="toc-number">1.</span> <span class="toc-text">Software Drawing</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Hardware-Accelerated-Drawing"><span class="toc-number">2.</span> <span class="toc-text">Hardware-Accelerated Drawing</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Render-Thread-Initialization"><span class="toc-number">3.</span> <span class="toc-text">Render Thread Initialization</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#UI-Thread-and-RenderThread-DisplayList-Synchronization-Mechanism"><span class="toc-number">3.1.</span> <span class="toc-text">UI Thread and RenderThread DisplayList Synchronization Mechanism</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#RenderThread-and-BlastBufferQueue-Interaction-Flow"><span class="toc-number">3.2.</span> <span class="toc-text">RenderThread and BlastBufferQueue Interaction Flow</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Division-of-Labor-Between-Main-Thread-and-Render-Thread"><span class="toc-number">4.</span> <span class="toc-text">Division of Labor Between Main Thread and Render Thread</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#BlastBufferQueue-Working-Principle"><span class="toc-number">4.1.</span> <span class="toc-text">BlastBufferQueue Working Principle</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#App-side-QueuedBuffer-Metric"><span class="toc-number">4.2.</span> <span class="toc-text">App-side QueuedBuffer Metric</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#QueuedBuffer-Value-Change-Timing"><span class="toc-number">4.3.</span> <span class="toc-text">QueuedBuffer Value Change Timing</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#SurfaceFlinger-side-BufferTX-Metric"><span class="toc-number">4.4.</span> <span class="toc-text">SurfaceFlinger-side BufferTX Metric</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Collaboration-Flow-Between-App-Side-and-SF-Side"><span class="toc-number">4.5.</span> <span class="toc-text">Collaboration Flow Between App Side and SF Side</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Key-Performance-Observation-Points"><span class="toc-number">4.6.</span> <span class="toc-text">Key Performance Observation Points</span></a></li></ol></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Performance"><span class="toc-number"></span> <span class="toc-text">Performance</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#Perfetto%E2%80%99s-Unique-FrameTimeline-Feature"><span class="toc-number">1.</span> <span class="toc-text">Perfetto’s Unique FrameTimeline Feature</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Core-Concepts-of-FrameTimeline"><span class="toc-number">1.1.</span> <span class="toc-text">Core Concepts of FrameTimeline</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#1-Expected-Timeline"><span class="toc-number">1.1.1.</span> <span class="toc-text">1. Expected Timeline</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#2-Actual-Timeline"><span class="toc-number">1.1.2.</span> <span class="toc-text">2. Actual Timeline</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Color-Coding-System"><span class="toc-number">1.2.</span> <span class="toc-text">Color Coding System</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Jank-Type-Analysis"><span class="toc-number">1.3.</span> <span class="toc-text">Jank Type Analysis</span></a><ol class="toc-child"><li class="toc-item toc-level-4"><a class="toc-link" href="#App-side-jank"><span class="toc-number">1.3.1.</span> <span class="toc-text">App-side jank:</span></a></li><li class="toc-item toc-level-4"><a class="toc-link" href="#SurfaceFlinger-jank"><span class="toc-number">1.3.2.</span> <span class="toc-text">SurfaceFlinger jank:</span></a></li></ol></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Configuring-FrameTimeline"><span class="toc-number">1.4.</span> <span class="toc-text">Configuring FrameTimeline</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Vsync-Signals-in-Perfetto"><span class="toc-number">2.</span> <span class="toc-text">Vsync Signals in Perfetto</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#Correct-Vsync-Signal-Identification"><span class="toc-number">2.1.</span> <span class="toc-text">Correct Vsync Signal Identification</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#Analysis-Techniques"><span class="toc-number">2.2.</span> <span class="toc-text">Analysis Techniques</span></a></li></ol></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#References"><span class="toc-number"></span> <span class="toc-text">References</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#Attachments"><span class="toc-number"></span> <span class="toc-text">Attachments</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#About-Me-amp-amp-Blog"><span class="toc-number"></span> <span class="toc-text">About Me &amp;&amp; Blog</span></a>
             </div>
         <!-- sidebar -->
         <div class="sidebar sidebar-hide">
@@ -1161,19 +1161,15 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
-            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</a>
-        </li>
-        <li class="archive-post-item">
-            <span class="archive-post-date">05/04</span>
             <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto Series 14: heapprofd and Memory Profiling</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
-            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</a>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
-            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</a>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
@@ -1182,6 +1178,10 @@ loading="lazy"             decoding="async"
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
             <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto Series 18: Response Latency in Practice, from Input Events to First-Frame Feedback</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/29</span>
@@ -1244,11 +1244,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/08</span>
-            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/08</span>
-            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
         </li>
                 </ul>
             <div class="archive-year"> 2024 </div>
@@ -1259,11 +1259,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/21</span>
-            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/21</span>
-            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/27</span>
@@ -1340,11 +1340,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
-            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
-            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
@@ -1402,11 +1402,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">11/18</span>
-            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">11/18</span>
-            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">11/06</span>
@@ -1434,11 +1434,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
-            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
-            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
@@ -1614,11 +1614,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">07/20</span>
-            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">07/20</span>
-            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/29</span>
@@ -1654,15 +1654,19 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/11</span>
-            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/11</span>
-            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/31</span>
             <a class="archive-post-title" href="/en/2015/03/31/android-performance-case-study-follow-up/">Android Performance Case Study Follow-up</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/15</span>
@@ -1671,10 +1675,6 @@ loading="lazy"             decoding="async"
         <li class="archive-post-item">
             <span class="archive-post-date">03/15</span>
             <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-4/">Android Tips Round-Up, Part 4</a>
-        </li>
-        <li class="archive-post-item">
-            <span class="archive-post-date">03/15</span>
-            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/04</span>
@@ -1729,41 +1729,25 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-tags">
     <div class="sidebar-tags-name">
-            <span class="sidebar-tag-name" data-tags="Android">
-                <span class="iconfont-archer">&#xe606;</span>
-                Android
-            </span>
-            <span class="sidebar-tag-name" data-tags="Perfetto">
-                <span class="iconfont-archer">&#xe606;</span>
-                Perfetto
-            </span>
-            <span class="sidebar-tag-name" data-tags="Systrace">
-                <span class="iconfont-archer">&#xe606;</span>
-                Systrace
-            </span>
-            <span class="sidebar-tag-name" data-tags="Startup">
-                <span class="iconfont-archer">&#xe606;</span>
-                Startup
-            </span>
             <span class="sidebar-tag-name" data-tags="Jank">
                 <span class="iconfont-archer">&#xe606;</span>
                 Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
             </span>
             <span class="sidebar-tag-name" data-tags="Yearly Recommendations">
                 <span class="iconfont-archer">&#xe606;</span>
                 Yearly Recommendations
             </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
             <span class="sidebar-tag-name" data-tags="Memory">
                 <span class="iconfont-archer">&#xe606;</span>
                 Memory
-            </span>
-            <span class="sidebar-tag-name" data-tags="Year in Review">
-                <span class="iconfont-archer">&#xe606;</span>
-                Year in Review
-            </span>
-            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
-                <span class="iconfont-archer">&#xe606;</span>
-                Knowledge Planet
             </span>
             <span class="sidebar-tag-name" data-tags="Performance">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1793,17 +1777,9 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 ANR
             </span>
-            <span class="sidebar-tag-name" data-tags="RenderThread">
+            <span class="sidebar-tag-name" data-tags="Perfetto">
                 <span class="iconfont-archer">&#xe606;</span>
-                RenderThread
-            </span>
-            <span class="sidebar-tag-name" data-tags="DelayLoad">
-                <span class="iconfont-archer">&#xe606;</span>
-                DelayLoad
-            </span>
-            <span class="sidebar-tag-name" data-tags="Java">
-                <span class="iconfont-archer">&#xe606;</span>
-                Java
+                Perfetto
             </span>
             <span class="sidebar-tag-name" data-tags="Agent OS">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1821,9 +1797,25 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Mobile OS
             </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
             <span class="sidebar-tag-name" data-tags="Tools">
                 <span class="iconfont-archer">&#xe606;</span>
                 Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
             </span>
             <span class="sidebar-tag-name" data-tags="Linux">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1853,18 +1845,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Page Response
             </span>
-            <span class="sidebar-tag-name" data-tags="Binder">
-                <span class="iconfont-archer">&#xe606;</span>
-                Binder
-            </span>
-            <span class="sidebar-tag-name" data-tags="Locking">
-                <span class="iconfont-archer">&#xe606;</span>
-                Locking
-            </span>
-            <span class="sidebar-tag-name" data-tags="Scheduling">
-                <span class="iconfont-archer">&#xe606;</span>
-                Scheduling
-            </span>
             <span class="sidebar-tag-name" data-tags="SQL">
                 <span class="iconfont-archer">&#xe606;</span>
                 SQL
@@ -1881,21 +1861,17 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 DataFlow
             </span>
-            <span class="sidebar-tag-name" data-tags="SDK">
-                <span class="iconfont-archer">&#xe606;</span>
-                SDK
-            </span>
-            <span class="sidebar-tag-name" data-tags="TraceEvent">
-                <span class="iconfont-archer">&#xe606;</span>
-                TraceEvent
-            </span>
             <span class="sidebar-tag-name" data-tags="heapprofd">
                 <span class="iconfont-archer">&#xe606;</span>
                 heapprofd
             </span>
-            <span class="sidebar-tag-name" data-tags="Field">
+            <span class="sidebar-tag-name" data-tags="Year in Review">
                 <span class="iconfont-archer">&#xe606;</span>
-                Field
+                Year in Review
+            </span>
+            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Knowledge Planet
             </span>
             <span class="sidebar-tag-name" data-tags="GPU">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1905,6 +1881,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Power
             </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
             <span class="sidebar-tag-name" data-tags="Camera">
                 <span class="iconfont-archer">&#xe606;</span>
                 Camera
@@ -1912,6 +1892,22 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Audio">
                 <span class="iconfont-archer">&#xe606;</span>
                 Audio
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="Locking">
+                <span class="iconfont-archer">&#xe606;</span>
+                Locking
+            </span>
+            <span class="sidebar-tag-name" data-tags="Scheduling">
+                <span class="iconfont-archer">&#xe606;</span>
+                Scheduling
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
             </span>
             <span class="sidebar-tag-name" data-tags="Input">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1921,9 +1917,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Latency
             </span>
-            <span class="sidebar-tag-name" data-tags="MAT">
+            <span class="sidebar-tag-name" data-tags="SDK">
                 <span class="iconfont-archer">&#xe606;</span>
-                MAT
+                SDK
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceEvent">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceEvent
             </span>
             <span class="sidebar-tag-name" data-tags="HashMap">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1941,10 +1941,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Annual Recommendations
             </span>
-            <span class="sidebar-tag-name" data-tags="Nexus">
-                <span class="iconfont-archer">&#xe606;</span>
-                Nexus
-            </span>
             <span class="sidebar-tag-name" data-tags="OpenClaw">
                 <span class="iconfont-archer">&#xe606;</span>
                 OpenClaw
@@ -1957,17 +1953,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Local Models
             </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
             <span class="sidebar-tag-name" data-tags="AI Agent">
                 <span class="iconfont-archer">&#xe606;</span>
                 AI Agent
-            </span>
-            <span class="sidebar-tag-name" data-tags="Sharp Tools">
-                <span class="iconfont-archer">&#xe606;</span>
-                Sharp Tools
-            </span>
-            <span class="sidebar-tag-name" data-tags="Productivity">
-                <span class="iconfont-archer">&#xe606;</span>
-                Productivity
             </span>
             <span class="sidebar-tag-name" data-tags="SmartPerfetto">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1985,25 +1977,33 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Design Specs
             </span>
-            <span class="sidebar-tag-name" data-tags="Kotlin">
-                <span class="iconfont-archer">&#xe606;</span>
-                Kotlin
-            </span>
             <span class="sidebar-tag-name" data-tags="Compose">
                 <span class="iconfont-archer">&#xe606;</span>
                 Compose
             </span>
-            <span class="sidebar-tag-name" data-tags="Process">
+            <span class="sidebar-tag-name" data-tags="Kotlin">
                 <span class="iconfont-archer">&#xe606;</span>
-                Process
+                Kotlin
             </span>
             <span class="sidebar-tag-name" data-tags="Stutter">
                 <span class="iconfont-archer">&#xe606;</span>
                 Stutter
             </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
             <span class="sidebar-tag-name" data-tags="Overdraw">
                 <span class="iconfont-archer">&#xe606;</span>
                 Overdraw
+            </span>
+            <span class="sidebar-tag-name" data-tags="Sharp Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Sharp Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity
             </span>
             <span class="sidebar-tag-name" data-tags="Reading Notes">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -2024,10 +2024,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="User Experience">
                 <span class="iconfont-archer">&#xe606;</span>
                 User Experience
-            </span>
-            <span class="sidebar-tag-name" data-tags="Reading">
-                <span class="iconfont-archer">&#xe606;</span>
-                Reading
             </span>
             <span class="sidebar-tag-name" data-tags="Internet">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -2053,6 +2049,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Experience Optimization
             </span>
+            <span class="sidebar-tag-name" data-tags="Reading">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading
+            </span>
     </div>
     <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
     <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
@@ -2063,29 +2063,29 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-categories">
     <div class="sidebar-categories-name">
-        <span class="sidebar-category-name" data-categories="Essays">
+        <span class="sidebar-category-name" data-categories="Reading Notes">
             <span class="iconfont-archer">&#xe60a;</span>
-            Essays
+            Reading Notes
         </span>
         <span class="sidebar-category-name" data-categories="Casual Notes">
             <span class="iconfont-archer">&#xe60a;</span>
             Casual Notes
         </span>
-        <span class="sidebar-category-name" data-categories="Reading Notes">
-            <span class="iconfont-archer">&#xe60a;</span>
-            Reading Notes
-        </span>
         <span class="sidebar-category-name" data-categories="Android">
             <span class="iconfont-archer">&#xe60a;</span>
             Android
         </span>
-        <span class="sidebar-category-name" data-categories="Java">
+        <span class="sidebar-category-name" data-categories="Essays">
             <span class="iconfont-archer">&#xe60a;</span>
-            Java
+            Essays
         </span>
         <span class="sidebar-category-name" data-categories="AI">
             <span class="iconfont-archer">&#xe60a;</span>
             AI
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
         </span>
         <span class="sidebar-category-name" data-categories="Android Performance Optimization">
             <span class="iconfont-archer">&#xe60a;</span>

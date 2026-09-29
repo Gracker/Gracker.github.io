@@ -21,11 +21,11 @@
 <meta property="og:image" content="https://androidperformance.com/en/images/Perfetto-11-18-Diagrams/09-input-to-present.png">
 <meta property="og:image" content="https://androidperformance.com/en/images/Perfetto-11-18-Diagrams/10-scroll-response.png">
 <meta property="article:published_time" content="2026-05-04T02:18:00.000Z">
-<meta property="article:modified_time" content="2026-09-19T16:54:18.918Z">
+<meta property="article:modified_time" content="2026-09-29T01:58:34.355Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Android">
-<meta property="article:tag" content="Perfetto">
 <meta property="article:tag" content="Performance">
+<meta property="article:tag" content="Perfetto">
 <meta property="article:tag" content="Input">
 <meta property="article:tag" content="Latency">
 <meta name="twitter:card" content="summary">
@@ -256,8 +256,8 @@ loading="lazy"             decoding="async"
             </span>
         </span>
         <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
-        <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Input">Input</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Latency">Latency</a>
 </div>
@@ -332,7 +332,7 @@ loading="lazy"             decoding="async"
     <article class="article-entry">
         <p>This article addresses a topic easily overshadowed by startup speed and smoothness: first-frame interaction response. It asks how long the screen takes to provide the first frame of feedback after a user action. Complete page loading and stability later in an animation require other metrics.</p>
 <p>After tapping a button, how long until its pressed state appears? After tapping a WeChat conversation, how long until the first frame of the conversation page starts moving? After swiping a list, how long until its content follows the finger? These questions relate to slow startup and dropped frames, but need their own measurement definitions.</p>
-<p>We use Perfetto to break down this interval: from InputReader <code>read_time</code>, through the App receiving the event, to the first frame’s present. The primary metric, <code>input_to_present_ms</code>, measures only input read to the associated frame’s present. It does not cover touch IC latency, delays before driver reporting, display scanning, or panel response. By the end, you should be able to define a start, endpoint, capture configuration, SQL metrics, and supplementary App markers for a tap or scroll scenario.</p>
+<p>We use Perfetto to break down this interval: from InputReader <code>read_time</code>, through the App receiving the event, to an associated frame’s present. This gives a candidate internal delay, <code>estimated_input_to_present_ms</code>. Only after confirming the target layer and that the business state visibly changed on that frame should a report call it <code>input_to_present_ms</code>. Neither value covers touch IC latency, delays before driver reporting, display scanning, or panel response. By the end, you should be able to define a start, endpoint, capture configuration, SQL metrics, and supplementary App markers for a tap or scroll scenario.</p>
 <p>The article examines response latency through four independent measurements—read&#x2F;dispatch, handling, ACK→first frame, and scroll responsiveness. Each comes with capture configuration, the first tracks to inspect in the UI, and SQL. It then covers five common attribution paths and the respective boundaries of high-speed cameras and Perfetto.</p>
 <span id="more"></span>
 
@@ -362,9 +362,9 @@ loading="lazy"             decoding="async"
 </ol>
 <h2 id="This-Article-Covers-Only-the-First-Frame-After-an-Interaction"><a href="#This-Article-Covers-Only-the-First-Frame-After-an-Interaction" class="headerlink" title="This Article Covers Only the First Frame After an Interaction"></a>This Article Covers Only the First Frame After an Interaction</h2><p>The earlier Systrace response-speed series covered response latency more broadly: startup, navigation, screen on&#x2F;off, unlocking, a busy system, Binder, and other scenarios. The smoothness series covered the stability of consecutive frames. Parts 07 and 08 of the Perfetto series also broke down the frame path through MainThread, RenderThread, Vsync, and SurfaceFlinger.</p>
 <p>This article adds just one segment:</p>
-<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">User input</span><br><span class="line">  -&gt; InputReader reads the event</span><br><span class="line">  -&gt; InputDispatcher dispatches it to the target window</span><br><span class="line">  -&gt; The App main thread receives input</span><br><span class="line">  -&gt; The App handles input and requests the next frame</span><br><span class="line">  -&gt; RenderThread submits a buffer</span><br><span class="line">  -&gt; SurfaceFlinger composites and presents</span><br><span class="line">  -&gt; The user sees the first frame of feedback</span><br></pre></td></tr></table></figure>
+<figure class="highlight text"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">User input</span><br><span class="line">  -&gt; InputReader reads the event</span><br><span class="line">  -&gt; InputDispatcher dispatches it to the target window</span><br><span class="line">  -&gt; The App main thread receives input</span><br><span class="line">  -&gt; The App handles input and requests the next frame</span><br><span class="line">  -&gt; RenderThread submits a buffer</span><br><span class="line">  -&gt; SurfaceFlinger composites and presents</span><br><span class="line">  -&gt; Confirm the first feedback frame against the target visual state</span><br></pre></td></tr></table></figure>
 
-<p>We consistently call the primary metric <code>input_to_present_ms</code>: from <code>android_input_events.read_time</code> to the associated frame’s present, represented by <code>end_to_end_latency_dur</code> in SQL. It answers “how long after the tap does the first frame of feedback appear?”, rather than “how long until the whole page loads?” or “does the animation drop frames?” The standard library’s present is a candidate association: <code>is_speculative_frame=false</code> means only that an input-handling slice overlaps a doFrame on the same thread. It proves neither business causality nor a visual change on the target layer. Queries below therefore output <code>estimated_input_to_present_ms</code>. Only after separately checking the target layer, frame token, actual present, and business state can it be promoted to confirmed <code>input_to_present_ms</code>.</p>
+<p><code>android_input_events.end_to_end_latency_dur</code> runs from <code>read_time</code> to the associated frame’s present. The standard library’s association is still a candidate: <code>is_speculative_frame=false</code> means only that an input-handling slice overlaps a doFrame on the same thread. It does not prove a visual change on the target layer. Queries below therefore output <code>estimated_input_to_present_ms</code>. Only after checking the frame token, target layer, actual present, and business state should a report call it confirmed <code>input_to_present_ms</code>.</p>
 <p>If you start from <code>event_time</code> or a business marker, report a separate field; do not mix it with <code>input_to_present_ms</code> for comparisons.</p>
 <p><img src="/en/images/Perfetto-11-18-Diagrams/09-input-to-present.png" alt="Timeline from input to candidate present"></p>
 <p><em>Illustration: ACK and frame display are different stages. A candidate present still needs confirmation against the layer and business state; it cannot directly stand for the first user-visible frame.</em></p>
@@ -391,10 +391,10 @@ loading="lazy"             decoding="async"
 <td>Is App input handling slow?</td>
 </tr>
 <tr>
-<td><code>input_to_present_ms</code></td>
+<td><code>estimated_input_to_present_ms</code></td>
 <td>Input read (<code>read_time</code>)</td>
 <td>Associated frame present</td>
-<td>How soon does the user see the first frame of feedback?</td>
+<td>When did the candidate frame present? Confirm the target layer and business state before calling it visible feedback.</td>
 </tr>
 <tr>
 <td>Completion latency</td>
@@ -458,7 +458,7 @@ loading="lazy"             decoding="async"
 <p><code>android.input.inputevent</code> targets debuggable system builds—controlled environments such as userdebug&#x2F;eng. <code>TRACE_MODE_TRACE_ALL</code> records input events handled by the system and is suitable only for local devices and testing.</p>
 <p>Do not depend on <code>android.input.inputevent</code> on field&#x2F;user builds. To reduce privacy exposure even in a debuggable, controlled environment, use <code>TRACE_MODE_USE_RULES</code>, strict matching rules, review of secure&#x2F;IME&#x2F;spy windows, and access controls. Rules mode does not turn it into an ordinary production-capture capability. Input events may be delivered to the foreground window, SystemUI, IME, or spy windows simultaneously; poorly designed <code>match_any_packages</code> &#x2F; <code>match_all_packages</code> rules can broaden collection scope.</p>
 <p>Field presets must include secure windows, IME, spy windows, multi-target dispatch, redaction, retention periods, and access controls in their review criteria.</p>
-<p>An ordinary App cannot start system ftrace, FrameTimeline, or <code>android.input.inputevent</code> sessions itself. <code>&lt;profileable android:shell=&quot;true&quot; /&gt;</code> is useful for allowing local profiling of release builds with CPU&#x2F;memory profilers. App tracing is available by default for all Apps on Android 12+; on Android 11 and earlier, <code>android.os.Trace</code> still requires attention to profileable&#x2F;debuggable boundaries.</p>
+<p>An ordinary App cannot start system ftrace, FrameTimeline, or <code>android.input.inputevent</code> sessions itself. <code>&lt;profileable android:shell=&quot;true&quot; /&gt;</code> is useful for allowing local profiling of release builds with CPU&#x2F;memory profilers. App tracing is available by default for all apps on Android 12–17; the capture side still needs the corresponding <code>atrace_apps</code> setting.</p>
 <p>It does not, however, grant an ordinary App on a user build permission to start system inputevent, ftrace, or SurfaceFlinger sessions itself.</p>
 <p><code>android.input</code> includes two different sources. <code>android_key_events/android_motion_events</code> come from raw <code>android.input.inputevent</code>. In contrast, <code>android_input_events</code> reconstructs round trips and frame associations from ATrace slices such as <code>sendMessage/receiveMessage</code>, <code>deliverInputEvent</code>, and <code>UnwantedInteractionBlocker::notifyMotion</code>. Do not conflate them. Round trips may exist without raw inputevent enabled; enabling only raw inputevent without ATrace does not automatically produce round trips. Actual availability depends on the system version, the presence of these instrumentation points, and whether categories such as input&#x2F;view&#x2F;gfx were captured.</p>
 <p>Define fallbacks in advance:</p>
@@ -517,6 +517,7 @@ loading="lazy"             decoding="async"
 <li>CPU scheduling&#x2F;frequency: check the main thread, RenderThread, and InputDispatcher for Runnable waits, insufficient frequency, or abnormal CPU migration.</li>
 </ol>
 <p>Do not start by guessing from the longest slice. Connect the input event to the first frame of feedback, then determine where the time went.</p>
+<p>I would rather leave the visual endpoint unconfirmed than take the next present timestamp as proof that the tap changed the screen. That shortcut produces a precise number for the wrong layer surprisingly easily.</p>
 <h2 id="Tap-Scenarios-From-DOWN-x2F-UP-to-the-First-Frame"><a href="#Tap-Scenarios-From-DOWN-x2F-UP-to-the-First-Frame" class="headerlink" title="Tap Scenarios: From DOWN&#x2F;UP to the First Frame"></a>Tap Scenarios: From DOWN&#x2F;UP to the First Frame</h2><p>Choose the starting point first. Products define “tap response” differently.</p>
 <table>
 <thead>
@@ -627,9 +628,9 @@ loading="lazy"             decoding="async"
 <li>Confirm content displacement with an App counter or external video.</li>
 </ol>
 <p>Perfetto cannot always tell “how far the content moved.” Apps you control can add a lightweight counter. The following records each nonzero consumed displacement, preserving the first change’s timestamp. If updates must be coalesced per frame, add frame-level scheduling separately and record the resulting sampling delay; do not assume <code>onScrolled</code> is called only once per frame. Report <code>first_effective_move_ts</code>, <code>first_offset_change_ts</code>, <code>offset_delta_px</code>, <code>touch_slop_px</code>, and <code>sample_policy</code> together.</p>
-<figure class="highlight kotlin"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">var</span> gestureScrollY = <span class="number">0L</span> <span class="comment">// Reset at the start of a new gesture and record a baseline counter.</span></span><br><span class="line">recyclerView.addOnScrollListener(<span class="keyword">object</span> : RecyclerView.OnScrollListener() &#123;</span><br><span class="line">    <span class="keyword">override</span> <span class="function"><span class="keyword">fun</span> <span class="title">onScrolled</span><span class="params">(rv: <span class="type">RecyclerView</span>, dx: <span class="type">Int</span>, dy: <span class="type">Int</span>)</span></span> &#123;</span><br><span class="line">        <span class="keyword">if</span> (dy == <span class="number">0</span>) <span class="keyword">return</span></span><br><span class="line">        gestureScrollY += dy.toLong()</span><br><span class="line">        <span class="keyword">if</span> (Build.VERSION.SDK_INT &gt;= Build.VERSION_CODES.Q) &#123;</span><br><span class="line">            Trace.setCounter(<span class="string">&quot;Feed#ScrollOffsetY&quot;</span>, gestureScrollY)</span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            <span class="comment">// AndroidX accepts int; split long scrolls into segments or use an SDK counter.</span></span><br><span class="line">            androidx.tracing.Trace.setCounter(<span class="string">&quot;Feed#ScrollOffsetY&quot;</span>, gestureScrollY.toInt())</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;)</span><br></pre></td></tr></table></figure>
+<figure class="highlight kotlin"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">var</span> gestureScrollY = <span class="number">0L</span> <span class="comment">// Reset at the start of a new gesture and record a baseline counter.</span></span><br><span class="line">recyclerView.addOnScrollListener(<span class="keyword">object</span> : RecyclerView.OnScrollListener() &#123;</span><br><span class="line">    <span class="keyword">override</span> <span class="function"><span class="keyword">fun</span> <span class="title">onScrolled</span><span class="params">(rv: <span class="type">RecyclerView</span>, dx: <span class="type">Int</span>, dy: <span class="type">Int</span>)</span></span> &#123;</span><br><span class="line">        <span class="keyword">if</span> (dy == <span class="number">0</span>) <span class="keyword">return</span></span><br><span class="line">        gestureScrollY += dy.toLong()</span><br><span class="line">        android.os.Trace.setCounter(<span class="string">&quot;Feed#ScrollOffsetY&quot;</span>, gestureScrollY)</span><br><span class="line">    &#125;</span><br><span class="line">&#125;)</span><br></pre></td></tr></table></figure>
 
-<p><code>android.os.Trace.setCounter(String, long)</code> is available from API 29. Projects with a lower minSdk need AndroidX tracing or their own version guard. For a large scroll-offset range, use an SDK Track Event counter or bucketed values. Do not flood the trace with counters for every layout detail. Record only user-visible state such as scroll offset, player position, or the current scene ID.</p>
+<p><code>android.os.Trace.setCounter(String, long)</code> is available throughout the Android 12–17 range discussed here. For a large scroll-offset range, use an SDK Track Event counter or bucketed values. Do not flood the trace with counters for every layout detail. Record only user-visible state such as scroll offset, player position, or the current scene ID.</p>
 <p><code>computeVerticalScrollOffset()</code> is a scrollbar estimate whose units depend on the LayoutManager; it should not be treated directly as exact displacement in pixels. Here, accumulating <code>dy</code> gives the content displacement consumed by this gesture. It still does not prove that the screen has moved. Item animation, nested scrolling, and data refresh need separate calibration. First calculate <code>move_to_offset_change_ms</code>, then verify the frame that actually carries that state and its present. Do not arbitrarily use “the next frame” as the visual endpoint.</p>
 <p><img src="/en/images/Perfetto-11-18-Diagrams/10-scroll-response.png" alt="From effective MOVE to displacement feedback"></p>
 <p><em>Illustration: first measure effective MOVE to scroll-state change, then verify the frame carrying that state and its present. A counter update does not prove that the screen has moved.</em></p>
@@ -700,7 +701,7 @@ loading="lazy"             decoding="async"
 <p>Analyze the input round trip and frame production separately. A fast ACK means only that the App has finished handling the input; it does not mean the first frame has appeared.</p>
 <h3 id="ANRs-and-Sub-ANR-Delays"><a href="#ANRs-and-Sub-ANR-Delays" class="headerlink" title="ANRs and Sub-ANR Delays"></a>ANRs and Sub-ANR Delays</h3><p>Most slow interaction responses are sub-ANR problems: the user already notices the delay, but it has not reached the system’s ANR threshold. Examine input ANRs in two main categories:</p>
 <ul>
-<li>The event was sent to a connection, but the App does not ACK for a long time. This usually appears as abnormal <code>handling_latency_dur</code> or ACK-related timing.</li>
+<li>The event was sent to a connection, but the App does not ACK for a long time. An event with no ACK may be absent from the fully joined <code>android_input_events</code> round-trip table; inspect InputDispatcher, relevant logs where available, and the bugreport instead of treating missing rows as a fast response.</li>
 <li>A focused event keeps waiting for a focused window. Inspect WindowManager &#x2F; ActivityTaskManager, window creation, focus changes, and InputDispatcher state.</li>
 </ul>
 <p>“Fast ACK, slow first frame” generally does not trigger an input ANR because the input event has already been handled. It is more likely a first-frame production or window-visibility issue.</p>
@@ -728,8 +729,8 @@ loading="lazy"             decoding="async"
 <ol>
 <li>Define the start: DOWN, UP, effective MOVE, or business click.</li>
 <li>Define the end: first pressed-state frame, first transition frame, first content displacement, or first-screen content completion.</li>
-<li>Use <code>android_input_events</code> to separate <code>read_to_dispatch</code>, dispatch, handling, ACK, and <code>input_to_present_ms</code>.</li>
-<li>Use App markers to describe business state and the associated frame’s present as the screen endpoint.</li>
+<li>Use <code>android_input_events</code> to separate <code>read_to_dispatch</code>, dispatch, handling, ACK, and the candidate <code>estimated_input_to_present_ms</code>.</li>
+<li>Confirm the target layer and visual-state change with App markers and, where needed, external video before treating the associated frame’s present as the screen endpoint.</li>
 <li>Use FrameTimeline, RenderThread, SurfaceFlinger, and CPU scheduling to explain why the first frame is early or late.</li>
 <li>Calibrate user-visible latency with a high-speed camera.</li>
 </ol>
@@ -761,7 +762,7 @@ loading="lazy"             decoding="async"
             <p>Author：<a href="https://androidperformance.com/en">Gracker</a>
             <p>Link：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">https://androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/</a>
             <p>Publish date：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">May 4th 2026, 10:18:00 am</a>
-            <p>Update date：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">September 20th 2026, 12:54:18 am</a>
+            <p>Update date：<a href="https://androidperformance.com/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">September 29th 2026, 9:58:34 am</a>
             <p>License：This work is licensed under <a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a></p>
         </div>
     <!-- paginator -->
@@ -1033,19 +1034,15 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
-            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</a>
-        </li>
-        <li class="archive-post-item">
-            <span class="archive-post-date">05/04</span>
             <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-14-Native-Heap-Heapprofd/">Android Perfetto Series 14: heapprofd and Memory Profiling</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
-            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</a>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
-            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-16-GPU-Power-Counters/">Android Perfetto Series 16: GPU, Power Counters, and Hardware Bottleneck Analysis</a>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-15-Boot-And-Long-Running-Field-Tracing/">Android Perfetto Series 15: Boot Traces, Long-Running Field Traces, and Capturing Intermittent Problems</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
@@ -1054,6 +1051,10 @@ loading="lazy"             decoding="async"
         <li class="archive-post-item">
             <span class="archive-post-date">05/04</span>
             <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-18-Input-Response-Latency/">Android Perfetto Series 18: Response Latency in Practice, from Input Events to First-Frame Feedback</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">05/04</span>
+            <a class="archive-post-title" href="/en/2026/05/04/Android-Perfetto-13-Track-Event-SDK/">Android Perfetto Series 13: Perfetto SDK, Track Event, and App Field Tracing</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/29</span>
@@ -1116,11 +1117,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/08</span>
-            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/08</span>
-            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-02-How-to-analysis-ANR/">Android ANR Series 2: ANR Analysis Methodology and Key Logs</a>
+            <a class="archive-post-title" href="/en/2025/02/08/Android-ANR-03-ANR-Case-Share/">Android ANR Series 3 - ANR Case Studies</a>
         </li>
                 </ul>
             <div class="archive-year"> 2024 </div>
@@ -1131,11 +1132,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/21</span>
-            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/21</span>
-            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto Series 3: Familiarizing with the Perfetto View</a>
+            <a class="archive-post-title" href="/en/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto Series 2: Capturing Perfetto Traces</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/27</span>
@@ -1212,11 +1213,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
-            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
-            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-1/">Android Systrace Smoothness in Action 1 - Understanding Jank Principles</a>
+            <a class="archive-post-title" href="/en/2021/04/24/android-systrace-smooth-in-action-2/">Android Systrace Smoothness in Action 2 - Case Analysis - MIUI Launcher Scroll Jank Analysis</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/24</span>
@@ -1274,11 +1275,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">11/18</span>
-            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">11/18</span>
-            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize-NEW/">Complete Guide to Android App Startup Optimization</a>
+            <a class="archive-post-title" href="/en/2019/11/18/Android-App-Lunch-Optimize/">Comprehensive Record of Android App Startup Optimization</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">11/06</span>
@@ -1306,11 +1307,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
-            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
-            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-System/">Overview of Jank and Frame Drops in Android - System Layer</a>
+            <a class="archive-post-title" href="/en/2019/09/05/Android-Jank-Due-To-App/">Overview of Jank and Frame Drops in Android - Application Layer</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/05</span>
@@ -1486,11 +1487,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">07/20</span>
-            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">07/20</span>
-            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Java/">Android Code Memory Optimization Suggestions - Java (Official)</a>
+            <a class="archive-post-title" href="/en/2015/07/20/Android-Performance-Memory-Google/">Android Code Memory Optimization Suggestions - Android (Official)</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">05/29</span>
@@ -1526,15 +1527,19 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/11</span>
-            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">04/11</span>
-            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT/">Android Memory Optimization (1) - Getting Started with MAT</a>
+            <a class="archive-post-title" href="/en/2015/04/11/AndroidMemory-Usage-Of-MAT-Pro/">Android Memory Optimization (2) - Advanced MAT Usage</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/31</span>
             <a class="archive-post-title" href="/en/2015/03/31/android-performance-case-study-follow-up/">Android Performance Case Study Follow-up</a>
+        </li>
+        <li class="archive-post-item">
+            <span class="archive-post-date">03/15</span>
+            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">03/15</span>
@@ -1543,10 +1548,6 @@ loading="lazy"             decoding="async"
         <li class="archive-post-item">
             <span class="archive-post-date">03/15</span>
             <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-4/">Android Tips Round-Up, Part 4</a>
-        </li>
-        <li class="archive-post-item">
-            <span class="archive-post-date">03/15</span>
-            <a class="archive-post-title" href="/en/2015/03/15/android-tips-round-up-5/">Android Tips Round-Up, Part 5</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/04</span>
@@ -1601,41 +1602,25 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-tags">
     <div class="sidebar-tags-name">
-            <span class="sidebar-tag-name" data-tags="Android">
-                <span class="iconfont-archer">&#xe606;</span>
-                Android
-            </span>
-            <span class="sidebar-tag-name" data-tags="Perfetto">
-                <span class="iconfont-archer">&#xe606;</span>
-                Perfetto
-            </span>
-            <span class="sidebar-tag-name" data-tags="Systrace">
-                <span class="iconfont-archer">&#xe606;</span>
-                Systrace
-            </span>
-            <span class="sidebar-tag-name" data-tags="Startup">
-                <span class="iconfont-archer">&#xe606;</span>
-                Startup
-            </span>
             <span class="sidebar-tag-name" data-tags="Jank">
                 <span class="iconfont-archer">&#xe606;</span>
                 Jank
+            </span>
+            <span class="sidebar-tag-name" data-tags="Android">
+                <span class="iconfont-archer">&#xe606;</span>
+                Android
             </span>
             <span class="sidebar-tag-name" data-tags="Yearly Recommendations">
                 <span class="iconfont-archer">&#xe606;</span>
                 Yearly Recommendations
             </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
             <span class="sidebar-tag-name" data-tags="Memory">
                 <span class="iconfont-archer">&#xe606;</span>
                 Memory
-            </span>
-            <span class="sidebar-tag-name" data-tags="Year in Review">
-                <span class="iconfont-archer">&#xe606;</span>
-                Year in Review
-            </span>
-            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
-                <span class="iconfont-archer">&#xe606;</span>
-                Knowledge Planet
             </span>
             <span class="sidebar-tag-name" data-tags="Performance">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1665,17 +1650,9 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 ANR
             </span>
-            <span class="sidebar-tag-name" data-tags="RenderThread">
+            <span class="sidebar-tag-name" data-tags="Perfetto">
                 <span class="iconfont-archer">&#xe606;</span>
-                RenderThread
-            </span>
-            <span class="sidebar-tag-name" data-tags="DelayLoad">
-                <span class="iconfont-archer">&#xe606;</span>
-                DelayLoad
-            </span>
-            <span class="sidebar-tag-name" data-tags="Java">
-                <span class="iconfont-archer">&#xe606;</span>
-                Java
+                Perfetto
             </span>
             <span class="sidebar-tag-name" data-tags="Agent OS">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1693,9 +1670,25 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Mobile OS
             </span>
+            <span class="sidebar-tag-name" data-tags="Systrace">
+                <span class="iconfont-archer">&#xe606;</span>
+                Systrace
+            </span>
             <span class="sidebar-tag-name" data-tags="Tools">
                 <span class="iconfont-archer">&#xe606;</span>
                 Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="DelayLoad">
+                <span class="iconfont-archer">&#xe606;</span>
+                DelayLoad
+            </span>
+            <span class="sidebar-tag-name" data-tags="Java">
+                <span class="iconfont-archer">&#xe606;</span>
+                Java
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
             </span>
             <span class="sidebar-tag-name" data-tags="Linux">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1725,18 +1718,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Page Response
             </span>
-            <span class="sidebar-tag-name" data-tags="Binder">
-                <span class="iconfont-archer">&#xe606;</span>
-                Binder
-            </span>
-            <span class="sidebar-tag-name" data-tags="Locking">
-                <span class="iconfont-archer">&#xe606;</span>
-                Locking
-            </span>
-            <span class="sidebar-tag-name" data-tags="Scheduling">
-                <span class="iconfont-archer">&#xe606;</span>
-                Scheduling
-            </span>
             <span class="sidebar-tag-name" data-tags="SQL">
                 <span class="iconfont-archer">&#xe606;</span>
                 SQL
@@ -1753,21 +1734,17 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 DataFlow
             </span>
-            <span class="sidebar-tag-name" data-tags="SDK">
-                <span class="iconfont-archer">&#xe606;</span>
-                SDK
-            </span>
-            <span class="sidebar-tag-name" data-tags="TraceEvent">
-                <span class="iconfont-archer">&#xe606;</span>
-                TraceEvent
-            </span>
             <span class="sidebar-tag-name" data-tags="heapprofd">
                 <span class="iconfont-archer">&#xe606;</span>
                 heapprofd
             </span>
-            <span class="sidebar-tag-name" data-tags="Field">
+            <span class="sidebar-tag-name" data-tags="Year in Review">
                 <span class="iconfont-archer">&#xe606;</span>
-                Field
+                Year in Review
+            </span>
+            <span class="sidebar-tag-name" data-tags="Knowledge Planet">
+                <span class="iconfont-archer">&#xe606;</span>
+                Knowledge Planet
             </span>
             <span class="sidebar-tag-name" data-tags="GPU">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1777,6 +1754,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Power
             </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
             <span class="sidebar-tag-name" data-tags="Camera">
                 <span class="iconfont-archer">&#xe606;</span>
                 Camera
@@ -1784,6 +1765,22 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Audio">
                 <span class="iconfont-archer">&#xe606;</span>
                 Audio
+            </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
+            <span class="sidebar-tag-name" data-tags="Locking">
+                <span class="iconfont-archer">&#xe606;</span>
+                Locking
+            </span>
+            <span class="sidebar-tag-name" data-tags="Scheduling">
+                <span class="iconfont-archer">&#xe606;</span>
+                Scheduling
+            </span>
+            <span class="sidebar-tag-name" data-tags="MAT">
+                <span class="iconfont-archer">&#xe606;</span>
+                MAT
             </span>
             <span class="sidebar-tag-name" data-tags="Input">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1793,9 +1790,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Latency
             </span>
-            <span class="sidebar-tag-name" data-tags="MAT">
+            <span class="sidebar-tag-name" data-tags="SDK">
                 <span class="iconfont-archer">&#xe606;</span>
-                MAT
+                SDK
+            </span>
+            <span class="sidebar-tag-name" data-tags="TraceEvent">
+                <span class="iconfont-archer">&#xe606;</span>
+                TraceEvent
             </span>
             <span class="sidebar-tag-name" data-tags="HashMap">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1813,10 +1814,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Annual Recommendations
             </span>
-            <span class="sidebar-tag-name" data-tags="Nexus">
-                <span class="iconfont-archer">&#xe606;</span>
-                Nexus
-            </span>
             <span class="sidebar-tag-name" data-tags="OpenClaw">
                 <span class="iconfont-archer">&#xe606;</span>
                 OpenClaw
@@ -1829,17 +1826,13 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Local Models
             </span>
+            <span class="sidebar-tag-name" data-tags="Nexus">
+                <span class="iconfont-archer">&#xe606;</span>
+                Nexus
+            </span>
             <span class="sidebar-tag-name" data-tags="AI Agent">
                 <span class="iconfont-archer">&#xe606;</span>
                 AI Agent
-            </span>
-            <span class="sidebar-tag-name" data-tags="Sharp Tools">
-                <span class="iconfont-archer">&#xe606;</span>
-                Sharp Tools
-            </span>
-            <span class="sidebar-tag-name" data-tags="Productivity">
-                <span class="iconfont-archer">&#xe606;</span>
-                Productivity
             </span>
             <span class="sidebar-tag-name" data-tags="SmartPerfetto">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1857,25 +1850,33 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Design Specs
             </span>
-            <span class="sidebar-tag-name" data-tags="Kotlin">
-                <span class="iconfont-archer">&#xe606;</span>
-                Kotlin
-            </span>
             <span class="sidebar-tag-name" data-tags="Compose">
                 <span class="iconfont-archer">&#xe606;</span>
                 Compose
             </span>
-            <span class="sidebar-tag-name" data-tags="Process">
+            <span class="sidebar-tag-name" data-tags="Kotlin">
                 <span class="iconfont-archer">&#xe606;</span>
-                Process
+                Kotlin
             </span>
             <span class="sidebar-tag-name" data-tags="Stutter">
                 <span class="iconfont-archer">&#xe606;</span>
                 Stutter
             </span>
+            <span class="sidebar-tag-name" data-tags="Process">
+                <span class="iconfont-archer">&#xe606;</span>
+                Process
+            </span>
             <span class="sidebar-tag-name" data-tags="Overdraw">
                 <span class="iconfont-archer">&#xe606;</span>
                 Overdraw
+            </span>
+            <span class="sidebar-tag-name" data-tags="Sharp Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Sharp Tools
+            </span>
+            <span class="sidebar-tag-name" data-tags="Productivity">
+                <span class="iconfont-archer">&#xe606;</span>
+                Productivity
             </span>
             <span class="sidebar-tag-name" data-tags="Reading Notes">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1896,10 +1897,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="User Experience">
                 <span class="iconfont-archer">&#xe606;</span>
                 User Experience
-            </span>
-            <span class="sidebar-tag-name" data-tags="Reading">
-                <span class="iconfont-archer">&#xe606;</span>
-                Reading
             </span>
             <span class="sidebar-tag-name" data-tags="Internet">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1925,6 +1922,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Experience Optimization
             </span>
+            <span class="sidebar-tag-name" data-tags="Reading">
+                <span class="iconfont-archer">&#xe606;</span>
+                Reading
+            </span>
     </div>
     <div class="iconfont-archer sidebar-tags-empty">&#xe678;</div>
     <div class="tag-load-fail" style="display: none; color: #ccc; font-size: 0.6rem;">
@@ -1935,29 +1936,29 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-categories">
     <div class="sidebar-categories-name">
-        <span class="sidebar-category-name" data-categories="Essays">
+        <span class="sidebar-category-name" data-categories="Reading Notes">
             <span class="iconfont-archer">&#xe60a;</span>
-            Essays
+            Reading Notes
         </span>
         <span class="sidebar-category-name" data-categories="Casual Notes">
             <span class="iconfont-archer">&#xe60a;</span>
             Casual Notes
         </span>
-        <span class="sidebar-category-name" data-categories="Reading Notes">
-            <span class="iconfont-archer">&#xe60a;</span>
-            Reading Notes
-        </span>
         <span class="sidebar-category-name" data-categories="Android">
             <span class="iconfont-archer">&#xe60a;</span>
             Android
         </span>
-        <span class="sidebar-category-name" data-categories="Java">
+        <span class="sidebar-category-name" data-categories="Essays">
             <span class="iconfont-archer">&#xe60a;</span>
-            Java
+            Essays
         </span>
         <span class="sidebar-category-name" data-categories="AI">
             <span class="iconfont-archer">&#xe60a;</span>
             AI
+        </span>
+        <span class="sidebar-category-name" data-categories="Java">
+            <span class="iconfont-archer">&#xe60a;</span>
+            Java
         </span>
         <span class="sidebar-category-name" data-categories="Android Performance Optimization">
             <span class="iconfont-archer">&#xe60a;</span>

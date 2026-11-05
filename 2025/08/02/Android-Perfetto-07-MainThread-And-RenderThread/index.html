@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh,en">
+<html lang="zh-CN">
     <!-- title -->
             <!-- keywords -->
 
@@ -11,13 +11,13 @@
                     <meta name="copyright" content="Gracker">
                       <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,启动优化,Startup,Perfetto,Systrace,RenderThread,Java">
                           <meta name="description" content="Focus On Android Performance">
-                          <meta name="description" content="一次滑动卡顿，主线程可能在处理布局，也可能早已把绘制命令交给 RenderThread。这篇用同一份 Perfetto Trace 对照两条线程、Buffer 提交和 SurfaceFlinger，找出等待发生在哪一步。 先沿截图读一帧，再看 ActivityThread、RenderThread 和 BLASTBufferQueue 的职责。Trace 能缩小调查范围；帧最终是否上屏，还要核对">
+                          <meta name="description" content="一次滑动卡顿，主线程可能在处理布局，也可能早已把绘制命令交给 RenderThread。这篇用 Perfetto 截图对照两条线程、Buffer 提交和 SurfaceFlinger，找出等待发生在哪一步。 先沿截图读一帧，再看 ActivityThread、RenderThread 和 BLASTBufferQueue 的职责。Trace 能缩小调查范围；帧最终是否上屏，还要核对 FrameTi">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Android Perfetto 系列 7：MainThread 和 RenderThread 解读">
 <meta property="og:url" content="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/index.html">
 <meta property="og:site_name" content="Android Performance">
-<meta property="og:description" content="一次滑动卡顿，主线程可能在处理布局，也可能早已把绘制命令交给 RenderThread。这篇用同一份 Perfetto Trace 对照两条线程、Buffer 提交和 SurfaceFlinger，找出等待发生在哪一步。 先沿截图读一帧，再看 ActivityThread、RenderThread 和 BLASTBufferQueue 的职责。Trace 能缩小调查范围；帧最终是否上屏，还要核对">
-<meta property="og:locale">
+<meta property="og:description" content="一次滑动卡顿，主线程可能在处理布局，也可能早已把绘制命令交给 RenderThread。这篇用 Perfetto 截图对照两条线程、Buffer 提交和 SurfaceFlinger，找出等待发生在哪一步。 先沿截图读一帧，再看 ActivityThread、RenderThread 和 BLASTBufferQueue 的职责。Trace 能缩小调查范围；帧最终是否上屏，还要核对 FrameTi">
+<meta property="og:locale" content="zh_CN">
 <meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803165650716.webp">
 <meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-07-MainThread-And-RenderThread/15717420572997.jpg">
 <meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803170713946.webp">
@@ -30,12 +30,12 @@
 <meta property="og:image" content="https://androidperformance.com/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803173809421.webp">
 <meta property="og:image" content="https://androidperformance.com/images/WechatIMG581.webp">
 <meta property="article:published_time" content="2025-08-02T02:11:45.000Z">
-<meta property="article:modified_time" content="2026-09-29T01:31:21.551Z">
+<meta property="article:modified_time" content="2026-11-02T18:00:38.190Z">
 <meta property="article:author" content="Gracker">
 <meta property="article:tag" content="Android">
-<meta property="article:tag" content="Jank">
 <meta property="article:tag" content="Perfetto">
 <meta property="article:tag" content="Systrace">
+<meta property="article:tag" content="Jank">
 <meta property="article:tag" content="Performance">
 <meta property="article:tag" content="BlastBufferQueue">
 <meta name="twitter:card" content="summary">
@@ -106,11 +106,14 @@
                                     <link rel="preload" href="/lib/jquery.min.js" as="script">
                                     <link rel="preload" href="/scripts/main.js" as="script">
                                     <!-- algolia -->
-                                                    <!-- Hreflang Tags -->
-                                                    
-                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/" />
-                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/" />
-                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/" />
+                                                    <!-- Language alternatives share the same route contract as the header. -->
+
+
+<link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/" />
+
+<link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/" />
+
+<link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/" />
                   <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/atom.xml" title="Android Performance" type="application/atom+xml">
 </head>
 
@@ -138,35 +141,10 @@
         <span class="header-theme-btn header-element" role="button" aria-label="Theme" data-tooltip="Theme">
             <span aria-hidden="true">&#9680;</span>
         </span>
-        <!-- language transition button -->
-        <span class="header-lang-btn header-element" data-tooltip="Language">
-            <a href="javascript:void(0)" onclick="toggleLanguage()" class="lang-text" aria-label="Language">EN</a>
-            <script>
-                // Update language button text based on current path
-                (function() {
-                    var path = window.location.pathname;
-                    var isEn = /^\/en(\/|$)/.test(path);
-                    var langBtn = document.querySelector('.header-lang-btn .lang-text');
-                    if (langBtn) {
-                        langBtn.textContent = isEn ? 'CN' : 'EN';
-                    }
-                })();
-                
-                function toggleLanguage() {
-                    var path = window.location.pathname;
-                    var isEn = /^\/en(\/|$)/.test(path);
-
-                    if (isEn) {
-                        var newPath = path.replace(/^\/en(\/|$)/, '/');
-                        if (newPath === '') newPath = '/';
-                        window.location.href = newPath;
-                    } else {
-                        var suffix = path;
-                        if (suffix === '/') suffix = '';
-                        window.location.href = '/en' + suffix;
-                    }
-                }
-            </script>
+        <!-- A real link works without JavaScript and supports opening a new tab. -->
+        
+        <span class="header-lang-btn header-element" data-tooltip="Read in English">
+            <a href="/en/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/" class="lang-text" aria-label="Read in English">EN</a>
         </span>
         <!-- home button -->
         <span class="home-link header-element">
@@ -204,12 +182,6 @@
             title="Wechat"
             alt="Wechat"
             src="/assets/donate-wechat.webp"
-        ></img>
-        <img
-            class="donate-popup__content-qrCode"
-            title="Alipay"
-            alt="Alipay"
-            src="/assets/donate-alipay.png"
         ></img>
     </div>
 </div>
@@ -266,16 +238,16 @@ loading="lazy"             decoding="async"
             </span>
         </span>
         <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
-        <a class="post-tag" href="javascript:void(0);" data-tags="Jank">Jank</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Perfetto">Perfetto</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Systrace">Systrace</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Jank">Jank</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="BlastBufferQueue">BlastBufferQueue</a>
 </div>
 
                 <!-- 文章字数统计 -->
                     <div class="post-intro-read">
-                        <span>Word count: <span class="post-count word-count">8.6k</span>Reading time: <span class="post-count reading-time">33 min</span></span>
+                        <span>字数统计: <span class="post-count word-count">8.8k</span>阅读时长: <span class="post-count reading-time">34 min</span></span>
                     </div>
                 <div class="post-intro-meta">
                     <!-- 撰写日期 -->
@@ -341,27 +313,27 @@ loading="lazy"             decoding="async"
             <div class="container container-unloaded">
                 <main class="main post-page">
     <article class="article-entry">
-        <p>一次滑动卡顿，主线程可能在处理布局，也可能早已把绘制命令交给 RenderThread。这篇用同一份 Perfetto Trace 对照两条线程、Buffer 提交和 SurfaceFlinger，找出等待发生在哪一步。</p>
+        <p>一次滑动卡顿，主线程可能在处理布局，也可能早已把绘制命令交给 RenderThread。这篇用 Perfetto 截图对照两条线程、Buffer 提交和 SurfaceFlinger，找出等待发生在哪一步。</p>
 <p>先沿截图读一帧，再看 ActivityThread、RenderThread 和 BLASTBufferQueue 的职责。Trace 能缩小调查范围；帧最终是否上屏，还要核对 FrameTimeline 与合成侧记录。</p>
 <span id="more"></span>
 
 <h2 id="本文目录"><a href="#本文目录" class="headerlink" title="本文目录"></a>本文目录</h2><ul>
-<li><a href="#%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0%E7%9B%AE%E5%BD%95">系列文章目录</a></li>
-<li><a href="#%E5%9F%BA%E4%BA%8E-Perfetto-%E7%9A%84%E6%B8%B2%E6%9F%93%E6%B5%81%E7%A8%8B%E5%88%86%E6%9E%90">基于 Perfetto 的渲染流程分析</a></li>
-<li><a href="#%E5%8F%8C%E7%BA%BF%E7%A8%8B%E6%B8%B2%E6%9F%93%E6%9E%B6%E6%9E%84%E7%9A%84%E6%BC%94%E8%BF%9B">双线程渲染架构的演进</a></li>
-<li><a href="#%E4%B8%BB%E7%BA%BF%E7%A8%8B%E7%9A%84%E5%88%9B%E5%BB%BA%E8%BF%87%E7%A8%8B">主线程的创建过程</a></li>
-<li><a href="#ActivityThread-%E7%9A%84%E5%8A%9F%E8%83%BD">ActivityThread 的功能</a></li>
-<li><a href="#%E6%B8%B2%E6%9F%93%E7%BA%BF%E7%A8%8B%E7%9A%84%E5%88%9B%E5%BB%BA%E5%92%8C%E5%8F%91%E5%B1%95">渲染线程的创建和发展</a></li>
-<li><a href="#%E6%80%A7%E8%83%BD">性能</a></li>
-<li><a href="#Perfetto-%E7%8B%AC%E6%9C%89%E7%9A%84-FrameTimeline-%E5%8A%9F%E8%83%BD">Perfetto 独有的 FrameTimeline 功能</a></li>
-<li><a href="#Perfetto-%E4%B8%AD-Vsync-%E4%BF%A1%E5%8F%B7">Perfetto 中 Vsync 信号</a></li>
-<li><a href="#%E5%8F%82%E8%80%83">参考</a></li>
-<li><a href="#%E9%99%84%E4%BB%B6">附件</a></li>
-<li><a href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2">关于我 &amp;&amp; 博客</a></li>
+<li><a href="#series">系列文章目录</a></li>
+<li><a href="#render-flow">基于 Perfetto 的渲染流程分析</a></li>
+<li><a href="#evolution">双线程渲染架构的演进</a></li>
+<li><a href="#main-thread-create">主线程的创建过程</a></li>
+<li><a href="#activitythread">ActivityThread 的功能</a></li>
+<li><a href="#render-thread">渲染线程的创建和发展</a></li>
+<li><a href="#performance">性能</a></li>
+<li><a href="#frametimeline">Perfetto 独有的 FrameTimeline 功能</a></li>
+<li><a href="#vsync">Perfetto 中 Vsync 信号</a></li>
+<li><a href="#refs">参考</a></li>
+<li><a href="#attachments">附件</a></li>
+<li><a href="#about">关于我 &amp;&amp; 博客</a></li>
 </ul>
 <p><a id="series"></a></p>
 <h1 id="系列文章目录"><a href="#系列文章目录" class="headerlink" title="系列文章目录"></a>系列文章目录</h1><ol>
-<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/03/27/Android-Perfetto-101/#/Perfetto-%E7%B3%BB%E5%88%97%E7%9B%AE%E5%BD%95">Android Perfetto 系列目录</a></li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/03/27/Android-Perfetto-101/#Perfetto-%E7%B3%BB%E5%88%97%E7%9B%AE%E5%BD%95">Android Perfetto 系列目录</a></li>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-01-What-is-perfetto/">Android Perfetto 系列 1：Perfetto 工具简介</a></li>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">Android Perfetto 系列 2：Perfetto Trace 抓取</a></li>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2024/05/21/Android-Perfetto-03-how-to-analysis-perfetto/">Android Perfetto 系列 3：熟悉 Perfetto View</a></li>
@@ -385,13 +357,13 @@ loading="lazy"             decoding="async"
 </ol>
 <p>如果大家还没看过 Systrace 系列，下面是传送门：</p>
 <ol>
-<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/05/26/Android_Systrace_0/#/%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0%E7%9B%AE%E5%BD%95">Systrace 系列目录</a> ： 系统介绍了 Perfetto 的前身 Systrace 的使用，并通过 Systrace 来学习和了解 Android 性能优化和 Android 系统运行的基本规则。</li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/05/26/Android_Systrace_0/#Systrace-%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0%E7%9B%AE%E5%BD%95">Systrace 系列目录</a> ： 系统介绍了 Perfetto 的前身 Systrace 的使用，并通过 Systrace 来学习和了解 Android 性能优化和 Android 系统运行的基本规则。</li>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/">个人博客</a> ：个人博客，主要是 Android 相关的内容，也放了一些生活和工作相关的内容。</li>
 </ol>
-<p>欢迎大家在 <a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">关于我</a> 页面加入微信群或者星球，讨论你的问题、你最想看到的关于 Perfetto 的部分，以及跟各位群友讨论所有 Android 开发相关的内容.</p>
-<p>本文使用到的 Trace 文件我上传到了 Github ：<a target="_blank" rel="noopener" href="https://github.com/Gracker/SystraceForBlog/tree/master/Android_Perfetto/demo_app_aosp_scroll.perfetto-trace">https://github.com/Gracker/SystraceForBlog/tree/master/Android_Perfetto/demo_app_aosp_scroll.perfetto-trace</a> ，需要的可以自取。</p>
+<p>欢迎大家在 <a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">关于我</a> 页面查看交流方式，讨论你的问题、你最想看到的关于 Perfetto 的部分，以及跟各位群友讨论所有 Android 开发相关的内容.</p>
+<p>本文使用到的 Trace 文件我上传到了 Github ：<a target="_blank" rel="noopener" href="https://github.com/Gracker/SystraceForBlog/blob/master/Android_Perfetto/demo_app_aosp_scroll.perfetto-trace">https://github.com/Gracker/SystraceForBlog/blob/master/Android_Perfetto/demo_app_aosp_scroll.perfetto-trace</a> ，需要的可以自取。</p>
 <blockquote>
-<p><strong>版本说明</strong>：本文以 Android 17（API 37）为当前技术参照，Android 12 及以上设备可按同一分析思路核对。文中的源码摘录按写作时的 AOSP 主线整理，截图来自附件中的设备 Trace；示意摘录不等于 Android 17 发布分支的逐行源码，具体签名和轨道名称以目标分支及设备 Trace 为准。</p>
+<p><strong>版本说明（2026-10 核查）</strong>：本文 Java&#x2F;HWUI 节选以 <code>android-16.0.0_r1</code> 核对，BLAST 计数以 <code>android-15.0.0_r1</code> 为例；Android 13 的 unsignaled latch 和 Android 17 的 MessageQueue 更新另行标注。附带 trace 的 SystemInfo 记录为 OPPO PKH110、Android 15&#x2F;API 35、Perfetto v46.0，文件名含 aosp 不代表纯 AOSP 固件。多数新图显示示例 App，另有 <code>com.tencent.mm</code> 详情图和旧 Systrace 图，不能把它们拼成同一次采集。</p>
 </blockquote>
 <p><a id="render-flow"></a></p>
 <h1 id="基于-Perfetto-的渲染流程分析"><a href="#基于-Perfetto-的渲染流程分析" class="headerlink" title="基于 Perfetto 的渲染流程分析"></a>基于 Perfetto 的渲染流程分析</h1><p>这里以滑动列表为例，从主线程的一次 <code>doFrame</code> 走到 RenderThread 的绘制和提交。帧的路径会随软件&#x2F;硬件绘制、窗口类型和更新内容变化；截图展示的是这一份 Trace 中实际出现的阶段。</p>
@@ -405,7 +377,7 @@ loading="lazy"             decoding="async"
 <p>在 Perfetto 中分析渲染性能时，需要重点关注以下两个线程：</p>
 <ul>
 <li><strong>UI Thread</strong>：应用主线程，处理用户输入、业务逻辑、布局计算</li>
-<li><strong>RenderThread</strong>：渲染线程，执行 GPU 渲染命令，与 SurfaceFlinger 交互</li>
+<li><strong>RenderThread</strong>：运行在 CPU 上的渲染线程，组织和提交 GPU 命令；GPU 执行命令，buffer 提交连接到 SurfaceFlinger</li>
 </ul>
 <h2 id="主线程和渲染线程的工作流程"><a href="#主线程和渲染线程的工作流程" class="headerlink" title="主线程和渲染线程的工作流程"></a>主线程和渲染线程的工作流程</h2><p><img src="/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803165650716.webp" alt="image-20250803165650716"></p>
 <p>截图里，主线程处理回调并记录绘制命令，RenderThread 接手后继续执行绘制和提交。先沿时间线找到两条线程的交接点，再看 Buffer 和 SurfaceFlinger；不要把图中的相邻 slice 全部当成同一帧。</p>
@@ -415,20 +387,9 @@ loading="lazy"             decoding="async"
 <li><strong>Perfetto trace</strong>：主线程在两次工作之间可能处于 Sleeping 状态。</li>
 <li><strong>流程说明</strong>：有待处理的帧时，Choreographer 请求下一次 VSync 回调；Sleeping 只能说明线程当时未运行，不能仅凭空白轨道断定它正在等待 VSync。</li>
 </ul>
-<h3 id="2-Vsync-app-信号传递过程"><a href="#2-Vsync-app-信号传递过程" class="headerlink" title="2. Vsync-app 信号传递过程"></a>2. Vsync-app 信号传递过程</h3><ul>
-<li><strong>Perfetto trace</strong>: <code>vsync-app</code> 相关事件，SurfaceFlinger app 线程活动</li>
-<li><strong>流程说明</strong>: 当硬件产生 Vsync 信号时，会先传给 SurfaceFlinger。SurfaceFlinger 的 app 线程被唤醒，负责管理和分发 Vsync 信号给需要渲染的应用程序。这个中间层设计允许系统级的 Vsync 调度和优化</li>
-</ul>
-<p><strong>重要说明</strong>：</p>
-<ul>
-<li><strong>Vsync-app 是按需申请的</strong>：只有 App 主动请求时才会收到 vsync-app 信号，不申请就没有</li>
-<li><strong>多 App 共享机制</strong>：同时可能有多个 App 申请 vsync-app 信号</li>
-<li><strong>信号归属问题</strong>：SurfaceFlinger 中的 vsync-app 信号可能是其他 App 申请的，当前分析的 App 如果没有申请，就不会有帧输出，这是正常现象</li>
-</ul>
-<h3 id="3-SurfaceFlinger-唤醒-App-主线程"><a href="#3-SurfaceFlinger-唤醒-App-主线程" class="headerlink" title="3. SurfaceFlinger 唤醒 App 主线程"></a>3. SurfaceFlinger 唤醒 App 主线程</h3><ul>
-<li><strong>Perfetto trace</strong>: <code>FrameDisplayEventReceiver.onVsync</code></li>
-<li><strong>流程说明</strong>: SurfaceFlinger 通过 FrameDisplayEventReceiver 机制将 Vsync 信号发送给已注册的 App。App 的 Choreographer 接收到信号后开始启动一帧绘制流程</li>
-</ul>
+<h3 id="2-Vsync-app-信号传递过程"><a href="#2-Vsync-app-信号传递过程" class="headerlink" title="2. Vsync-app 信号传递过程"></a>2. Vsync-app 信号传递过程</h3><p>SurfaceFlinger 的调度器结合硬件时序与软件预测安排通知，不能把每次 <code>VSYNC-app</code> 翻转都解释为一次硬件中断即时转发。图中的 app&#x2F;EventThread 服务可能同时面对多个连接；这条全局轨道不能单独归属某个 App。</p>
+<p>Choreographer 按需请求一次通知并处理到期回调。其他 Vsync 订阅方式和渲染路径可能不同；某个 App 未申请这一轮 Choreographer 回调，不等于系统中没有其他帧或 buffer 提交。</p>
+<h3 id="3-SurfaceFlinger-唤醒-App-主线程"><a href="#3-SurfaceFlinger-唤醒-App-主线程" class="headerlink" title="3. SurfaceFlinger 唤醒 App 主线程"></a>3. SurfaceFlinger 唤醒 App 主线程</h3><p>Vsync 事件经 DisplayEventReceiver 的 native FD&#x2F;JNI 路径到达 Java <code>onVsync()</code>，再投递异步 Message。Looper 稍后分发 Receiver Runnable 时才进入 <code>doFrame()</code>；通知到达和开始处理帧不是同一时刻。能否看到对应 slice 取决于插桩和采集配置，详见<a href="/2025/03/26/Android-Perfetto-05-Chorergrapher/">第五篇</a>。</p>
 <h3 id="4-处理输入事件（Input）"><a href="#4-处理输入事件（Input）" class="headerlink" title="4. 处理输入事件（Input）"></a>4. 处理输入事件（Input）</h3><ul>
 <li><strong>Perfetto trace</strong>: <code>Input</code> 块</li>
 <li><strong>流程说明</strong>：只有这一帧登记了相应回调，才会出现 <code>Input</code> 阶段；系统输入事件并非全部在这里处理。</li>
@@ -437,31 +398,18 @@ loading="lazy"             decoding="async"
 <li><strong>可能没有 Input 回调</strong>：惯性滑动或静止时没有对应待处理输入。</li>
 <li><strong>注意</strong>：是否出现该 slice 以当次 Trace 为准，不能由手指状态单独推断。</li>
 </ul>
-<h3 id="5-处理动画（Animation）"><a href="#5-处理动画（Animation）" class="headerlink" title="5. 处理动画（Animation）"></a>5. 处理动画（Animation）</h3><ul>
-<li><strong>Perfetto trace</strong>: <code>Animation</code> 块</li>
-<li><strong>流程说明</strong>: 仅在有动画需要更新时才执行，更新动画状态和当前帧的动画值</li>
-<li><strong>触发条件</strong>:</li>
-<li><strong>有 Animation 回调</strong>：惯性滑动阶段、属性动画运行时、列表 item 创建和内容变化、页面转场动画等</li>
-<li><strong>无 Animation 回调</strong>：界面静止状态、纯 Input 交互阶段（无动画效果时）</li>
-<li><strong>注意</strong>: Animation 回调同样由前一帧 post 的回调决定当前帧是否执行</li>
-</ul>
-<h3 id="6-处理-Insets-动画"><a href="#6-处理-Insets-动画" class="headerlink" title="6. 处理 Insets 动画"></a>6. 处理 Insets 动画</h3><ul>
-<li><strong>Perfetto trace</strong>: <code>Insets Animation</code> 块</li>
-<li><strong>流程说明</strong>: 仅在有窗口插入变化时才执行，处理窗口边界动画</li>
-<li><strong>触发条件</strong>:</li>
-<li><strong>有 Insets Animation 回调</strong>：键盘弹出&#x2F;收起、状态栏显示&#x2F;隐藏、导航栏变化等</li>
-<li><strong>无 Insets Animation 回调</strong>：窗口边界稳定状态，大部分普通交互场景</li>
-</ul>
+<h3 id="5-处理动画（Animation）"><a href="#5-处理动画（Animation）" class="headerlink" title="5. 处理动画（Animation）"></a>5. 处理动画（Animation）</h3><p><code>animation</code> 阶段执行已到期的 CALLBACK_ANIMATION，其中包括属性动画、View.postOnAnimation 和应用 FrameCallback。有该阶段不一定存在肉眼可见的动画；创建列表 item 或处理输入也不保证出现它。回调可能在之前或当前帧前面的阶段登记，不限于上一帧 post。</p>
+<h3 id="6-处理-Insets-动画"><a href="#6-处理-Insets-动画" class="headerlink" title="6. 处理 Insets 动画"></a>6. 处理 Insets 动画</h3><p><code>insetsAnimation</code> 阶段处理已到期的窗口 Insets 动画回调，例如受支持的 IME&#x2F;系统栏动画。Insets 指系统 UI 占用的边缘区域，不是“插入窗口”。静态 Insets 变化、键盘出现或导航栏改变不保证每次都产生这一 slice。</p>
 <h3 id="7-Traversal（测量、布局、绘制准备）"><a href="#7-Traversal（测量、布局、绘制准备）" class="headerlink" title="7. Traversal（测量、布局、绘制准备）"></a>7. Traversal（测量、布局、绘制准备）</h3><ul>
 <li><strong>Perfetto trace</strong>: <code>performTraversals</code>, <code>measure</code>, <code>layout</code>, <code>draw</code></li>
 <li><strong>流程说明</strong>: Android UI 渲染的三大核心流程，但并不是每个 Vsync 都完整执行一遍，是否执行取决于本帧是否有布局&#x2F;绘制请求。</li>
 </ul>
 <h4 id="7-1-Measure（测量阶段）"><a href="#7-1-Measure（测量阶段）" class="headerlink" title="7.1 Measure（测量阶段）"></a>7.1 Measure（测量阶段）</h4><ul>
 <li><strong>作用</strong>: 确定每个 View 的尺寸大小</li>
-<li><strong>过程</strong>: 从根 View 开始，递归测量所有子 View 的宽高</li>
+<li><strong>过程</strong>: 父容器按布局策略测量需要更新的子 View；缓存或跳过分支可减少工作，并非每次遍历都重测整棵树</li>
 <li><strong>关键概念</strong>:</li>
 <li><code>MeasureSpec</code>：封装了父容器对子 View 的尺寸要求（EXACTLY、AT_MOST、UNSPECIFIED）</li>
-<li><code>onMeasure()</code>：每个 View 重写此方法来实现自己的测量逻辑</li>
+<li><code>onMeasure()</code>：自定义 View 可重写此方法实现测量逻辑，并非每个 View 都要重写</li>
 <li><strong>Perfetto 中的表现</strong>: <code>measure</code> 事件，耗时取决于 View 层级复杂度</li>
 </ul>
 <h4 id="7-2-Layout（布局阶段）"><a href="#7-2-Layout（布局阶段）" class="headerlink" title="7.2 Layout（布局阶段）"></a>7.2 Layout（布局阶段）</h4><ul>
@@ -470,20 +418,20 @@ loading="lazy"             decoding="async"
 <li><strong>关键概念</strong>:</li>
 <li><code>layout(left, top, right, bottom)</code>：设置 View 的四个边界坐标</li>
 <li><code>onLayout()</code>：ViewGroup 重写此方法来确定子 View 的位置</li>
-<li><strong>Perfetto 中的表现</strong>: <code>layout</code> 事件，通常比 measure 更快</li>
+<li><strong>Perfetto 中的表现</strong>: <code>layout</code> 事件；耗时由布局逻辑与层级决定，不能普遍认定比 measure 快</li>
 </ul>
 <h4 id="7-3-Draw（绘制阶段）"><a href="#7-3-Draw（绘制阶段）" class="headerlink" title="7.3 Draw（绘制阶段）"></a>7.3 Draw（绘制阶段）</h4><ul>
 <li><strong>作用</strong>: 将 View 的内容绘制到画布上</li>
-<li><strong>现代实现</strong>: 不直接绘制像素，而是构建 DisplayList（绘制指令列表）</li>
+<li><strong>硬件加速 View 路径</strong>：记录或更新 DisplayList；软件 Canvas 路径仍可直接栅格化像素</li>
 <li><strong>关键流程</strong>:</li>
 <li><code>draw(Canvas)</code>：绘制 View 自身内容</li>
 <li><code>onDraw(Canvas)</code>：子类重写实现具体绘制逻辑</li>
 <li><code>dispatchDraw(Canvas)</code>：ViewGroup 用来绘制子 View</li>
 <li><strong>Perfetto 中的表现</strong>: <code>draw</code> 事件，在硬件加速下主要是构建 DisplayList</li>
 </ul>
-<h4 id="ViewRootImpl-performTraversals-核心代码"><a href="#ViewRootImpl-performTraversals-核心代码" class="headerlink" title="ViewRootImpl.performTraversals 核心代码"></a>ViewRootImpl.performTraversals 核心代码</h4><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/base/core/java/android/view/ViewRootImpl.java</span></span><br><span class="line"><span class="keyword">void</span> <span class="title function_">scheduleTraversals</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="keyword">if</span> (!mTraversalScheduled) &#123;</span><br><span class="line">        mTraversalScheduled = <span class="literal">true</span>;</span><br><span class="line">        mTraversalBarrier = mHandler.getLooper().getQueue().postSyncBarrier();</span><br><span class="line">        mChoreographer.postCallback(CALLBACK_TRAVERSAL, mTraversalRunnable, <span class="literal">null</span>);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title function_">performTraversals</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="comment">// ... 大量窗口/relayout/可见性/同步相关逻辑</span></span><br><span class="line">    <span class="type">boolean</span> <span class="variable">layoutRequested</span> <span class="operator">=</span> mLayoutRequested &amp;&amp; (!mStopped || mReportNextDraw);</span><br><span class="line">    <span class="keyword">if</span> (layoutRequested) &#123;</span><br><span class="line">        <span class="comment">// 可能触发 measureHierarchy / performMeasure</span></span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">final</span> <span class="type">boolean</span> <span class="variable">didLayout</span> <span class="operator">=</span> layoutRequested &amp;&amp; (!mStopped || mReportNextDraw);</span><br><span class="line">    <span class="keyword">if</span> (didLayout) &#123;</span><br><span class="line">        performLayout(lp, mWidth, mHeight);</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 满足条件才会进入 draw；若取消绘制会重新 scheduleTraversals()</span></span><br><span class="line">    performDraw(mActiveSurfaceSyncGroup);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h4 id="ViewRootImpl-performTraversals-核心代码"><a href="#ViewRootImpl-performTraversals-核心代码" class="headerlink" title="ViewRootImpl.performTraversals 核心代码"></a>ViewRootImpl.performTraversals 核心代码</h4><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/base/core/java/android/view/ViewRootImpl.java</span></span><br><span class="line"><span class="keyword">void</span> <span class="title function_">scheduleTraversals</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="keyword">if</span> (!mTraversalScheduled) &#123;</span><br><span class="line">        mTraversalScheduled = <span class="literal">true</span>;</span><br><span class="line">        mTraversalBarrier = mHandler.getLooper().getQueue().postSyncBarrier();</span><br><span class="line">        mChoreographer.postCallback(CALLBACK_TRAVERSAL, mTraversalRunnable, <span class="literal">null</span>);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title function_">performTraversals</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="comment">// ... 大量窗口/relayout/可见性/同步相关逻辑</span></span><br><span class="line">    <span class="type">boolean</span> <span class="variable">layoutRequested</span> <span class="operator">=</span> mLayoutRequested &amp;&amp; (!mStopped || mReportNextDraw);</span><br><span class="line">    <span class="keyword">if</span> (layoutRequested) &#123;</span><br><span class="line">        <span class="comment">// 可能触发 measureHierarchy / performMeasure</span></span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">final</span> <span class="type">boolean</span> <span class="variable">didLayout</span> <span class="operator">=</span> layoutRequested &amp;&amp; (!mStopped || mReportNextDraw);</span><br><span class="line">    <span class="keyword">if</span> (didLayout) &#123;</span><br><span class="line">        performLayout(lp, mWidth, mHeight);</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 满足条件才会进入 draw；若取消绘制会重新 scheduleTraversals()</span></span><br><span class="line">    <span class="keyword">if</span> (!isViewVisible) &#123;</span><br><span class="line">        <span class="comment">// Visibility/sync handling omitted.</span></span><br><span class="line">    &#125; <span class="keyword">else</span> <span class="keyword">if</span> (cancelAndRedraw) &#123;</span><br><span class="line">        scheduleTraversals();</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        performDraw(mActiveSurfaceSyncGroup);</span><br><span class="line">        <span class="comment">// Return-value and sync handling omitted.</span></span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <blockquote>
-<p>注：最新 AOSP 中 <code>performTraversals</code> 的分支远比示例复杂，涉及 relayout、surface 变化、同步组、取消重绘、窗口可见性等；这里仅保留与 Measure&#x2F;Layout&#x2F;Draw 直接相关的主干逻辑。</p>
+<p>Android 16 关系示意：局部变量和外围分支未列出，不是可直接编译的完整方法。不可见、取消绘制与取消后重调度是不同分支；performDraw 也可能返回未绘制。</p>
 </blockquote>
 <p><strong>三阶段的执行条件</strong>：</p>
 <ul>
@@ -496,17 +444,14 @@ loading="lazy"             decoding="async"
 <li><strong>流程说明</strong>：主线程通过 <code>syncAndDrawFrame</code> 将本帧 RenderNode&#x2F;DisplayList 状态同步到 RenderThread。UI 线程会在 <code>DrawFrameTask::postAndWait</code> 等待关键同步点，解除阻塞后继续处理消息；屏幕呈现还要经过后续渲染与合成。</li>
 </ul>
 <h3 id="9-渲染线程获取-Buffer"><a href="#9-渲染线程获取-Buffer" class="headerlink" title="9. 渲染线程获取 Buffer"></a>9. 渲染线程获取 Buffer</h3><ul>
-<li><strong>Perfetto trace</strong>: 常见可观察 <code>DequeueBufferDuration</code> &#x2F; <code>QueueBufferDuration</code> 相关信息（具体 tag 因版本和厂商实现不同）</li>
+<li><strong>Perfetto trace</strong>：按实际插桩查 dequeueBuffer&#x2F;queueBuffer 等 slice。<code>DequeueBufferDuration</code> &#x2F; <code>QueueBufferDuration</code> 是 HWUI 帧统计字段，不保证以同名 slice 出现</li>
 <li><strong>流程说明</strong>: 渲染线程在绘制提交阶段会通过 <code>ANativeWindow/RenderPipeline</code> 路径完成 buffer 申请与交换。是否等待、等待多久，直接影响这一帧是否赶上 deadline。</li>
 </ul>
 <h3 id="10-处理渲染指令并-flush-到-GPU"><a href="#10-处理渲染指令并-flush-到-GPU" class="headerlink" title="10. 处理渲染指令并 flush 到 GPU"></a>10. 处理渲染指令并 flush 到 GPU</h3><ul>
 <li><strong>Perfetto trace</strong>: <code>drawing</code> 相关块</li>
-<li><strong>流程说明</strong>: RenderThread（运行在 CPU 上）通过 <code>HardwareRenderer/CanvasContext</code> 处理 UI 线程同步过来的 RenderNode 树，生成 GPU 命令并提交。GPU 异步执行后产出 fence，用于后续的合成同步。</li>
+<li><strong>流程说明</strong>: RenderThread（运行在 CPU 上）通过 <code>HardwareRenderer/CanvasContext</code> 处理 UI 线程同步过来的 RenderNode 树，生成 GPU 命令并提交。提交关联的 fence 在 GPU 工作完成后 signal，供后续合成同步。</li>
 </ul>
-<h3 id="11-提交-Buffer（可能-unsignaled）"><a href="#11-提交-Buffer（可能-unsignaled）" class="headerlink" title="11. 提交 Buffer（可能 unsignaled）"></a>11. 提交 Buffer（可能 unsignaled）</h3><ul>
-<li><strong>Perfetto trace</strong>: queueBuffer（可观察 acquireFence 状态）</li>
-<li><strong>流程说明</strong>: 帧提交会经过 BufferQueue&#x2F;BLAST 机制进入 SurfaceFlinger，某些场景下会出现 unsignaled fence 相关行为（由系统策略决定是否允许提前 latch），目标是降低端到端延迟。</li>
-</ul>
+<h3 id="11-提交-Buffer（可能-unsignaled）"><a href="#11-提交-Buffer（可能-unsignaled）" class="headerlink" title="11. 提交 Buffer（可能 unsignaled）"></a>11. 提交 Buffer（可能 unsignaled）</h3><p><code>queueBuffer</code> 提交可携带尚未 signal 的 acquire fence，这是异步 GPU 管线允许的情况，不等于已经发生 unsignaled latch。前者是生产者提交，后者是 SurfaceFlinger 是否提前采用 buffer 的策略。仅有 queueBuffer slice 不足以确定 fence 状态，需对应 fence&#x2F;图形数据。</p>
 <h3 id="12-触发-Transaction-到-SurfaceFlinger"><a href="#12-触发-Transaction-到-SurfaceFlinger" class="headerlink" title="12. 触发 Transaction 到 SurfaceFlinger"></a>12. 触发 Transaction 到 SurfaceFlinger</h3><ul>
 <li><strong>Perfetto trace</strong>: TransactionQueue 或 BLAST transaction 事件 ，一般在 queueBuffer 之后，有些 Trace 没有这个 Tag</li>
 <li><strong>流程说明</strong>: App 侧通过 BLAST&#x2F;SurfaceControl transaction 将 buffer 与层属性更新关联后提交到 SurfaceFlinger。SurfaceFlinger 再按 <code>LatchUnsignaledConfig</code> 等策略决定 latch 时机并完成合成显示。</li>
@@ -528,8 +473,8 @@ loading="lazy"             decoding="async"
 </thead>
 <tbody><tr>
 <td><strong>绘制线程</strong></td>
-<td>主线程</td>
-<td>RenderThread</td>
+<td>普通 View 路径通常在主线程；其他 Canvas 用法可不同</td>
+<td>主线程记录命令，RenderThread 组织后续工作，GPU 执行</td>
 </tr>
 <tr>
 <td><strong>绘制引擎</strong></td>
@@ -538,8 +483,8 @@ loading="lazy"             decoding="async"
 </tr>
 <tr>
 <td><strong>Perfetto 特征</strong></td>
-<td>主线程有大块 <code>draw</code> 事件</td>
-<td>主线程快速完成，RenderThread 处理绘制</td>
+<td>可能见主线程 <code>draw</code> 与栅格化&#x2F;等待</td>
+<td>主线程与 RenderThread 都可能耗时或等待</td>
 </tr>
 <tr>
 <td><strong>性能影响</strong></td>
@@ -558,7 +503,8 @@ loading="lazy"             decoding="async"
 </ol>
 <p><a id="evolution"></a></p>
 <h1 id="双线程渲染架构的演进"><a href="#双线程渲染架构的演进" class="headerlink" title="双线程渲染架构的演进"></a>双线程渲染架构的演进</h1><p>Android 的渲染系统经历了从单线程到双线程的重要演进过程。</p>
-<h2 id="单线程时代（Android-5-0-之前）"><a href="#单线程时代（Android-5-0-之前）" class="headerlink" title="单线程时代（Android 5.0 之前）"></a>单线程时代（Android 5.0 之前）</h2><p>在早期以软件绘制为主的 View 渲染路径中，主线程承担更多 UI 绘制工作：</p>
+<h2 id="单线程时代（Android-5-0-之前）"><a href="#单线程时代（Android-5-0-之前）" class="headerlink" title="单线程时代（Android 5.0 之前）"></a>单线程时代（Android 5.0 之前）</h2><p>硬件加速从 Android 3.0（API 11）已支持，早于 Android 5.0 的 HWUI RenderThread。因此“5.0 前”不能等同于全部 CPU 软件绘制；这里仅讨论早期普通 View 路径。</p>
+<p>在早期以软件绘制为主的 View 渲染路径中，主线程承担更多 UI 绘制工作：</p>
 <ul>
 <li>处理用户输入事件</li>
 <li>执行 measure、layout、draw</li>
@@ -592,56 +538,57 @@ loading="lazy"             decoding="async"
 <li><strong>并行机会</strong>：同步结束后，主线程可以继续处理消息；实际帧节奏取决于 RenderThread、GPU 与 BufferQueue。</li>
 </ol>
 <p><a id="main-thread-create"></a></p>
-<h1 id="主线程的创建过程"><a href="#主线程的创建过程" class="headerlink" title="主线程的创建过程"></a>主线程的创建过程</h1><p>Android App 的进程是基于 Linux 的，其管理也是基于 Linux 的进程管理机制，所以其创建也是调用了 fork 函数</p>
-<p>frameworks&#x2F;base&#x2F;core&#x2F;jni&#x2F;com_android_internal_os_Zygote.cpp</p>
+<h1 id="主线程的创建过程"><a href="#主线程的创建过程" class="headerlink" title="主线程的创建过程"></a>主线程的创建过程</h1><p>普通 Android App 进程通常由 Zygote fork 后专门化，USAP 等路径的准备时机可不同。fork 创建子进程，子进程保留调用线程；进程和主线程不是同一个概念。</p>
+<p>frameworks&#x2F;base&#x2F;core&#x2F;jni&#x2F;com_android_internal_os_Zygote.cpp 中的核心操作可概括为：</p>
 <figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">pid_t</span> pid = fork();</span><br></pre></td></tr></table></figure>
 
-<p>Fork 出来的进程，我们这里可以把他看做主线程，但是这个线程还没有和 Android 进行连接，所以无法处理 Android App 的 Message ；由于 Android App 线程运行<strong>基于消息机制</strong> ，那么这个 Fork 出来的主线程需要和 Android 的 Message 消息绑定，才能处理 Android App 的各种 Message</p>
-<p>这里就引入了 <strong>ActivityThread</strong>。更准确地说，把它理解成 ProcessThread 会更贴切一些。ActivityThread 负责把 Fork 出来的进程和 App 的 Message 机制连接起来，它会初始化 MessageQueue、Looper、Handler 等关键对象，而它自己的 Handler 又负责处理大部分主线程消息。所以我们习惯上会把 ActivityThread 叫成主线程，但更准确地说，它是主线程上的核心逻辑单元。</p>
-<h2 id="ActivityThread-的创建"><a href="#ActivityThread-的创建" class="headerlink" title="ActivityThread 的创建"></a>ActivityThread 的创建</h2><p>App 进程 fork 出来之后，主路径是：<br><code>ZygoteConnection.handleChildProc</code> → <code>ZygoteInit.zygoteInit</code> → <code>RuntimeInit.applicationInit</code> → <code>ActivityThread.main</code></p>
-<p>com&#x2F;android&#x2F;internal&#x2F;os&#x2F;ZygoteConnection.java</p>
+<p><code>ActivityThread</code> 是运行在应用主线程上的框架对象，不继承 Thread，也不创建这个 Linux 主线程。它的入口准备主 Looper、实例和与系统的连接；H 处理应用生命周期等消息。应用自己的 Handler、Choreographer Handler 和 native FD 工作并不都经 H。</p>
+<h2 id="ActivityThread-的创建"><a href="#ActivityThread-的创建" class="headerlink" title="ActivityThread 的创建"></a>ActivityThread 的创建</h2><p>下面是 Android 16 普通 Zygote 子进程的一条主路径（省略外围初始化和特殊分支）：<br><code>ZygoteConnection.handleChildProc</code> → <code>ZygoteInit.zygoteInit</code> → <code>RuntimeInit.applicationInit</code> → <code>ActivityThread.main</code></p>
+<p><a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/core/java/com/android/internal/os/ZygoteConnection.java">Android 16 ZygoteConnection.java</a></p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> Runnable <span class="title function_">handleChildProc</span><span class="params">(ZygoteArguments parsedArgs, FileDescriptor pipeFd,</span></span><br><span class="line"><span class="params">        <span class="type">boolean</span> isZygote)</span> &#123;</span><br><span class="line">    <span class="comment">// ... 省略前置逻辑</span></span><br><span class="line">    <span class="keyword">if</span> (!isZygote) &#123;</span><br><span class="line">        <span class="keyword">return</span> ZygoteInit.zygoteInit(parsedArgs.mTargetSdkVersion,</span><br><span class="line">                parsedArgs.mDisabledCompatChanges,</span><br><span class="line">                parsedArgs.mRemainingArgs, <span class="literal">null</span> <span class="comment">/* classLoader */</span>);</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> ZygoteInit.childZygoteInit(parsedArgs.mRemainingArgs);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>对于普通 App 进程，上面会走 <code>zygoteInit</code> 分支并最终进入 <code>ActivityThread.main</code>；<code>childZygoteInit</code> 是子 zygote 的分支，不是常规 App 主路径。</p>
-<p>android&#x2F;app&#x2F;ActivityThread.java</p>
-<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title function_">main</span><span class="params">(String[] args)</span> &#123;</span><br><span class="line">    Trace.traceBegin(Trace.TRACE_TAG_ACTIVITY_MANAGER, <span class="string">&quot;ActivityThreadMain&quot;</span>);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 1. 初始化 Looper、MessageQueue</span></span><br><span class="line">    Looper.prepareMainLooper();</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 2. 初始化 ActivityThread</span></span><br><span class="line">    <span class="type">long</span> <span class="variable">startSeq</span> <span class="operator">=</span> <span class="number">0</span>;</span><br><span class="line">    <span class="keyword">if</span> (args != <span class="literal">null</span>) &#123;</span><br><span class="line">        <span class="keyword">for</span> (<span class="type">int</span> <span class="variable">i</span> <span class="operator">=</span> args.length - <span class="number">1</span>; i &gt;= <span class="number">0</span>; --i) &#123;</span><br><span class="line">            <span class="keyword">if</span> (args[i] != <span class="literal">null</span> &amp;&amp; args[i].startsWith(PROC_START_SEQ_IDENT)) &#123;</span><br><span class="line">                startSeq = Long.parseLong(</span><br><span class="line">                        args[i].substring(PROC_START_SEQ_IDENT.length()));</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="type">ActivityThread</span> <span class="variable">thread</span> <span class="operator">=</span> <span class="keyword">new</span> <span class="title class_">ActivityThread</span>();</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 3. 主要是调用 AMS.attachApplicationLocked，同步进程信息，做一些初始化工作</span></span><br><span class="line">    thread.attach(<span class="literal">false</span>, startSeq);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 4. 获取主线程的 Handler，这里是 H ，基本上 App 的 Message 都会在这个 Handler 里面进行处理</span></span><br><span class="line">    <span class="keyword">if</span> (sMainThreadHandler == <span class="literal">null</span>) &#123;</span><br><span class="line">        sMainThreadHandler = thread.getHandler();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    Trace.traceEnd(Trace.TRACE_TAG_ACTIVITY_MANAGER);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 5. 初始化完成，Looper 开始工作</span></span><br><span class="line">    Looper.loop();</span><br><span class="line"></span><br><span class="line">    <span class="keyword">throw</span> <span class="keyword">new</span> <span class="title class_">RuntimeException</span>(<span class="string">&quot;Main thread loop unexpectedly exited&quot;</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-<p>注释里面都很清楚，这里就不详细说了，main 函数处理完成之后，主线程就算是正式上线开始工作。<a target="_blank" rel="noopener" href="https://developer.android.com/about/versions/17/behavior-changes-17">Android 17</a> 中，面向 API 37 及以上的 App 使用新的无锁 <code>MessageQueue</code> 实现；<code>Looper</code>、<code>Handler</code> 的使用方式不因此改变，分析队列内部锁竞争时则要核对目标 App 的 <code>targetSdkVersion</code>。</p>
+<p><a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/core/java/android/app/ActivityThread.java">Android 16 ActivityThread.java</a></p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title function_">main</span><span class="params">(String[] args)</span> &#123;</span><br><span class="line">    Trace.traceBegin(Trace.TRACE_TAG_ACTIVITY_MANAGER, <span class="string">&quot;ActivityThreadMain&quot;</span>);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 1. 初始化 Looper、MessageQueue</span></span><br><span class="line">    Looper.prepareMainLooper();</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 2. 初始化 ActivityThread</span></span><br><span class="line">    <span class="type">long</span> <span class="variable">startSeq</span> <span class="operator">=</span> <span class="number">0</span>;</span><br><span class="line">    <span class="keyword">if</span> (args != <span class="literal">null</span>) &#123;</span><br><span class="line">        <span class="keyword">for</span> (<span class="type">int</span> <span class="variable">i</span> <span class="operator">=</span> args.length - <span class="number">1</span>; i &gt;= <span class="number">0</span>; --i) &#123;</span><br><span class="line">            <span class="keyword">if</span> (args[i] != <span class="literal">null</span> &amp;&amp; args[i].startsWith(PROC_START_SEQ_IDENT)) &#123;</span><br><span class="line">                startSeq = Long.parseLong(</span><br><span class="line">                        args[i].substring(PROC_START_SEQ_IDENT.length()));</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="type">ActivityThread</span> <span class="variable">thread</span> <span class="operator">=</span> <span class="keyword">new</span> <span class="title class_">ActivityThread</span>();</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 3. 主要是调用 AMS.attachApplicationLocked，同步进程信息，做一些初始化工作</span></span><br><span class="line">    thread.attach(<span class="literal">false</span>, startSeq);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 4. 获取主线程的 Handler，这里是 H ，负责应用生命周期等框架消息，不包揽所有 Handler 消息</span></span><br><span class="line">    <span class="keyword">if</span> (sMainThreadHandler == <span class="literal">null</span>) &#123;</span><br><span class="line">        sMainThreadHandler = thread.getHandler();</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    Trace.traceEnd(Trace.TRACE_TAG_ACTIVITY_MANAGER);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 5. 初始化完成，Looper 开始工作</span></span><br><span class="line">    Looper.loop();</span><br><span class="line"></span><br><span class="line">    <span class="keyword">throw</span> <span class="keyword">new</span> <span class="title class_">RuntimeException</span>(<span class="string">&quot;Main thread loop unexpectedly exited&quot;</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>以上是 Android 16 的简化节选。进入 <code>Looper.loop()</code>，主线程就算正式上线，开始分发消息了；正常运行时 <code>main()</code> 不会先返回。<a target="_blank" rel="noopener" href="https://developer.android.com/about/versions/17/behavior-changes-17">Android 17</a> 中，面向 API 37 及以上的 App 使用新的无锁 <code>MessageQueue</code> 实现；<code>Looper</code>、<code>Handler</code> 的使用方式不因此改变，分析队列内部锁竞争时需核对 <code>targetSdkVersion</code>，依赖 MessageQueue 私有字段反射的监控也可能受影响。</p>
 <p><a id="activitythread"></a></p>
 <h2 id="ActivityThread-的功能"><a href="#ActivityThread-的功能" class="headerlink" title="ActivityThread 的功能"></a>ActivityThread 的功能</h2><p>ActivityThread 的 Handler 负责分发许多应用生命周期消息。组件回调通常从主线程进入，但 Service、Receiver 等后续工作也可能转到其他线程，不能把四大组件的全部执行都算在主线程上。</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> <span class="title class_">H</span> <span class="keyword">extends</span> <span class="title class_">Handler</span> &#123; <span class="comment">// 仅示意相关消息类型，具体数值以目标分支为准</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">BIND_APPLICATION</span>        <span class="operator">=</span> <span class="number">110</span>; <span class="comment">// 应用启动</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">CREATE_SERVICE</span>          <span class="operator">=</span> <span class="number">114</span>; <span class="comment">// 创建Service</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">BIND_SERVICE</span>            <span class="operator">=</span> <span class="number">121</span>; <span class="comment">// 绑定Service</span></span><br><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="type">int</span> <span class="variable">RECEIVER</span>                <span class="operator">=</span> <span class="number">113</span>; <span class="comment">// 广播接收</span></span><br><span class="line">    <span class="comment">// ... 还有其他四大组件相关的消息类型</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-<p>从这些 Message 类型就能看出，进程创建、Activity 启动、Service 管理、Receiver 管理、Provider 管理这些流程都会在这里处理，然后进入具体的 handleXXX</p>
+<p>H 不是进程创建者。Activity 生命周期还涉及 EXECUTE_TRANSACTION 等分发；Service&#x2F;Receiver 生命周期通常在主线程，但远程 Binder 服务方法、Provider 的 query&#x2F;insert 等请求可在线程池执行，不能把所有组件方法归到 H。</p>
 <p><a id="render-thread"></a></p>
-<h1 id="渲染线程的创建和发展"><a href="#渲染线程的创建和发展" class="headerlink" title="渲染线程的创建和发展"></a>渲染线程的创建和发展</h1><p>主线程讲完了我们来讲渲染线程，渲染线程也就是 RenderThread ，最初的 Android 版本里面是没有渲染线程的，渲染工作都是在主线程完成，使用的也都是 CPU ，调用的是 libSkia 这个库，RenderThread 是在 Android Lollipop 中新加入的组件，负责承担一部分之前主线程的渲染工作，减轻主线程的负担</p>
-<h2 id="软件绘制"><a href="#软件绘制" class="headerlink" title="软件绘制"></a>软件绘制</h2><p>我们一般提到的硬件加速，指的就是 GPU 加速，这里可以理解为用 RenderThread 调用 GPU 来进行渲染加速 。 硬件加速在目前的 Android 中是默认开启的， 所以如果我们什么都不设置，那么我们的进程默认都会有主线程和渲染线程(有可见的内容)。我们如果在 App 的 AndroidManifest 里面，在 Application 标签里面加一个</p>
-<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">android:hardwareAccelerated=&quot;false&quot;</span><br></pre></td></tr></table></figure>
-<p>关闭应用的硬件加速后，普通 View 绘制路径会更多依赖主线程上的软件绘制；进程里是否还有 RenderThread 要看其他 Surface 或组件，不能由这个开关单独判断。下面是旧版 Systrace 中的软件绘制示例：</p>
+<h1 id="渲染线程的创建和发展"><a href="#渲染线程的创建和发展" class="headerlink" title="渲染线程的创建和发展"></a>渲染线程的创建和发展</h1><p>HWUI RenderThread 从 Android 5.0 起承担一部分原来位于 UI 线程的工作。它是 CPU 线程；更早版本已有 GPU 硬件加速，不能把 RenderThread 的引入当成 Android 首次使用 GPU。</p>
+<h2 id="软件绘制"><a href="#软件绘制" class="headerlink" title="软件绘制"></a>软件绘制</h2><p><a target="_blank" rel="noopener" href="https://developer.android.com/develop/ui/views/graphics/hardware-accel">硬件加速</a>在 target API 14 及以上默认启用，也可在 Application&#x2F;Activity 等层级配置。下面属性放在已有 <code>&lt;application&gt;</code> 标签中；Activity 覆盖或其他图形组件仍可能使用硬件路径：</p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">android:hardwareAccelerated=&quot;false&quot;</span><br></pre></td></tr></table></figure>
+
+<p>这会影响普通 View 的绘制路径，不保证进程里完全没有 RenderThread，也不同于单个 View 的软件 layer。下图保留为历史渲染等待示例：它明确出现 RenderThread、DrawFrame 和 dequeueBuffer，不能作为关闭硬件加速后的纯软件绘制证据。</p>
 <p><img src="/images/Android-Perfetto-07-MainThread-And-RenderThread/15717420572997.jpg" alt="img"></p>
-<p>和这篇文章开头开启硬件加速的 Perfetto 图对比，主线程由于要承担渲染工作，执行时间会明显变长，也更容易出现卡顿；同时帧与帧之间的空闲间隔也会变短，使得其他 Message 的执行时间被压缩。在 Perfetto 中，这种差异可以通过线程活动的时间长度和密集程度直接观察到。</p>
-<h2 id="硬件加速绘制"><a href="#硬件加速绘制" class="headerlink" title="硬件加速绘制"></a>硬件加速绘制</h2><p>正常情况下，硬件加速是开启的，主线程的 draw 主要是在构建&#x2F;更新 DisplayList（RenderNode 树），然后通过 <code>syncAndDrawFrame</code> 同步给 RenderThread。UI 线程会在同步关键路径上短暂等待，随后尽快返回继续处理主线程消息；RenderThread 再继续执行后续渲染与提交。</p>
-<h2 id="渲染线程初始化"><a href="#渲染线程初始化" class="headerlink" title="渲染线程初始化"></a>渲染线程初始化</h2><p>硬件加速的 ViewRootImpl 在需要绘制内容时，会检查 ThreadedRenderer 是否已经初始化。具体触发时机随窗口和版本变化，下面从 <code>initializeIfNeeded</code> 的调用点继续看。</p>
+<p>这张旧 Systrace 与开头的设备 Perfetto 图不是同条件测试。线程 slice 还包含等待，不能据其长度推导硬件加速的加速比或纯 CPU 绘制成本。</p>
+<h2 id="硬件加速绘制"><a href="#硬件加速绘制" class="headerlink" title="硬件加速绘制"></a>硬件加速绘制</h2><p>普通硬件加速 View 路径在主线程记录或更新 RenderNode 中的 DisplayList，再经 syncAndDrawFrame 进入同步。主线程可能早于后续绘制完成被释放，也可能等到 draw&#x2F;flush 等分支之后；不能保证等待总是短暂。</p>
+<h2 id="渲染线程初始化"><a href="#渲染线程初始化" class="headerlink" title="渲染线程初始化"></a>渲染线程初始化</h2><p>Android 16 的 RenderProxy 构造函数会取得 <code>RenderThread::getInstance()</code>，该入口按需创建并启动进程内 HWUI 渲染线程。因此首次 draw 中的 <code>initializeIfNeeded()</code> 主要是 Surface&#x2F;渲染器状态初始化，不等于线程一定在此时才创建。BLAST 更新又在 ViewRootImpl 的另一条路径中，下面两段不表示连续调用顺序。</p>
 <p>android&#x2F;view&#x2F;ViewRootImpl.java</p>
-<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">// 渲染线程初始化</span><br><span class="line">mAttachInfo.mThreadedRenderer.initializeIfNeeded(</span><br><span class="line">        mWidth, mHeight, mAttachInfo, mSurface, surfaceInsets);</span><br><span class="line"></span><br><span class="line">// 初始化 BlastBufferQueue - App 端缓冲区管理器</span><br><span class="line">if (mBlastBufferQueue == null) &#123;</span><br><span class="line">    mBlastBufferQueue = new BLASTBufferQueue(mTag, mSurfaceControl,</span><br><span class="line">        mSurfaceSize.x, mSurfaceSize.y,</span><br><span class="line">        mWindowAttributes.format);</span><br><span class="line">    mBlastBufferQueue.update(mSurfaceControl,</span><br><span class="line">        mSurfaceSize.x, mSurfaceSize.y, mWindowAttributes.format);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// ViewRootImpl: renderer/Surface initialization call (surrounding conditions omitted)</span></span><br><span class="line">mAttachInfo.mThreadedRenderer.initializeIfNeeded(</span><br><span class="line">        mWidth, mHeight, mAttachInfo, mSurface, surfaceInsets);</span><br><span class="line"></span><br><span class="line"><span class="comment">// Separate Android 16 updateBlastSurfaceIfNeeded excerpt after recreation checks</span></span><br><span class="line">mBlastBufferQueue = <span class="keyword">new</span> <span class="title class_">BLASTBufferQueue</span>(mTag, <span class="literal">true</span> <span class="comment">/* updateDestinationFrame */</span>);</span><br><span class="line">mBlastBufferQueue.setApplyToken(mBbqApplyToken);</span><br><span class="line">mBlastBufferQueue.update(mSurfaceControl, mSurfaceSize.x, mSurfaceSize.y,</span><br><span class="line">        mWindowAttributes.format);</span><br><span class="line"><span class="comment">// Callbacks, Surface creation/transfer and other state omitted.</span></span><br></pre></td></tr></table></figure>
 
 <p>这里创建的 BlastBufferQueue 将在后续的渲染过程中发挥关键作用：</p>
 <ul>
-<li>为 RenderThread 提供高效的 Buffer 管理</li>
-<li>支持批量 Transaction 提交，减少与 SurfaceFlinger 的交互开销</li>
+<li>在客户端管理 BufferQueue 端点与 SurfaceControl transaction</li>
+<li>可合并 buffer 与层属性更新；是否减少调用或等待取决于具体路径</li>
 <li>在 Perfetto 中可观察到 QueuedBuffer 指标的变化</li>
 </ul>
-<p>后续直接调用 draw</p>
-<p>android&#x2F;view&#x2F;ThreadedRenderer.java</p>
-<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br></pre></td><td class="code"><pre><span class="line">mAttachInfo.mThreadedRenderer.draw(mView, mAttachInfo, this);</span><br><span class="line"></span><br><span class="line">void draw(View view, AttachInfo attachInfo, DrawCallbacks callbacks) &#123;</span><br><span class="line">    final Choreographer choreographer = attachInfo.mViewRootImpl.mChoreographer;</span><br><span class="line">    choreographer.mFrameInfo.markDrawStart();</span><br><span class="line"></span><br><span class="line">    // 更新 RootDisplayList，构建 RenderNode 树</span><br><span class="line">    updateRootDisplayList(view, callbacks);</span><br><span class="line"></span><br><span class="line">    // 处理动画 RenderNode</span><br><span class="line">    if (attachInfo.mPendingAnimatingRenderNodes != null) &#123;</span><br><span class="line">        final int count = attachInfo.mPendingAnimatingRenderNodes.size();</span><br><span class="line">        for (int i = 0; i &lt; count; i++) &#123;</span><br><span class="line">            registerAnimatingRenderNode(</span><br><span class="line">                    attachInfo.mPendingAnimatingRenderNodes.get(i));</span><br><span class="line">        &#125;</span><br><span class="line">        attachInfo.mPendingAnimatingRenderNodes.clear();</span><br><span class="line">        attachInfo.mPendingAnimatingRenderNodes = null;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    // 同步并绘制帧，这里会触发 RenderThread 工作</span><br><span class="line">    int syncResult = syncAndDrawFrame(choreographer.mFrameInfo);</span><br><span class="line"></span><br><span class="line">    // 处理各种结果状态</span><br><span class="line">    if ((syncResult &amp; SYNC_LOST_SURFACE_REWARD_IF_FOUND) != 0) &#123;</span><br><span class="line">        setEnabled(false);</span><br><span class="line">        attachInfo.mViewRootImpl.mSurface.release();</span><br><span class="line">        attachInfo.mViewRootImpl.invalidate();</span><br><span class="line">    &#125;</span><br><span class="line">    if ((syncResult &amp; SYNC_REDRAW_REQUESTED) != 0) &#123;</span><br><span class="line">        attachInfo.mViewRootImpl.invalidate();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>进入绘制时，可调用 ThreadedRenderer.draw；以下为 Android 16 方法：</p>
+<p><a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/core/java/android/view/ThreadedRenderer.java">Android 16 ThreadedRenderer.java</a></p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> <span class="title function_">draw</span><span class="params">(View view, AttachInfo attachInfo, DrawCallbacks callbacks)</span> &#123;</span><br><span class="line">    attachInfo.mViewRootImpl.mViewFrameInfo.markDrawStart();</span><br><span class="line"></span><br><span class="line">    updateRootDisplayList(view, callbacks);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// register animating rendernodes which started animating prior to renderer</span></span><br><span class="line">    <span class="comment">// creation, which is typical for animators started prior to first draw</span></span><br><span class="line">    <span class="keyword">if</span> (attachInfo.mPendingAnimatingRenderNodes != <span class="literal">null</span>) &#123;</span><br><span class="line">        <span class="keyword">final</span> <span class="type">int</span> <span class="variable">count</span> <span class="operator">=</span> attachInfo.mPendingAnimatingRenderNodes.size();</span><br><span class="line">        <span class="keyword">for</span> (<span class="type">int</span> <span class="variable">i</span> <span class="operator">=</span> <span class="number">0</span>; i &lt; count; i++) &#123;</span><br><span class="line">            registerAnimatingRenderNode(</span><br><span class="line">                    attachInfo.mPendingAnimatingRenderNodes.get(i));</span><br><span class="line">        &#125;</span><br><span class="line">        attachInfo.mPendingAnimatingRenderNodes.clear();</span><br><span class="line">        <span class="comment">// We don&#x27;t need this anymore as subsequent calls to</span></span><br><span class="line">        <span class="comment">// ViewRootImpl#attachRenderNodeAnimator will go directly to us.</span></span><br><span class="line">        attachInfo.mPendingAnimatingRenderNodes = <span class="literal">null</span>;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">final</span> <span class="type">FrameInfo</span> <span class="variable">frameInfo</span> <span class="operator">=</span> attachInfo.mViewRootImpl.getUpdatedFrameInfo();</span><br><span class="line"></span><br><span class="line">    <span class="type">int</span> <span class="variable">syncResult</span> <span class="operator">=</span> syncAndDrawFrame(frameInfo);</span><br><span class="line">    <span class="keyword">if</span> ((syncResult &amp; SYNC_LOST_SURFACE_REWARD_IF_FOUND) != <span class="number">0</span>) &#123;</span><br><span class="line">        Log.w(<span class="string">&quot;HWUI&quot;</span>, <span class="string">&quot;Surface lost, forcing relayout&quot;</span>);</span><br><span class="line">        <span class="comment">// We lost our surface. For a relayout next frame which should give us a new</span></span><br><span class="line">        <span class="comment">// surface from WindowManager, which hopefully will work.</span></span><br><span class="line">        attachInfo.mViewRootImpl.mForceNextWindowRelayout = <span class="literal">true</span>;</span><br><span class="line">        attachInfo.mViewRootImpl.requestLayout();</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">if</span> ((syncResult &amp; SYNC_REDRAW_REQUESTED) != <span class="number">0</span>) &#123;</span><br><span class="line">        attachInfo.mViewRootImpl.invalidate();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 <p>上面的 draw 先更新 DisplayList，之后调用 <code>syncAndDrawFrame</code> 进入关键同步阶段，完成 <strong>UI Thread 到 RenderThread</strong> 的数据对齐。</p>
 <h3 id="UI-Thread-与-RenderThread-的-DisplayList-同步机制"><a href="#UI-Thread-与-RenderThread-的-DisplayList-同步机制" class="headerlink" title="UI Thread 与 RenderThread 的 DisplayList 同步机制"></a>UI Thread 与 RenderThread 的 DisplayList 同步机制</h3><p>在 <code>syncAndDrawFrame</code> 这个关键函数中，发生了以下重要的同步操作：</p>
-<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/base/libs/hwui/renderthread/RenderProxy.cpp</span></span><br><span class="line"><span class="function"><span class="type">int</span> <span class="title">RenderProxy::syncAndDrawFrame</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="comment">// 1. 将 UI Thread 的 DisplayList 同步到 RenderThread</span></span><br><span class="line">    <span class="comment">// 这里会把主线程构建的 RenderNode 树传递给渲染线程</span></span><br><span class="line">    <span class="keyword">return</span> mDrawFrameTask.<span class="built_in">drawFrame</span>();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// android-16.0.0_r1, RenderProxy.cpp</span></span><br><span class="line"><span class="function"><span class="type">int</span> <span class="title">RenderProxy::syncAndDrawFrame</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="keyword">return</span> mDrawFrameTask.<span class="built_in">drawFrame</span>();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
-<p><code>syncAndDrawFrame</code> 的底层并不是完全非阻塞。最新 AOSP 中 <code>DrawFrameTask::drawFrame()</code> 会执行 <code>postAndWait()</code>：先把任务投递到 RenderThread 队列，再在条件变量上等待；RenderThread 在合适的同步点会 <code>unblockUiThread()</code>。因此它是“<strong>有等待但尽量早释放 UI</strong>”的设计，而不是“UI 完全不等待”。</p>
+<p><code>syncAndDrawFrame</code> 的底层并不是完全非阻塞。Android 16 中 <code>DrawFrameTask::drawFrame()</code> 会执行 <code>postAndWait()</code>：先把任务投递到 RenderThread 队列，再在条件变量上等待；RenderThread 在合适的同步点会 <code>unblockUiThread()</code>。因此它是“<strong>有等待但尽量早释放 UI</strong>”的设计，而不是“UI 完全不等待”。</p>
 <figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/base/libs/hwui/renderthread/DrawFrameTask.cpp</span></span><br><span class="line"><span class="function"><span class="type">int</span> <span class="title">DrawFrameTask::drawFrame</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    mSyncResult = SyncResult::OK;</span><br><span class="line">    mSyncQueued = <span class="built_in">systemTime</span>(SYSTEM_TIME_MONOTONIC);</span><br><span class="line">    <span class="built_in">postAndWait</span>();   <span class="comment">// 关键：UI 线程在这里等待</span></span><br><span class="line">    <span class="keyword">return</span> mSyncResult;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">DrawFrameTask::postAndWait</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    AutoMutex _lock(mLock);</span><br><span class="line">    mRenderThread-&gt;<span class="built_in">queue</span>().<span class="built_in">post</span>([<span class="keyword">this</span>]() &#123; <span class="built_in">run</span>(); &#125;);</span><br><span class="line">    mSignal.<span class="built_in">wait</span>(mLock);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
+<p><code>run()</code> 中 <code>canUnblockUiThread</code> 为真时在后续 draw 前释放 UI；为假则在后续绘制或 flush&#x2F;wait 分支之后释放。排队、资源同步和 fence 等待均可能延长 UI 的等待，不是固定时长。参见 <a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/libs/hwui/renderthread/DrawFrameTask.cpp">Android 16 DrawFrameTask</a>。</p>
 <p>具体的同步过程包括：</p>
 <ol>
 <li><strong>RenderNode 树的传递</strong>：主线程在 draw 过程中构建的 RenderNode 树（包含 DisplayList）会被传递给 RenderThread</li>
 <li><strong>属性同步</strong>：View 的变换矩阵、透明度、裁剪区域等属性会一并同步</li>
-<li><strong>资源共享</strong>：纹理、Path、Paint 等绘制资源在两个线程之间建立共享机制</li>
+<li><strong>资源共享</strong>：同步按 HWUI 的 staging&#x2F;渲染状态与资源生命周期进行，不代表应用可并发修改任意 Path&#x2F;Paint</li>
 <li><strong>渲染状态传递</strong>：当前帧需要的渲染状态信息传递给 RenderThread</li>
 </ol>
 <p>这个同步过程是 Android 硬件加速渲染的核心，它实现了 UI Thread 专注于逻辑处理，RenderThread 专注于渲染的分工模式。</p>
@@ -650,14 +597,14 @@ loading="lazy"             decoding="async"
 <figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// frameworks/base/libs/hwui/renderthread/CanvasContext.cpp</span></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">CanvasContext::draw</span><span class="params">(<span class="type">bool</span> solelyTextureViewUpdates)</span> </span>&#123;</span><br><span class="line">    <span class="comment">// 1. 计算 dirty 区域并准备本帧</span></span><br><span class="line">    <span class="comment">// 2. 通过 mRenderPipeline-&gt;draw(...) 生成绘制命令</span></span><br><span class="line">    <span class="comment">// 3. 通过 mRenderPipeline-&gt;swapBuffers(...) 提交本帧</span></span><br><span class="line">    <span class="comment">// 4. 记录 dequeue/queue 时延到 FrameInfo (DequeueBufferDuration/QueueBufferDuration)</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
 <blockquote>
-<p>注：旧版本常见的 <code>dequeueBuffer/queueBuffer/flushTransaction</code> 直观流程仍可作为理解模型，但在最新主干里这些细节被收敛在 <code>RenderPipeline</code>&#x2F;<code>ANativeWindow</code> 路径中，<code>CanvasContext::draw()</code> 本身已不是旧代码形态。</p>
+<p>注：旧版本常见的 <code>dequeueBuffer/queueBuffer/flushTransaction</code> 直观流程仍可作为理解模型，但在本篇核对的 Android 16 中，这些细节分布在 <code>RenderPipeline</code>&#x2F;<code>ANativeWindow</code> 路径中，<code>CanvasContext::draw()</code> 本身已不是旧代码形态。</p>
 </blockquote>
 <p><strong>BlastBufferQueue 的关键特性：</strong></p>
 <ol>
-<li><strong>App 端管理</strong>：不同于传统的 BufferQueue 由 SurfaceFlinger 创建，BlastBufferQueue 是由 App 端创建和管理</li>
+<li><strong>App 端管理</strong>：在这里比较的窗口路径中，BLASTBufferQueue 由客户端创建和管理</li>
 <li><strong>缓冲区获取</strong>：生产者和消费者在 App 侧建立，但没有可用 Buffer 时 <code>dequeueBuffer</code> 仍可能等待</li>
 <li><strong>缓冲区轮转</strong>：具体等待时间和高刷新率收益要以目标设备的 Trace 为准</li>
-<li><strong>异步提交</strong>：通过 transaction 机制异步地将完成的帧提交给 SurfaceFlinger</li>
+<li><strong>异步提交</strong>：通过 transaction 机制提交 buffer 和 acquire fence 给 SurfaceFlinger，GPU 工作可能尚未完成</li>
 <li><strong>支持 unsignaled buffer</strong>：配合 SurfaceFlinger 的 unsignaled latch 策略，允许在特定条件下减少端到端延迟</li>
 </ol>
 <p><strong>关于 Latching Unsignaled Buffers 的深入探讨</strong></p>
@@ -669,43 +616,12 @@ loading="lazy"             decoding="async"
 </li>
 </ul>
 <p><strong>控制开关与策略 (Android 13+)</strong>:</p>
-<p>一个典型的策略是 <code>AutoSingleLayer</code>。按 <a target="_blank" rel="noopener" href="https://source.android.com/docs/core/graphics/unsignaled-buffer-latch">AOSP 文档</a>，Android 13 的默认模式只在一帧中单个 layer 更新、且更新仅包含 Buffer、没有同步事务或几何变化时允许提前 latch。多 layer 或其他事务条件不满足时，不走这条路径。具体设备还要核对 <code>LatchUnsignaledConfig</code> 和系统属性。</p>
+<p>一个典型的策略是 <code>AutoSingleLayer</code>。按 <a target="_blank" rel="noopener" href="https://source.android.com/docs/core/graphics/unsignaled-buffer-latch">AOSP 文档</a>，Android 13 的默认模式只在一帧中单个 layer 更新、且更新仅包含 Buffer、没有同步事务或几何变化时允许提前 latch。多 layer 或其他事务条件不满足时，不走这条路径。文档说明该配置在启动时读取；具体设备还要核对分支与系统属性，不能当成所有版本通用的实时开关。</p>
 <p>分析这类 Trace 时，先核对 acquire fence、layer 更新和 latch 时点；<code>present fence</code> 留给判断合成呈现完成时间。</p>
-<h2 id="主线程和渲染线程的分工"><a href="#主线程和渲染线程的分工" class="headerlink" title="主线程和渲染线程的分工"></a>主线程和渲染线程的分工</h2><p>主线程负责处理进程 Message、处理 Input 事件、处理 Animation 逻辑、处理 Measure、Layout、Draw ，更新 DisplayList ，但是不涉及与 SurfaceFlinger 直接打交道；渲染线程负责渲染相关的工作，包括与 BlastBufferQueue 的交互、GPU 渲染命令的提交，以及与 SurfaceFlinger 的最终交互。GPU 命令由 GPU 执行。</p>
-<p>当启动硬件加速后，在 Measure、Layout、Draw 的 Draw 这个环节，Android 使用 DisplayList 进行绘制而非直接使用 CPU 绘制每一帧。DisplayList 是一系列绘制操作的记录，抽象为 RenderNode 类，这样间接的进行绘制操作的优点如下</p>
-<ol>
-<li>DisplayList 可以按需多次绘制而无须同业务逻辑交互</li>
-<li>特定的绘制操作（如 translation、scale 等）可以作用于整个 DisplayList 而无须重新分发绘制操作</li>
-<li>当知晓了所有绘制操作后，可以针对其进行优化：例如，所有的文本可以一起进行绘制一次</li>
-<li>可以将对 DisplayList 的处理转移至另一个线程（也就是 RenderThread）</li>
-<li>主线程在关键同步点解除等待后可以处理其他消息，但是否再次阻塞要看后续任务。</li>
-<li>BLASTBufferQueue 把 Buffer 与 SurfaceControl transaction 关联；是否减少等待需看具体 Trace。</li>
-</ol>
-<h3 id="BlastBufferQueue-的工作原理"><a href="#BlastBufferQueue-的工作原理" class="headerlink" title="BlastBufferQueue 的工作原理"></a>BlastBufferQueue 的工作原理</h3><p>BlastBufferQueue 是现代 Android 渲染架构中的关键组件，它改变了传统的缓冲区管理方式：</p>
-<p><strong>传统 BufferQueue vs BlastBufferQueue：</strong></p>
-<ol>
-<li><strong>创建主体不同</strong>：</li>
-</ol>
-<ul>
-<li>传统 BufferQueue：由 SurfaceFlinger 创建和管理</li>
-<li>BlastBufferQueue：由 App 端（ViewRootImpl）创建和管理</li>
-</ul>
-<ol start="2">
-<li><strong>缓冲区获取机制</strong>：</li>
-</ol>
-<ul>
-<li>传统方式：没有可用 Buffer 时，<code>dequeueBuffer</code> 可能阻塞</li>
-<li>BlastBufferQueue：App 端建立本地 BufferQueue，但没有可用 Buffer 时仍可能阻塞</li>
-</ul>
-<ol start="3">
-<li><strong>提交机制</strong>：</li>
-</ol>
-<ul>
-<li>传统方式：通过 queueBuffer 直接提交给 SurfaceFlinger</li>
-<li>BlastBufferQueue：通过 transaction 机制批量提交，减少 Binder 调用开销</li>
-</ul>
-<p><strong>在 Perfetto 中观察 BlastBufferQueue：</strong></p>
-<p>在 Perfetto 跟踪中，BlastBufferQueue 的状态通过以下关键指标显示：</p>
+<h2 id="主线程和渲染线程的分工"><a href="#主线程和渲染线程的分工" class="headerlink" title="主线程和渲染线程的分工"></a>主线程和渲染线程的分工</h2><p>普通 View 路径由主线程处理输入、业务、布局和绘制命令记录，RenderThread 组织后续 GPU 工作与提交。主线程也可通过 ViewRootImpl&#x2F;SurfaceControl 更新层属性和事务，不能用“只有 RenderThread 与 SurfaceFlinger 交互”划界。</p>
+<p>RenderNode 包含绘制记录与变换、透明度等属性，DisplayList 是其中的命令记录，并非 RenderNode 的同义词。已有记录可复用，某些属性变化无须重新执行 onDraw；重新布局或内容改变仍可能要求更新。绘制优化必须保持先后顺序、裁剪和混合语义，不能任意把所有文字合成一次绘制。</p>
+<h3 id="BlastBufferQueue-的工作原理"><a href="#BlastBufferQueue-的工作原理" class="headerlink" title="BlastBufferQueue 的工作原理"></a>BlastBufferQueue 的工作原理</h3><p>这里比较旧式 SurfaceFlinger 消费窗口 BufferQueue 的路径与客户端 BLAST 路径；BufferQueue 还有相机、编解码器等用途，不是所有队列都由 SurfaceFlinger 创建。</p>
+<p>Android 15 的常见窗口路径中，ViewRootImpl 管理 BLASTBufferQueue；本地消费者取得 buffer，再与 SurfaceControl transaction 关联提交。同步和合并会影响提交时点，有 buffer&#x2F;fence 背压时仍可等待。以下 counter 解释按 <a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/native/+/android-15.0.0_r1/libs/gui/BLASTBufferQueue.cpp">Android 15 BLASTBufferQueue</a>，不能仅凭使用 BLAST 就声称性能改善。</p>
 <h3 id="App-端的-QueuedBuffer-指标"><a href="#App-端的-QueuedBuffer-指标" class="headerlink" title="App 端的 QueuedBuffer 指标"></a>App 端的 QueuedBuffer 指标</h3><ul>
 <li><strong>Perfetto 显示</strong>：<code>QueuedBuffer</code> 数值轨道</li>
 <li><strong>AOSP 定义（BLASTBufferQueue）</strong>：<code>QueuedBuffer = mNumFrameAvailable + mNumAcquired - mPendingRelease.size()</code></li>
@@ -713,55 +629,35 @@ loading="lazy"             decoding="async"
 <li><strong>实战建议</strong>：重点看趋势和持续时间，而不是单个瞬时值</li>
 </ul>
 <p><img src="/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803170713946.webp" alt="image-20250803170713946"></p>
-<h3 id="QueuedBuffer-数值变化时机"><a href="#QueuedBuffer-数值变化时机" class="headerlink" title="QueuedBuffer 数值变化时机"></a>QueuedBuffer 数值变化时机</h3><p><strong>QueuedBuffer +1 的时机</strong>：</p>
-<ul>
-<li><strong>常见触发</strong>：生产侧有新 buffer 到达 BLAST，并进入可处理状态</li>
-<li><strong>Perfetto 表现</strong>：<code>QueuedBuffer</code> 轨道上升</li>
-<li><strong>含义</strong>：App 端到 SF 端之间的“待处理帧压力”增加</li>
-</ul>
+<h3 id="QueuedBuffer-数值变化时机"><a href="#QueuedBuffer-数值变化时机" class="headerlink" title="QueuedBuffer 数值变化时机"></a>QueuedBuffer 数值变化时机</h3><p>上升图可见 queueBuffer&#x2F;onFrameAvailable 与计数更新。Android 15 会更新可用帧等状态后输出组合值；同步、合并和释放分支可能影响变化，不能把每次函数调用机械换算为 +1。</p>
 <p><img src="/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803170852607.webp" alt="image-20250803170852607"></p>
-<p><strong>QueuedBuffer -1 的时机</strong>：</p>
-<ul>
-<li><strong>触发条件</strong>：收到 SurfaceFlinger 的 <code>releaseBufferCallback</code></li>
-<li><strong>Perfetto 表现</strong>：可观察到 <code>releaseBuffer</code> 相关事件</li>
-<li><strong>含义</strong>：某个 buffer 完成消费或被处理后释放，队列压力下降</li>
-</ul>
+<p>下降图可见 App Binder 线程上的 release 回调与计数下降。该样例支持二者相关，但回调到达不等于 release fence 已完成，也不保证 buffer 可立即重写。BLAST 还可能保留部分 pending release；counter 扣除这些项，不是简单的空闲 buffer 数。</p>
 <p><img src="/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803171008400.webp" alt="image-20250803171008400"></p>
-<h3 id="SurfaceFlinger-端的-BufferTX-指标"><a href="#SurfaceFlinger-端的-BufferTX-指标" class="headerlink" title="SurfaceFlinger 端的 BufferTX 指标"></a>SurfaceFlinger 端的 BufferTX 指标</h3><ul>
-<li><strong>Perfetto 显示</strong>：SurfaceFlinger 进程中的 <code>BufferTX</code> 数值轨道</li>
-<li><strong>AOSP 定义（Layer）</strong>：该值对应每层 <code>mPendingBuffers</code> 的跟踪；buffer 到达 server 侧会增加，buffer 被 latch 或 drop 会减少</li>
-<li><strong>触发条件</strong>：与 transaction 和 buffer 生命周期共同相关，不建议简单等价为“收到 transaction 就 +1”</li>
-<li><strong>注意</strong>：它不是通用“固定最大 3”的指标，受图层类型、生产消费节奏和系统策略影响</li>
-</ul>
+<h3 id="SurfaceFlinger-端的-BufferTX-指标"><a href="#SurfaceFlinger-端的-BufferTX-指标" class="headerlink" title="SurfaceFlinger 端的 BufferTX 指标"></a>SurfaceFlinger 端的 BufferTX 指标</h3><p>Android 15 <a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/native/+/android-15.0.0_r1/services/surfaceflinger/Layer.h">Layer</a> 对应字段是 <code>mPendingBufferTransactions</code>，输出名为 <code>BufferTX - </code> 加 layer 名。收到含有效 buffer 的事务时增加，latch 或 drop 路径减少；只有属性变化的事务不能一概计为 +1，减少也不代表呈现完成。</p>
+<p>图中标出的 1、2 是该段观察值；轨道左侧纵轴范围不是通用队列容量或固定最大 3。实际行为还受图层与提交策略影响。</p>
 <p><img src="/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803171228146.webp" alt="image-20250803171228146"></p>
 <h3 id="App-端和-SF-端的协作流程"><a href="#App-端和-SF-端的协作流程" class="headerlink" title="App 端和 SF 端的协作流程"></a>App 端和 SF 端的协作流程</h3><ol>
-<li><strong>App 端</strong>：RenderThread 提交新帧后，<code>QueuedBuffer</code> 常见上升</li>
-<li><strong>跨进程</strong>：BLAST&#x2F;SurfaceControl transaction 关联 frameNumber 并进入 SF 侧处理</li>
-<li><strong>SF 端</strong>：<code>BufferTX</code> 随 pending buffer 变化（到达增、latch&#x2F;drop 减）</li>
-<li><strong>回流</strong>：<code>releaseBufferCallback</code> 到 App 端后，<code>QueuedBuffer</code> 下降</li>
+<li>BLAST 接收并按队列&#x2F;同步状态取得 App 提交的 buffer。</li>
+<li>SurfaceControl transaction 关联 buffer、frameNumber 和层属性；与 doFrame token 是不同标识，需显式关联。</li>
+<li>SF 更新待处理计数，latch&#x2F;drop 与后续合成&#x2F;呈现分别处理。</li>
+<li>release callback&#x2F;fence 与 BLAST 的 pending-release 管理控制回流，不能只看计数下降认定已上屏或已可复用。</li>
 </ol>
-<h3 id="关键性能观察点"><a href="#关键性能观察点" class="headerlink" title="关键性能观察点"></a>关键性能观察点</h3><p>在分析性能时，重点关注：</p>
-<ul>
-<li><strong>App 端 QueuedBuffer 趋势</strong>：连续上升且长时间不回落，通常表示生产&#x2F;消费节奏失衡；结合主线程 <code>performTraversals</code> 与 RenderThread <code>DrawFrames</code> 判断瓶颈在 App 还是 SF&#x2F;GPU 侧</li>
-<li><strong>SurfaceFlinger 端 BufferTX 趋势</strong>：长期偏高常见于消费侧压力大；长期偏低且 App 又频繁 miss deadline，往往是生产侧供给不足</li>
-</ul>
+<h3 id="关键性能观察点"><a href="#关键性能观察点" class="headerlink" title="关键性能观察点"></a>关键性能观察点</h3><p>counter 的趋势可提示进一步调查的位置，但持续高值可能来自有意的流水线、同步事务、GPU&#x2F;fence 等待或消费延后；低值也可能只是内容不更新。先对齐 frameNumber&#x2F;token&#x2F;Layer，再结合 doFrame、DrawFrames、调度状态、fence 和最终呈现判断。单个数值或生产&#x2F;消费高低不能唯一归因到 App、GPU 或 SF。</p>
 <p><a id="performance"></a></p>
-<h1 id="性能"><a href="#性能" class="headerlink" title="性能"></a>性能</h1><p>如果主线程需要处理所有任务，则执行耗时较长的操作（例如，网络访问或数据库查询）将会阻塞整个界面线程。一旦被阻塞，线程将无法分派任何事件，包括绘图事件。主线程执行超时通常会带来两个问题</p>
+<h1 id="性能"><a href="#性能" class="headerlink" title="性能"></a>性能</h1><p>同步数据库访问、锁等待等工作会占用主线程的消息分发时间。阻塞会延后输入和帧回调，但卡顿与 ANR 需要分别判断：</p>
 <ol>
-<li><strong>卡顿</strong>：120 Hz 的刷新间隔约 8.33 ms，但主线程、RenderThread 与 GPU 是流水线工作，不能把两条线程的耗时简单相加后与 8.33 ms 比较。应按 FrameTimeline 的截止时间和最终呈现结果判断。</li>
-<li><strong>卡死</strong>：如果界面线程被阻塞超过几秒钟时间（根据组件不同, 这里的阈值也不同），用户会看到 “<a target="_blank" rel="noopener" href="http://developer.android.google.cn/guide/practices/responsiveness.html">应用无响应</a>“ (ANR) 对话框(部分厂商屏蔽了这个弹框,会直接 Crash 到桌面)</li>
+<li><strong>卡顿</strong>：按该帧期限和最终呈现分析；UI、RenderThread、GPU 可重叠，不能把墙钟耗时相加与固定 8.33 ms 比较。</li>
+<li><strong>ANR</strong>：由具体输入&#x2F;组件超时规则触发，不是任何主线程停顿几秒都必弹框。前后台、系统配置与故障类型影响处置，也不能笼统说“不弹框就 Crash”。详见<a href="/2025/02/08/Android-ANR-01-ANR-Design/">ANR 系列</a>。</li>
 </ol>
-<p>对于用户来说，这两个情况都是用户不愿意看到的，所以对于 App 开发者来说，两个问题是发版本之前必须要解决的，ANR 这个由于有详细的调用栈，所以相对来说比较好定位；但是间歇性卡顿这个，可能就需要使用工具来进行分析了：<strong>Perfetto + Trace View （Android Studio 已经集成）</strong>，所以理解主线程和渲染线程的关系和他们的工作原理是非常重要的，这也是本系列的一个初衷。</p>
+<p>ANR dump 可能晚于现场，不能因为有栈就认定容易定位。用 Perfetto&#x2F;System Trace 观察等待和调度，再用 Android Studio 的方法采样&#x2F;插桩工具补充函数证据，注意额外开销。用户遇到卡顿或卡死都不好受，这也是我写这个系列的初衷：先看懂两条线程怎样交接，再去找问题卡在哪一步。</p>
 <p><a id="frametimeline"></a></p>
-<h2 id="Perfetto-独有的-FrameTimeline-功能"><a href="#Perfetto-独有的-FrameTimeline-功能" class="headerlink" title="Perfetto 独有的 FrameTimeline 功能"></a>Perfetto 独有的 FrameTimeline 功能</h2><p>FrameTimeline 把 App 与 SurfaceFlinger 的预期和实际帧时间线放在一起，便于先定位晚帧，再回到线程和 Buffer 轨道查原因。</p>
-<blockquote>
-<p><strong>注意</strong>: FrameTimeline 需要 Android 12 或更高版本支持</p>
-</blockquote>
-<h3 id="FrameTimeline-的核心概念"><a href="#FrameTimeline-的核心概念" class="headerlink" title="FrameTimeline 的核心概念"></a>FrameTimeline 的核心概念</h3><p>根据 <a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/frametimeline">Perfetto 官方文档</a>，当帧在屏幕上的实际呈现时间与调度器预期的呈现时间不匹配时，就会产生卡顿。FrameTimeline 为每个有帧在屏幕上显示的应用添加了两个新的轨道：</p>
+<h2 id="Perfetto-独有的-FrameTimeline-功能"><a href="#Perfetto-独有的-FrameTimeline-功能" class="headerlink" title="Perfetto 独有的 FrameTimeline 功能"></a>Perfetto 独有的 FrameTimeline 功能</h2><p>FrameTimeline 提供 App 与 SurfaceFlinger 的预期&#x2F;实际帧记录，帮助筛选晚帧与延迟，再回到具体线程调查。相对旧 Systrace 查看方式，它提供了可关联的帧记录，也可由 Trace Processor 查询。</p>
+<p>需要 Android 12 及以上支持，并实际启用相应数据源。轨道缺失可能是支持范围或采集问题，不能直接当作没有卡顿。</p>
+<h3 id="FrameTimeline-的核心概念"><a href="#FrameTimeline-的核心概念" class="headerlink" title="FrameTimeline 的核心概念"></a>FrameTimeline 的核心概念</h3><p>根据 <a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/frametimeline">Perfetto 官方文档</a>，FrameTimeline 按预期&#x2F;实际时序等信息分类；分类可含预测误差，不等于每次偏差都有同样的可感知卡顿。对受支持并被采集的帧，可观察两类轨道：</p>
 <p><img src="/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803172616453.webp" alt="image-20250803172616453"></p>
 <h4 id="1-Expected-Timeline（预期时间线）"><a href="#1-Expected-Timeline（预期时间线）" class="headerlink" title="1. Expected Timeline（预期时间线）"></a>1. Expected Timeline（预期时间线）</h4><ul>
 <li><strong>作用</strong>: 显示系统分配给应用的渲染时间窗口</li>
-<li><strong>开始时间</strong>: Choreographer 回调被调度运行的时间</li>
+<li><strong>开始时间</strong>: 调度器预测 Choreographer 回调应开始的时间，不是实际获得 CPU 的时刻</li>
 <li><strong>含义</strong>: 为了避免系统卡顿，应用需要在这个时间范围内完成工作</li>
 </ul>
 <h4 id="2-Actual-Timeline（实际时间线）"><a href="#2-Actual-Timeline（实际时间线）" class="headerlink" title="2. Actual Timeline（实际时间线）"></a>2. Actual Timeline（实际时间线）</h4><ul>
@@ -807,19 +703,20 @@ loading="lazy"             decoding="async"
 </tr>
 </tbody></table>
 <p>点击不同颜色的 Actual Timeline 切片，详情区会显示 <code>jank_type</code> 等归类信息；具体阻塞点仍要回到相关线程与 fence：<br><img src="/images/Android-Perfetto-07-MainThread-And-RenderThread/image-20250803173304026.webp" alt="image-20250803173304026"></p>
+<p>上面的表描述常见 UI 分类，颜色不是具体代码根因。上方详情示例来自 <code>com.tencent.mm</code>（token 54160848），与前面示例 App 的 token 8227… 不属于同一现场。图中 App Deadline Missed 与 Buffer Stuffing 同时出现，说明标签可组合；不能强行挑一个当唯一根因。</p>
 <h3 id="卡顿类型分析"><a href="#卡顿类型分析" class="headerlink" title="卡顿类型分析"></a>卡顿类型分析</h3><p>FrameTimeline 可以识别多种卡顿类型：</p>
 <h4 id="应用端卡顿"><a href="#应用端卡顿" class="headerlink" title="应用端卡顿"></a>应用端卡顿</h4><ul>
 <li><strong>AppDeadlineMissed</strong>: 应用运行时间超过预期</li>
-<li><strong>BufferStuffing</strong>: 应用在前一帧呈现前就发送新帧，导致 Buffer 队列堆积</li>
+<li><strong>BufferStuffing</strong>：持续提交形成待呈现积压和额外延迟的状态；正常流水线中前帧呈现前准备下一帧，本身不够证明异常</li>
 </ul>
 <h4 id="SurfaceFlinger-卡顿"><a href="#SurfaceFlinger-卡顿" class="headerlink" title="SurfaceFlinger 卡顿"></a>SurfaceFlinger 卡顿</h4><ul>
-<li><strong>SurfaceFlingerCpuDeadlineMissed</strong>: SurfaceFlinger 主线程超时</li>
-<li><strong>SurfaceFlingerGpuDeadlineMissed</strong>: GPU 合成时间超时</li>
-<li><strong>DisplayHAL</strong>: HAL 层呈现延迟</li>
+<li><strong>SurfaceFlingerCpuDeadlineMissed</strong>：SF 对应合成路径晚于期限，不是 ANR 超时或纯 CPU Running 时长</li>
+<li><strong>SurfaceFlingerGpuDeadlineMissed</strong>：CPU 部分按时，但后续 GPU 合成未及时完成</li>
+<li><strong>DisplayHAL</strong>：SF 按时交付后呈现仍错过预期；还需查 HAL 所获预算与实际工作</li>
 <li><strong>PredictionError</strong>: 调度器预测偏差</li>
 </ul>
-<h3 id="配置-FrameTimeline"><a href="#配置-FrameTimeline" class="headerlink" title="配置 FrameTimeline"></a>配置 FrameTimeline</h3><p>在 Perfetto 配置中启用 FrameTimeline：</p>
-<figure class="highlight yaml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="string">data_sources</span> &#123;</span><br><span class="line">    <span class="string">config</span> &#123;</span><br><span class="line">        <span class="attr">name:</span> <span class="string">&quot;android.surfaceflinger.frametimeline&quot;</span></span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h3 id="配置-FrameTimeline"><a href="#配置-FrameTimeline" class="headerlink" title="配置 FrameTimeline"></a>配置 FrameTimeline</h3><p>这是要加入完整 Perfetto TraceConfig 的 textproto 数据源片段，不是 YAML，也不是含 buffer&#x2F;时长的独立采集配置；完整示例见<a href="/2024/05/21/Android-Perfetto-02-how-to-get-perfetto/">采集篇</a>：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">data_sources &#123;</span><br><span class="line">    config &#123;</span><br><span class="line">        name: &quot;android.surfaceflinger.frametimeline&quot;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
 <p><a id="vsync"></a></p>
 <h2 id="Perfetto-中-Vsync-信号"><a href="#Perfetto-中-Vsync-信号" class="headerlink" title="Perfetto 中 Vsync 信号"></a>Perfetto 中 Vsync 信号</h2><p>在这份 Perfetto Trace 中，<strong>VSYNC-app 使用 Counter 类型显示</strong>，这与很多人的直觉认知不同：</p>
@@ -833,14 +730,10 @@ loading="lazy"             decoding="async"
 <p><strong>关键要点</strong>：</p>
 <ol>
 <li><strong>本图的每次数值变化对应一个已记录的 Vsync 标记</strong>：无论是 0→1 还是 1→0；这不是所有 Vsync 轨道的通用编码规则</li>
-<li><strong>信号频率</strong>：120Hz 设备上约每 8.33ms 会有一次变化（实际可能因系统调度略有差异，这里指的是连续出帧场景）</li>
+<li><strong>信号频率</strong>：本例连续通知可测量相邻翻转的间隔；不能只由“支持 120 Hz”推出恒定 8.33 ms，实际模式、软件调度和 ARR 都会影响对应关系</li>
 <li><strong>多 App 场景</strong>：Counter 可能因为其他 App 的申请而保持活跃状态</li>
 </ol>
-<h3 id="分析技巧"><a href="#分析技巧" class="headerlink" title="分析技巧"></a>分析技巧</h3><p><strong>判断 App 是否接收到 Vsync</strong>：</p>
-<ul>
-<li><strong>正确方法</strong>：查看 App 进程中是否有对应的 <code>FrameDisplayEventReceiver.onVsync</code> 事件</li>
-<li><strong>错误方法</strong>：仅凭 SurfaceFlinger 中的 <code>vsync-app</code> counter 变化来判断</li>
-</ul>
+<h3 id="分析技巧"><a href="#分析技巧" class="headerlink" title="分析技巧"></a>分析技巧</h3><p>SF 的 VSYNC-app counter 不够证明目标 App 收到通知。若采集包含 App 端 onVsync&#x2F;相关插桩，可结合 PID、时间和 doFrame token 核对；没有名为 FrameDisplayEventReceiver.onVsync 的 slice 也可能只是未插桩或未采集。区分通知、队列分发、回调处理与最终呈现。</p>
 <p><a id="refs"></a></p>
 <h1 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h1><ol>
 <li><a target="_blank" rel="noopener" href="https://juejin.im/post/5a9e01c3f265da239d48ce32">https://juejin.im/post/5a9e01c3f265da239d48ce32</a></li>
@@ -851,14 +744,14 @@ loading="lazy"             decoding="async"
 </ol>
 <p><a id="attachments"></a></p>
 <h1 id="附件"><a href="#附件" class="headerlink" title="附件"></a>附件</h1><p>本文涉及到的 Perfetto 跟踪文件也上传了，各位下载后可以在 Perfetto UI (<a target="_blank" rel="noopener" href="https://ui.perfetto.dev/">https://ui.perfetto.dev/</a>) 中打开分析</p>
-<p><a target="_blank" rel="noopener" href="https://github.com/Gracker/SystraceForBlog/tree/master/Android_Perfetto/demo_app_aosp_scroll.perfetto-trace">点此链接下载文章所涉及到的 Perfetto 跟踪文件</a></p>
+<p><a target="_blank" rel="noopener" href="https://github.com/Gracker/SystraceForBlog/blob/master/Android_Perfetto/demo_app_aosp_scroll.perfetto-trace">点此链接下载文章所涉及到的 Perfetto 跟踪文件</a></p>
 <p><a id="about"></a></p>
 <h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p>
 <ol>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/12/01/BlogMap/">本博客内容导航</a> ：个人博客内容的一个导航。</li>
 <li><a href="https://androidperformance.com/2018/05/07/Android-performance-optimization-skills-and-tools/">个人整理和搜集的优秀博客文章 - Android 性能优化必知必会</a> ：欢迎大家自荐和推荐 （微信私聊即可）</li>
-<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a> ： 欢迎加入，多谢支持～</li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a> ：历史介绍（已停止运营）</li>
 </ol>
 <blockquote>
 <p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p>
@@ -868,11 +761,11 @@ loading="lazy"             decoding="async"
     </article>
     <!-- license -->
         <div class="license-wrapper">
-            <p>Author：<a href="https://androidperformance.com">Gracker</a>
-            <p>Link：<a href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/</a>
-            <p>Publish date：<a href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">August 2nd 2025, 10:11:45 am</a>
-            <p>Update date：<a href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">September 29th 2026, 9:31:21 am</a>
-            <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
+            <p>原文作者：<a href="https://androidperformance.com">Gracker</a>
+            <p>原文链接：<a href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/</a>
+            <p>发表日期：<a href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">August 2nd 2025, 10:11:45 am</a>
+            <p>更新日期：<a href="https://androidperformance.com/2025/08/02/Android-Perfetto-07-MainThread-And-RenderThread/">November 3rd 2026, 2:00:38 am</a>
+            <p>版权声明：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     <!-- paginator -->
     <ul class="post-paginator">
@@ -1099,14 +992,19 @@ loading="lazy"             decoding="async"
         
         
         
+        
     <div class="total-and-search">
         <div class="total-archive">
-        Total : 139
+        Total : 140
         </div>
     </div>
     <div class="post-archive">
             <div class="archive-year"> 2026 </div>
             <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/06</span>
+            <a class="archive-post-title" href="/2026/10/06/SmartPerfetto-v1.15.1-Release-Notes/">SmartPerfetto v1.15.1 更新说明</a>
+        </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/19</span>
             <a class="archive-post-title" href="/2026/09/19/SmartPerfetto-v1.12.0-Release-Notes/">SmartPerfetto v1.12.0 更新说明</a>
@@ -1293,11 +1191,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/07</span>
-            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
+            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/07</span>
-            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/03</span>
@@ -1650,7 +1548,7 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/04</span>
-            <a class="archive-post-title" href="/2015/02/04/build-rom-for-nexus5/">为 Nexus5 编译 AndroidL 固件</a>
+            <a class="archive-post-title" href="/2015/02/04/build-rom-for-nexus5/">为 Nexus 5 编译 Android Lollipop 固件</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/30</span>
@@ -1662,14 +1560,14 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/13</span>
-            <a class="archive-post-title" href="/2015/01/13/android-performance-optimization-overdraw-2/">Android 性能优化之过渡绘制 - 实战篇</a>
+            <a class="archive-post-title" href="/2015/01/13/android-performance-optimization-overdraw-2/">Android 性能优化之过度绘制 - 实战篇</a>
         </li>
                 </ul>
             <div class="archive-year"> 2014 </div>
             <ul class="year-list">
         <li class="archive-post-item">
             <span class="archive-post-date">10/20</span>
-            <a class="archive-post-title" href="/2014/10/20/android-performance-optimization-overdraw-1/">Android 性能优化之过渡绘制 - 理论篇</a>
+            <a class="archive-post-title" href="/2014/10/20/android-performance-optimization-overdraw-1/">Android 性能优化之过度绘制 - 理论篇</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">06/03</span>
@@ -1705,25 +1603,9 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-tags">
     <div class="sidebar-tags-name">
-            <span class="sidebar-tag-name" data-tags="年度推荐">
-                <span class="iconfont-archer">&#xe606;</span>
-                年度推荐
-            </span>
-            <span class="sidebar-tag-name" data-tags="Startup">
-                <span class="iconfont-archer">&#xe606;</span>
-                Startup
-            </span>
-            <span class="sidebar-tag-name" data-tags="Memory">
-                <span class="iconfont-archer">&#xe606;</span>
-                Memory
-            </span>
             <span class="sidebar-tag-name" data-tags="Android">
                 <span class="iconfont-archer">&#xe606;</span>
                 Android
-            </span>
-            <span class="sidebar-tag-name" data-tags="Jank">
-                <span class="iconfont-archer">&#xe606;</span>
-                Jank
             </span>
             <span class="sidebar-tag-name" data-tags="Perfetto">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1733,6 +1615,14 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Systrace
             </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
             <span class="sidebar-tag-name" data-tags="年终总结">
                 <span class="iconfont-archer">&#xe606;</span>
                 年终总结
@@ -1740,6 +1630,14 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="知识星球">
                 <span class="iconfont-archer">&#xe606;</span>
                 知识星球
+            </span>
+            <span class="sidebar-tag-name" data-tags="年度推荐">
+                <span class="iconfont-archer">&#xe606;</span>
+                年度推荐
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
             </span>
             <span class="sidebar-tag-name" data-tags="Performance">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1765,6 +1663,18 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 随笔
             </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
             <span class="sidebar-tag-name" data-tags="Agent OS">
                 <span class="iconfont-archer">&#xe606;</span>
                 Agent OS
@@ -1780,18 +1690,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Mobile OS">
                 <span class="iconfont-archer">&#xe606;</span>
                 Mobile OS
-            </span>
-            <span class="sidebar-tag-name" data-tags="ANR">
-                <span class="iconfont-archer">&#xe606;</span>
-                ANR
-            </span>
-            <span class="sidebar-tag-name" data-tags="Tools">
-                <span class="iconfont-archer">&#xe606;</span>
-                Tools
-            </span>
-            <span class="sidebar-tag-name" data-tags="RenderThread">
-                <span class="iconfont-archer">&#xe606;</span>
-                RenderThread
             </span>
             <span class="sidebar-tag-name" data-tags="Linux">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1809,6 +1707,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 性能优化
             </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
             <span class="sidebar-tag-name" data-tags="线程优化">
                 <span class="iconfont-archer">&#xe606;</span>
                 线程优化
@@ -1816,10 +1718,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="卡顿优化">
                 <span class="iconfont-archer">&#xe606;</span>
                 卡顿优化
-            </span>
-            <span class="sidebar-tag-name" data-tags="电量优化">
-                <span class="iconfont-archer">&#xe606;</span>
-                电量优化
             </span>
             <span class="sidebar-tag-name" data-tags="ANR分析">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1829,9 +1727,9 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 页面响应
             </span>
-            <span class="sidebar-tag-name" data-tags="Binder">
+            <span class="sidebar-tag-name" data-tags="电量优化">
                 <span class="iconfont-archer">&#xe606;</span>
-                Binder
+                电量优化
             </span>
             <span class="sidebar-tag-name" data-tags="SQL">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1861,6 +1759,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 heapprofd
             </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
             <span class="sidebar-tag-name" data-tags="GPU">
                 <span class="iconfont-archer">&#xe606;</span>
                 GPU
@@ -1876,10 +1778,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Audio">
                 <span class="iconfont-archer">&#xe606;</span>
                 Audio
-            </span>
-            <span class="sidebar-tag-name" data-tags="Field">
-                <span class="iconfont-archer">&#xe606;</span>
-                Field
             </span>
             <span class="sidebar-tag-name" data-tags="Input">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1897,25 +1795,33 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 DelayLoad
             </span>
-            <span class="sidebar-tag-name" data-tags="程序员">
-                <span class="iconfont-archer">&#xe606;</span>
-                程序员
-            </span>
             <span class="sidebar-tag-name" data-tags="HashMap">
                 <span class="iconfont-archer">&#xe606;</span>
                 HashMap
             </span>
-            <span class="sidebar-tag-name" data-tags="Singleton">
+            <span class="sidebar-tag-name" data-tags="程序员">
                 <span class="iconfont-archer">&#xe606;</span>
-                Singleton
+                程序员
             </span>
             <span class="sidebar-tag-name" data-tags="Nexus">
                 <span class="iconfont-archer">&#xe606;</span>
                 Nexus
             </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
             <span class="sidebar-tag-name" data-tags="OpenClaw">
                 <span class="iconfont-archer">&#xe606;</span>
                 OpenClaw
+            </span>
+            <span class="sidebar-tag-name" data-tags="效率工具">
+                <span class="iconfont-archer">&#xe606;</span>
+                效率工具
+            </span>
+            <span class="sidebar-tag-name" data-tags="本地模型">
+                <span class="iconfont-archer">&#xe606;</span>
+                本地模型
             </span>
             <span class="sidebar-tag-name" data-tags="AI Agent">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1933,14 +1839,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Android Performance
             </span>
-            <span class="sidebar-tag-name" data-tags="效率工具">
-                <span class="iconfont-archer">&#xe606;</span>
-                效率工具
-            </span>
-            <span class="sidebar-tag-name" data-tags="本地模型">
-                <span class="iconfont-archer">&#xe606;</span>
-                本地模型
-            </span>
             <span class="sidebar-tag-name" data-tags="Gracker">
                 <span class="iconfont-archer">&#xe606;</span>
                 Gracker
@@ -1948,10 +1846,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="设计规范">
                 <span class="iconfont-archer">&#xe606;</span>
                 设计规范
-            </span>
-            <span class="sidebar-tag-name" data-tags="Compose">
-                <span class="iconfont-archer">&#xe606;</span>
-                Compose
             </span>
             <span class="sidebar-tag-name" data-tags="Kotlin">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1965,6 +1859,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 卡顿
             </span>
+            <span class="sidebar-tag-name" data-tags="Overdraw">
+                <span class="iconfont-archer">&#xe606;</span>
+                Overdraw
+            </span>
             <span class="sidebar-tag-name" data-tags="读书笔记">
                 <span class="iconfont-archer">&#xe606;</span>
                 读书笔记
@@ -1973,10 +1871,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 程序员的修炼
             </span>
-            <span class="sidebar-tag-name" data-tags="测试">
-                <span class="iconfont-archer">&#xe606;</span>
-                测试
-            </span>
             <span class="sidebar-tag-name" data-tags="设计原则">
                 <span class="iconfont-archer">&#xe606;</span>
                 设计原则
@@ -1984,6 +1878,10 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="了解你的用户">
                 <span class="iconfont-archer">&#xe606;</span>
                 了解你的用户
+            </span>
+            <span class="sidebar-tag-name" data-tags="测试">
+                <span class="iconfont-archer">&#xe606;</span>
+                测试
             </span>
             <span class="sidebar-tag-name" data-tags="互联网那些事">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -2035,21 +1933,21 @@ loading="lazy"             decoding="async"
             <span class="iconfont-archer">&#xe60a;</span>
             随笔
         </span>
-        <span class="sidebar-category-name" data-categories="读书笔记">
-            <span class="iconfont-archer">&#xe60a;</span>
-            读书笔记
-        </span>
         <span class="sidebar-category-name" data-categories="Android">
             <span class="iconfont-archer">&#xe60a;</span>
             Android
         </span>
-        <span class="sidebar-category-name" data-categories="AI">
+        <span class="sidebar-category-name" data-categories="读书笔记">
             <span class="iconfont-archer">&#xe60a;</span>
-            AI
+            读书笔记
         </span>
         <span class="sidebar-category-name" data-categories="Java">
             <span class="iconfont-archer">&#xe60a;</span>
             Java
+        </span>
+        <span class="sidebar-category-name" data-categories="AI">
+            <span class="iconfont-archer">&#xe60a;</span>
+            AI
         </span>
         <span class="sidebar-category-name" data-categories="Android性能优化">
             <span class="iconfont-archer">&#xe60a;</span>

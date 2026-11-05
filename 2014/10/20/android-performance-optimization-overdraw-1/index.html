@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh,en">
+<html lang="zh-CN">
     <!-- title -->
             <!-- keywords -->
 
@@ -11,27 +11,28 @@
                     <meta name="copyright" content="Gracker">
                       <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,启动优化,Startup,Perfetto,Systrace,RenderThread,Java">
                           <meta name="description" content="Focus On Android Performance">
-                          <meta name="description" content="博客有一段时间没有更新了，到了新公司后，一直比较忙，博客也更新地不那么频繁了。最近一直在看Android上和性能相关的部分，也就是所谓的Android性能优化，才发现Android性能这一块，自己懂得还是太少了，所以从上层开始看，也算是一点一点入门吧。这个系列将讲解学习过程中总结的和性能相关的内容。 首先将讲解一下GPU过渡绘制，也是开发者最直接接触的部分吧，这个内容将分为两个部分来将讲，第一部分">
+                          <meta name="description" content="2026-10-13 更新：本文原写于 2014 年，源码节选已对照 AOSP android-4.4.4_r2。Overdraw 的概念仍适用，ADT、monitor、Hierarchy Viewer 和旧 OpenGL 跟踪入口已过时；Android Studio 3.1 起改用 Layout Inspector 查看层级，帧时序使用 Perfetto。下文保留历史源码，并补充 Androi">
 <meta property="og:type" content="article">
-<meta property="og:title" content="Android 性能优化之过渡绘制 - 理论篇">
+<meta property="og:title" content="Android 性能优化之过度绘制 - 理论篇">
 <meta property="og:url" content="https://androidperformance.com/2014/10/20/android-performance-optimization-overdraw-1/index.html">
 <meta property="og:site_name" content="Android Performance">
-<meta property="og:description" content="博客有一段时间没有更新了，到了新公司后，一直比较忙，博客也更新地不那么频繁了。最近一直在看Android上和性能相关的部分，也就是所谓的Android性能优化，才发现Android性能这一块，自己懂得还是太少了，所以从上层开始看，也算是一点一点入门吧。这个系列将讲解学习过程中总结的和性能相关的内容。 首先将讲解一下GPU过渡绘制，也是开发者最直接接触的部分吧，这个内容将分为两个部分来将讲，第一部分">
-<meta property="og:locale">
+<meta property="og:description" content="2026-10-13 更新：本文原写于 2014 年，源码节选已对照 AOSP android-4.4.4_r2。Overdraw 的概念仍适用，ADT、monitor、Hierarchy Viewer 和旧 OpenGL 跟踪入口已过时；Android Studio 3.1 起改用 Layout Inspector 查看层级，帧时序使用 Perfetto。下文保留历史源码，并补充 Androi">
+<meta property="og:locale" content="zh_CN">
 <meta property="og:image" content="https://androidperformance.com/images/overdraw-1/lint.webp">
 <meta property="og:image" content="https://androidperformance.com/images/WechatIMG581.webp">
 <meta property="article:published_time" content="2014-10-20T15:19:23.000Z">
-<meta property="article:modified_time" content="2026-06-02T15:40:34.523Z">
+<meta property="article:modified_time" content="2026-11-02T15:46:02.120Z">
 <meta property="article:author" content="Gracker">
-<meta property="article:tag" content="Memory">
 <meta property="article:tag" content="Android">
+<meta property="article:tag" content="Performance">
+<meta property="article:tag" content="Overdraw">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:image" content="https://androidperformance.com/images/overdraw-1/lint.webp">
                             <meta http-equiv="Cache-control" content="no-cache">
                             <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
                             <link rel="icon" href="/assets/favicon.ico">
                                 <title>
-                                  Android 性能优化之过渡绘制 - 理论篇 · Android Performance
+                                  Android 性能优化之过度绘制 - 理论篇 · Android Performance
                                 </title>
                                 
 <link rel="canonical" href="https://androidperformance.com/2014/10/20/android-performance-optimization-overdraw-1/">
@@ -93,11 +94,14 @@
                                     <link rel="preload" href="/lib/jquery.min.js" as="script">
                                     <link rel="preload" href="/scripts/main.js" as="script">
                                     <!-- algolia -->
-                                                    <!-- Hreflang Tags -->
-                                                    
-                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2014/10/20/android-performance-optimization-overdraw-1/" />
-                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2014/10/20/android-performance-optimization-overdraw-1/" />
-                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2014/10/20/android-performance-optimization-overdraw-1/" />
+                                                    <!-- Language alternatives share the same route contract as the header. -->
+
+
+<link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2014/10/20/android-performance-optimization-overdraw-1/" />
+
+<link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2014/10/20/android-performance-optimization-overdraw-1/" />
+
+<link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2014/10/20/android-performance-optimization-overdraw-1/" />
                   <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/atom.xml" title="Android Performance" type="application/atom+xml">
 </head>
 
@@ -125,35 +129,10 @@
         <span class="header-theme-btn header-element" role="button" aria-label="Theme" data-tooltip="Theme">
             <span aria-hidden="true">&#9680;</span>
         </span>
-        <!-- language transition button -->
-        <span class="header-lang-btn header-element" data-tooltip="Language">
-            <a href="javascript:void(0)" onclick="toggleLanguage()" class="lang-text" aria-label="Language">EN</a>
-            <script>
-                // Update language button text based on current path
-                (function() {
-                    var path = window.location.pathname;
-                    var isEn = /^\/en(\/|$)/.test(path);
-                    var langBtn = document.querySelector('.header-lang-btn .lang-text');
-                    if (langBtn) {
-                        langBtn.textContent = isEn ? 'CN' : 'EN';
-                    }
-                })();
-                
-                function toggleLanguage() {
-                    var path = window.location.pathname;
-                    var isEn = /^\/en(\/|$)/.test(path);
-
-                    if (isEn) {
-                        var newPath = path.replace(/^\/en(\/|$)/, '/');
-                        if (newPath === '') newPath = '/';
-                        window.location.href = newPath;
-                    } else {
-                        var suffix = path;
-                        if (suffix === '/') suffix = '';
-                        window.location.href = '/en' + suffix;
-                    }
-                }
-            </script>
+        <!-- A real link works without JavaScript and supports opening a new tab. -->
+        
+        <span class="header-lang-btn header-element" data-tooltip="Read in English">
+            <a href="/en/2014/10/20/android-performance-optimization-overdraw-1/" class="lang-text" aria-label="Read in English">EN</a>
         </span>
         <!-- home button -->
         <span class="home-link header-element">
@@ -174,7 +153,7 @@
                             </a>
                         </div>
                         <div class="post-title header-element">
-                            <a href="#" class="post-name">Android 性能优化之过渡绘制 - 理论篇</a>
+                            <a href="#" class="post-name">Android 性能优化之过度绘制 - 理论篇</a>
                         </div>
                 </div>
 </header>
@@ -191,12 +170,6 @@
             title="Wechat"
             alt="Wechat"
             src="/assets/donate-wechat.webp"
-        ></img>
-        <img
-            class="donate-popup__content-qrCode"
-            title="Alipay"
-            alt="Alipay"
-            src="/assets/donate-alipay.png"
         ></img>
     </div>
 </div>
@@ -234,7 +207,7 @@ loading="lazy"             decoding="async"
         <!-- 标题  -->
         <h1 class="intro-title">
             <!-- 主页  -->
-                Android 性能优化之过渡绘制 - 理论篇
+                Android 性能优化之过度绘制 - 理论篇
             <!-- 404 -->
         </h1>
         <!-- 副标题 -->
@@ -252,13 +225,14 @@ loading="lazy"             decoding="async"
                 Android
             </span>
         </span>
-        <a class="post-tag" href="javascript:void(0);" data-tags="Memory">Memory</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Overdraw">Overdraw</a>
 </div>
 
                 <!-- 文章字数统计 -->
                     <div class="post-intro-read">
-                        <span>Word count: <span class="post-count word-count">2.7k</span>Reading time: <span class="post-count reading-time">11 min</span></span>
+                        <span>字数统计: <span class="post-count word-count">2.8k</span>阅读时长: <span class="post-count reading-time">11 min</span></span>
                     </div>
                 <div class="post-intro-meta">
                     <!-- 撰写日期 -->
@@ -324,112 +298,109 @@ loading="lazy"             decoding="async"
             <div class="container container-unloaded">
                 <main class="main post-page">
     <article class="article-entry">
-        <p>博客有一段时间没有更新了，到了新公司后，一直比较忙，博客也更新地不那么频繁了。最近一直在看Android上和性能相关的部分，也就是所谓的Android性能优化，才发现Android性能这一块，自己懂得还是太少了，所以从上层开始看，也算是一点一点入门吧。这个系列将讲解学习过程中总结的和性能相关的内容。</p>
-<p>首先将讲解一下GPU过渡绘制，也是开发者最直接接触的部分吧，这个内容将分为两个部分来将讲，第一部分初步讲解一下gpu过渡绘制的原理，和一些优化建议，第二部分将用实际例子来讲解优化GPU过渡绘制的一般步骤。</p>
-<h2 id="过渡绘制概念"><a href="#过渡绘制概念" class="headerlink" title="过渡绘制概念"></a>过渡绘制概念</h2><p>GPU过渡绘制的概念：GPU过度绘制指的是在屏幕一个像素上绘制多次(超过一次),比如一个TextView后有背景，那么显示文本的像素至少绘了两次，一次是背景，一次是文本。GPU过度绘制或多或少对性能有些影响,设备的内存带宽是有限的，当过度绘制导致应用需要更多的带宽(超过了可用带宽)的时候性能就会降低。带宽的限制每个设备都可能是不一样的。</p>
+        <blockquote>
+<p>2026-10-13 更新：本文原写于 2014 年，源码节选已对照 AOSP <code>android-4.4.4_r2</code>。Overdraw 的概念仍适用，ADT、monitor、Hierarchy Viewer 和旧 OpenGL 跟踪入口已过时；Android Studio 3.1 起改用 Layout Inspector 查看层级，帧时序使用 Perfetto。下文保留历史源码，并补充 Android 12 &#x2F; Android 16 的对应边界。</p>
+</blockquote>
+<p>博客有一段时间没有更新了，到了新公司后，一直比较忙，博客也更新地不那么频繁了。最近一直在看Android上和性能相关的部分，也就是所谓的Android性能优化，才发现Android性能这一块，自己懂得还是太少了，所以从上层开始看，也算是一点一点入门吧。这个系列将讲解学习过程中总结的和性能相关的内容。</p>
+<p>先讲讲 GPU 过度绘制，也是开发者最直接接触的部分吧。这个内容分两篇来讲：第一篇讲原理和一些优化建议，第二篇用实际例子来看一般的优化步骤。</p>
+<h2 id="过度绘制概念"><a href="#过度绘制概念" class="headerlink" title="过度绘制概念"></a>过度绘制概念</h2><p>GPU 过度绘制（Overdraw）指同一帧内，一个像素被绘制多次。例如 TextView 先画背景再画文字，文字覆盖到的像素就可能参与两次绘制。多余的像素着色、混合和内存访问会消耗资源，但是否造成掉帧，取决于绘制面积、透明度、GPU 能力以及这一帧的其他工作，不能仅凭颜色数量判断。<a target="_blank" rel="noopener" href="https://developer.android.com/topic/performance/rendering/overdraw">Android 过度绘制说明</a></p>
 <span id="more"></span>
 
-<p>这篇文章里的 Overdraw 原理仍然成立，但工具链需要换成现在的组合。早期文章提到的 Hierarchy Viewer、ADT、monitor、Tracer for OpenGL 是旧入口；现在应先用开发者选项里的 Debug GPU Overdraw&#x2F;Profile GPU Rendering 看可疑页面，再用 Layout Inspector&#x2F;Compose Layout Inspector 检查层级、背景、无用父节点和 Compose 重组，最后用 Perfetto Frame Timeline&#x2F;System Trace 验证优化是否真的减少 missed frames、绘制耗时或 SurfaceFlinger 合成压力。</p>
-<h2 id="过渡绘制的原因"><a href="#过渡绘制的原因" class="headerlink" title="过渡绘制的原因"></a>过渡绘制的原因</h2><ol>
-<li>太多的View叠加</li>
-<li>复杂的层级叠加</li>
-<li>更长的inflation时间</li>
+<p>现在排查可以先用开发者选项中的 Debug GPU Overdraw 找到重复绘制区域，再用 <a target="_blank" rel="noopener" href="https://developer.android.com/studio/debug/layout-inspector">Layout Inspector</a> 对照实际层级和背景。Compose 的重组次数与像素过度绘制是不同指标，不能互相代替。</p>
+<p>修改后，在相同设备、刷新率和操作下关闭调试着色再比较帧时序。Android 12（API 31）及以上可使用 <a target="_blank" rel="noopener" href="https://perfetto.dev/docs/data-sources/frametimeline">Perfetto FrameTimeline</a> 对照应用帧和 SurfaceFlinger 帧；该数据源目前不支持 SurfaceView。应用内部少画一层背景，并不自动证明 SurfaceFlinger 合成耗时也下降了。</p>
+<h2 id="过度绘制的原因"><a href="#过度绘制的原因" class="headerlink" title="过度绘制的原因"></a>过度绘制的原因</h2><ol>
+<li>多个背景或自定义绘制覆盖了同一块区域，其中一部分完全被不透明内容遮住。</li>
+<li>半透明内容需要与下层像素混合，不能简单跳过被它覆盖的绘制。</li>
+<li>同一绘制过程重复提交了没有可见贡献的图形。</li>
 </ol>
-<h2 id="过渡绘制和不合理的xml布局的影响"><a href="#过渡绘制和不合理的xml布局的影响" class="headerlink" title="过渡绘制和不合理的xml布局的影响"></a>过渡绘制和不合理的xml布局的影响</h2><ol>
-<li>布局文件是一个xml文件，inflate布局文件其实就是解析xml，根据标签信息创建相应的布局对象并做关联。xml中的标签和属性设置越多，节点树的深度越深，在解析时要执行的判断逻辑、函数的嵌套和递归就越多，所以时间消耗越多；</li>
-<li>inflate操作只是布局影响的第一个环节，一个界面要显示出来，在requestLayout后还要执行一系列的measure、layout、draw的操作，每一步的执行时间都会受到布局本身的影响。而界面的最终显示是所有这些操作完成后才实现的，所以如果布局质量差，会增加每一步操作的时间成本，最终显示时间就会比较长。</li>
+<p>View 数量、嵌套深度和 inflate 时间需要另外分析。一个没有背景也不绘制内容的父容器会增加布局工作，但不一定增加像素过度绘制；一个扁平的自定义 View 也可以在同一像素上画很多次。</p>
+<h2 id="过度绘制和不合理的-XML-布局的影响"><a href="#过度绘制和不合理的-XML-布局的影响" class="headerlink" title="过度绘制和不合理的 XML 布局的影响"></a>过度绘制和不合理的 XML 布局的影响</h2><ol>
+<li>inflate 读取编译后的布局资源，创建 View 并设置属性。这主要消耗 CPU；节点数量、控件构造和属性处理都会影响耗时，不等于 GPU 已经绘制了多少层。</li>
+<li>布局变化可能触发 measure&#x2F;layout，界面更新还要记录和执行绘制命令。并非每一帧都重新 inflate 或重新执行完整布局；需要从 trace 中确认实际耗时发生在创建、测量、布局、绘制还是等待阶段。</li>
 </ol>
-<h2 id="过渡绘制的一些基本概念"><a href="#过渡绘制的一些基本概念" class="headerlink" title="过渡绘制的一些基本概念:"></a>过渡绘制的一些基本概念:</h2><p>Android提供了三个工具来帮助辨别和解决重绘问题：Hierachy Viewer，Tracer for OpenGL和Show GPU overdraw。前两个可以在ADT工具或者独立的monitor工具中找到，最后一个是在开发者选项的一部分.</p>
-<ol>
-<li>GPU过渡绘制测试:对于过度绘制的测试主要通过人工进行测试，也是发现应用过渡绘制的首选途径 .通过打开开发者选项中的 显示GPU过度绘制(魅族手机:设置—辅助功能–开发人员工具–硬件加速渲染—调试GPU过渡绘制— 显示过渡绘制区域. (魅族手机需要打开开发者模式：需要在电话界面输入: <em>#</em>#6961#<em>#</em> )) 来进行测试（PS：只有android4.2及以上的版本才具备此功能)</li>
-<li>颜色标识: GPU过渡绘制从好到差:蓝-绿-淡红-红</li>
-</ol>
-<ul>
-<li>蓝色1x过度绘制</li>
-<li>绿色2x过度绘制</li>
-<li>淡红色3x过度绘制</li>
-<li>红色超过4x过度绘制</li>
+<h2 id="过度绘制的一些基本概念"><a href="#过度绘制的一些基本概念" class="headerlink" title="过度绘制的一些基本概念"></a>过度绘制的一些基本概念</h2><p>在支持的设备上打开「开发者选项 → 调试 GPU 过度绘制 → 显示过度绘制区域」。原文的魅族拨号代码和菜单位置属于当年的机型，不作为现在启用开发者选项的通用步骤。这里主要观察 HWUI 绘制的应用窗口，不能把颜色图当作整机所有 Surface 的完整 GPU 计数器。</p>
+<p>默认配色中的次数要区分「总绘制次数」和「额外绘制次数」。以本文核对的 Android 4.4.4 实现为例：</p>
+<table>
+<thead>
+<tr>
+<th>颜色</th>
+<th>同一像素的总绘制次数</th>
+<th>超过首次绘制的次数</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>原色，无调试着色</td>
+<td>1</td>
+<td>0</td>
+</tr>
+<tr>
+<td>蓝色</td>
+<td>2</td>
+<td>1</td>
+</tr>
+<tr>
+<td>绿色</td>
+<td>3</td>
+<td>2</td>
+</tr>
+<tr>
+<td>淡红色</td>
+<td>4</td>
+<td>3</td>
+</tr>
+<tr>
+<td>红色</td>
+<td>5 及以上</td>
+<td>4 及以上</td>
+</tr>
+</tbody></table>
+<p>蓝色也有过度绘制。我当时给的检查建议是「控制在 2x、不允许 4x、大面积 3x 不超过四分之一屏幕」，这不是 Android 的通用验收标准。颜色可以帮助找可疑区域，值不值得改，还要看帧耗时和视觉需求；文字、圆角、阴影和半透明效果可能需要叠加绘制。</p>
+<h2 id="优化工具介绍"><a href="#优化工具介绍" class="headerlink" title="优化工具介绍"></a>优化工具介绍</h2><h3 id="1-Lint-工具"><a href="#1-Lint-工具" class="headerlink" title="1. Lint 工具"></a>1. Lint 工具</h3><p>Android Studio 的 lint 可以检查布局和代码中的问题，也可以通过项目的 Gradle lint 任务运行。编辑器中的提示不代表完整 lint 任务已经执行，具体规则和严重级别以项目的 Android Gradle Plugin &#x2F; lint 版本与配置为准。参见<a target="_blank" rel="noopener" href="https://developer.android.com/studio/write/lint">官方 lint 使用说明</a>。</p>
+<p>下面保留的是早期工具截图，不是当前 Android Studio 的界面：</p>
+<p><img src="/images/overdraw-1/lint.webp" alt="Lint"></p>
+<h3 id="2-Lint-布局建议及边界"><a href="#2-Lint-布局建议及边界" class="headerlink" title="2. Lint 布局建议及边界"></a>2. Lint 布局建议及边界</h3><ul>
+<li><strong>Compound drawables</strong>：如果图片与文本不需要独立的布局、点击或无障碍语义，可以用 TextView 的 compound drawable 减少节点。</li>
+<li><strong>Merge root frame</strong>：仅当根容器没有需要保留的背景、padding、布局或交互行为，并且有合适的宿主父容器时，才考虑 <code>&lt;merge&gt;</code>。它不是可独立实例化的 View。</li>
+<li><strong>Useless leaf &#x2F; parent</strong>：先确认节点没有自定义绘制、前景、点击、动画或无障碍作用。没有背景本身不足以证明节点可以删除。</li>
+<li><strong>Deep layouts</strong>：嵌套可能增加测量与布局开销。官方布局优化文档列出的默认深度警告阈值为 10，项目可以受版本和配置影响；它是静态检查线索，不是超过 10 层就一定掉帧的结论。</li>
 </ul>
-<ol start="3">
-<li>验收标准:</li>
-</ol>
-<ul>
-<li>控制过度绘制为2x</li>
-<li>不允许存在4x过度绘制</li>
-<li>不允许存在面积超过屏幕1&#x2F;4区域的3x过度绘制（淡红色区域）</li>
+<p>这些规则主要面向 View&#x2F;XML。修改前后还要检查布局结果是否一致，不能为了消除警告改变界面语义。<a target="_blank" rel="noopener" href="https://developer.android.com/develop/ui/views/layout/improving-layouts/optimizing-layouts">优化布局层级</a></p>
+<h3 id="3-Hierarchy-Viewer-与-Layout-Inspector"><a href="#3-Hierarchy-Viewer-与-Layout-Inspector" class="headerlink" title="3. Hierarchy Viewer 与 Layout Inspector"></a>3. Hierarchy Viewer 与 Layout Inspector</h3><p><a target="_blank" rel="noopener" href="https://developer.android.com/studio/profile/hierarchy-viewer">Hierarchy Viewer 已停止维护</a>。它曾在 Android Device Monitor 中展示视图树及 measure&#x2F;layout&#x2F;draw 的相对耗时；旧版能否连接设备取决于系统构建、调试能力和连接协议，不是磁盘是否加密。原文通过 ViewServer 适配旧工具的做法仅供历史参考。</p>
+<p>Android Studio 3.1 及以上使用 Layout Inspector 检查运行时层级和属性。它不能替代帧性能测量；定位耗时仍需要 system trace、帧指标或应用自己的测量数据。</p>
+<h2 id="布局优化建议"><a href="#布局优化建议" class="headerlink" title="布局优化建议"></a>布局优化建议</h2><ul>
+<li>简单横向或纵向布局可以用 LinearLayout；复杂 View 布局可以比较 ConstraintLayout 等方案。不要仅按容器类名给性能排序，也不要把 View&#x2F;XML 的测量经验直接套到 Compose。</li>
+<li>用 <code>&lt;include&gt;</code> 复用布局；满足宿主要求时，用 <code>&lt;merge&gt;</code> 去掉没有行为的中间容器。</li>
+<li>对首次显示时不需要的内容，用 ViewStub 延后创建。已经存在的 View 只切换可见性，不需要再次创建对象；因此「动态 inflate 一定比 setVisibility 快」不成立。ViewStub 会把工作推迟到首次展开时，并非消除这些工作。</li>
+<li>删除确定没有可见贡献的背景。只在上层始终不透明且完整覆盖下层的区域才安全；还要检查列表空白、滚动边缘、加载、错误、点击和转场状态。</li>
+<li>selector 的 normal 状态可以在视觉允许时不绘制背景，但不能一律改成透明，也不能同时丢掉选中、按压和无障碍反馈。</li>
+<li>嵌套使用 <code>layout_weight</code> 的 LinearLayout 可能需要多轮测量。这是 measure 阶段的成本，不等于所有子 View 都必定在 draw 阶段执行两次；结合 MeasureSpec 与实际 trace 判断。</li>
+<li>减少无意义的节点和重复测量，同时保留控件语义。优化目标是降低已测出的成本，而不是让层级图看起来最扁平。</li>
 </ul>
-<h2 id="优化工具介绍"><a href="#优化工具介绍" class="headerlink" title="优化工具介绍"></a>优化工具介绍</h2><ol>
-<li>Lint工具:</li>
-</ol>
-<ul>
-<li>Eclipse中,点击即可,下面的窗口中会出现提示,根据提示和具体解决办法消除.</li>
-<li>Android Studio自带Lint工具,不合理或者需要优化和注意的地方,会用黄色标记出来.</li>
-<li>Lint工具不仅对布局有很好的优化建议,对代码中不合理的活着存在潜在风险的模块也会提出优化建议,所以一个好的建议是:多使用Lint工具检查自己的应用,尽量消除所有的建议.</li>
-<li>Lint工具可以用命令行来运行,具体使用可以参考:<a href="tools.android.com">tools.android.com</a><br>  <img src="/images/overdraw-1/lint.webp" alt="Lint"></li>
-</ul>
-<ol start="2">
-<li>Lint工具的提升例子(摘自官方文档):</li>
-</ol>
-<ul>
-<li>Use compound drawables(使用compound drawables) - A LinearLayout which contains an ImageView and a TextView can be more efficiently handled as a compound drawable.</li>
-<li>Merge root frame(使用Merge根框架) - If a FrameLayout is the root of a layout and does not provide background or padding etc, it can be replaced with a merge tag which is slightly more efficient.</li>
-<li>Useless leaf(去除无用的分支) - A layout that has no children or no background can often be removed (since it is invisible) for a flatter and more efficient layout hierarchy.</li>
-<li>Useless parent (去除无用的父控件)- A layout with children that has no siblings, is not a ScrollView or a root layout, and does not have a background, can be removed and have its children moved directly into the parent for a flatter and more efficient layout hierarchy.</li>
-<li>Deep layouts (注意Layout的深度) - Layouts with too much nesting are bad for performance. Consider using flatter layouts such as RelativeLayout or GridLayout to improve performance. The default maximum depth is</li>
-</ul>
-<ol start="3">
-<li>Hierarchy Viewer:此工具是一个ADT工具（或者monitor,最新版本的SDK建议不使用独立的HV工具,而是直接在monitor中进行操作.）的一部分，可以被用作对视图层级进行快速解读。在处理布局问题时特别有用，对于性能问题也很适用。Hierarchy Viewer默认只能在非加密设备使用，例如工程机，工程平板或者模拟器。为了能够在任何手机上使用Hierarchy Viewer，你得在你的应用中添加ViewServer，这是一个开源库,使用方法可以参考这里。连接上设备，打开Hierarchy Viewer(定位到tools&#x2F;目录下，直接执行hierarchyviewer的命令，选定需要查看的Process，再点击Load View Hierarchy会显示出当前界面的布局Tree。在每个模块的Traffic light上有三个灯，分别代表了Measure, Layout and Draw三个步骤的性能。</li>
-</ol>
-<h2 id="布局优化建议"><a href="#布局优化建议" class="headerlink" title="布局优化建议"></a>布局优化建议</h2><p>在Android UI布局过程中，通过遵守一些惯用、有效的布局原则，我们可以制作出高效且复用性高的UI，概括来说包括如下几点：</p>
-<ul>
-<li><p>尽量多使用RelativeLayout和LinearLayout, 不要使用绝对布局AbsoluteLayout，</p>
-<ul>
-<li>在布局层次一样的情况下， 建议使用LinearLayout代替RelativeLayout, 因为LinearLayout性能要稍高一点.</li>
-<li>在完成相对较复杂的布局时,建议使用RelativeLayout,RelativeLayout可以简单实现LinearLayout嵌套才能实现的布局.</li>
-</ul>
-</li>
-<li><p>将可复用的组件抽取出来并通过include标签使用；</p>
-</li>
-<li><p>使用ViewStub标签来加载一些不常用的布局；</p>
-</li>
-<li><p>动态地inflation view性能要比SetVisiblity性能要好.当然用VIewStub是最好的选择.</p>
-</li>
-<li><p>使用merge标签减少布局的嵌套层次</p>
-</li>
-<li><p>去掉多余的背景颜色(查看背景颜色是否多余,可以将HierarchyView中的图导出为psd文件,然后用Photoshop查看.具体可以参考这个<a target="_blank" rel="noopener" href="https://www.youtube.com/watch?v=URyoiAt8098">视频</a>)</p>
-<ul>
-<li>对于有多层背景颜色的Layout来说,留最上面一层的颜色即可,其他底层的颜色都可以去掉</li>
-<li>对于使用Selector当背景的Layout(比如ListView的Item,会使用Selector来标记点击,选择等不同的状态),可以将normal状态的color设置为&quot;@android:color&#x2F;transparent”,来解决对应的问题</li>
-</ul>
-</li>
-<li><p>内嵌使用包含layout_weight属性的LinearLayout会在绘制时花费昂贵的系统资源，因为每一个子组件都需要被测量两次。在使用ListView与GridView的时候，这个问题显的尤其重要，因为子组件会重复被创建.所以要尽量避免使用Layout_weight</p>
-</li>
-<li><p>使得Layout宽而浅，而不是窄而深（在Hierarchy Viewer的Tree视图里面体现）</p>
-</li>
-</ul>
-<h2 id="源码相关"><a href="#源码相关" class="headerlink" title="源码相关"></a>源码相关</h2><p>另外有能力看源码的同学，下面是绘制OverDraw的源码位置：&#x2F;frameworks&#x2F;base&#x2F;libs&#x2F;hwui&#x2F;OpenGLRenderer.cpp,有兴趣的可以去研究研究。</p>
-<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">OpenGLRenderer::renderOverdraw</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="keyword">if</span> (mCaches.debugOverdraw &amp;amp;&amp;amp; <span class="built_in">getTargetFbo</span>() == <span class="number">0</span>) &#123;</span><br><span class="line">        <span class="type">const</span> Rect* clip = &amp;amp;mTilingClip;</span><br><span class="line"></span><br><span class="line">        mCaches.<span class="built_in">enableScissor</span>();</span><br><span class="line">        mCaches.<span class="built_in">setScissor</span>(clip-&amp;gt;left, mFirstSnapshot-&amp;gt;height - clip-&amp;gt;bottom,</span><br><span class="line">                clip-&amp;gt;right - clip-&amp;gt;left, clip-&amp;gt;bottom - clip-&amp;gt;top);</span><br><span class="line"></span><br><span class="line">        <span class="comment">// 1x overdraw</span></span><br><span class="line">        mCaches.stencil.<span class="built_in">enableDebugTest</span>(<span class="number">2</span>);</span><br><span class="line">        <span class="built_in">drawColor</span>(mCaches.<span class="built_in">getOverdrawColor</span>(<span class="number">1</span>), SkXfermode::kSrcOver_Mode);</span><br><span class="line"></span><br><span class="line">        <span class="comment">// 2x overdraw</span></span><br><span class="line">        mCaches.stencil.<span class="built_in">enableDebugTest</span>(<span class="number">3</span>);</span><br><span class="line">        <span class="built_in">drawColor</span>(mCaches.<span class="built_in">getOverdrawColor</span>(<span class="number">2</span>), SkXfermode::kSrcOver_Mode);</span><br><span class="line"></span><br><span class="line">        <span class="comment">// 3x overdraw</span></span><br><span class="line">        mCaches.stencil.<span class="built_in">enableDebugTest</span>(<span class="number">4</span>);</span><br><span class="line">        <span class="built_in">drawColor</span>(mCaches.<span class="built_in">getOverdrawColor</span>(<span class="number">3</span>), SkXfermode::kSrcOver_Mode);</span><br><span class="line"></span><br><span class="line">        <span class="comment">// 4x overdraw and higher</span></span><br><span class="line">        mCaches.stencil.<span class="built_in">enableDebugTest</span>(<span class="number">4</span>, <span class="literal">true</span>);</span><br><span class="line">        <span class="built_in">drawColor</span>(mCaches.<span class="built_in">getOverdrawColor</span>(<span class="number">4</span>), SkXfermode::kSrcOver_Mode);</span><br><span class="line"></span><br><span class="line">        mCaches.stencil.<span class="built_in">disable</span>();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">OpenGLRenderer::countOverdraw</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="type">size_t</span> count = mWidth * mHeight;</span><br><span class="line">    <span class="type">uint32_t</span>* buffer = <span class="keyword">new</span> <span class="type">uint32_t</span>[count];</span><br><span class="line">    <span class="built_in">glReadPixels</span>(<span class="number">0</span>, <span class="number">0</span>, mWidth, mHeight, GL_RGBA, GL_UNSIGNED_BYTE, &amp;amp;buffer[<span class="number">0</span>]);</span><br><span class="line"></span><br><span class="line">    <span class="type">size_t</span> total = <span class="number">0</span>;</span><br><span class="line">    <span class="keyword">for</span> (<span class="type">size_t</span> i = <span class="number">0</span>; i &amp;lt; count; i++) &#123;</span><br><span class="line">        total += buffer[i] &amp;amp; <span class="number">0xff</span>;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    mOverdraw = total / <span class="built_in">float</span>(count);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">delete</span>[] buffer;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h2 id="源码相关"><a href="#源码相关" class="headerlink" title="源码相关"></a>源码相关</h2><p>有兴趣看源码的同学，可以接着看看 AOSP <code>android-4.4.4_r2</code> 的 <a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/base/+/android-4.4.4_r2/libs/hwui/OpenGLRenderer.cpp">OpenGLRenderer.cpp</a>。下面是两段节选，依赖 HWUI 内部状态：<code>renderOverdraw()</code> 把 stencil 计数转换成调试颜色，<code>countOverdraw()</code> 读取调试结果并计算均值。</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="type">void</span> <span class="title">OpenGLRenderer::renderOverdraw</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="keyword">if</span> (mCaches.debugOverdraw &amp;&amp; <span class="built_in">getTargetFbo</span>() == <span class="number">0</span>) &#123;</span><br><span class="line">        <span class="type">const</span> Rect* clip = &amp;mTilingClip;</span><br><span class="line"></span><br><span class="line">        mCaches.<span class="built_in">enableScissor</span>();</span><br><span class="line">        mCaches.<span class="built_in">setScissor</span>(clip-&gt;left, mFirstSnapshot-&gt;height - clip-&gt;bottom,</span><br><span class="line">                clip-&gt;right - clip-&gt;left, clip-&gt;bottom - clip-&gt;top);</span><br><span class="line"></span><br><span class="line">        <span class="comment">// 1x overdraw</span></span><br><span class="line">        mCaches.stencil.<span class="built_in">enableDebugTest</span>(<span class="number">2</span>);</span><br><span class="line">        <span class="built_in">drawColor</span>(mCaches.<span class="built_in">getOverdrawColor</span>(<span class="number">1</span>), SkXfermode::kSrcOver_Mode);</span><br><span class="line"></span><br><span class="line">        <span class="comment">// 2x overdraw</span></span><br><span class="line">        mCaches.stencil.<span class="built_in">enableDebugTest</span>(<span class="number">3</span>);</span><br><span class="line">        <span class="built_in">drawColor</span>(mCaches.<span class="built_in">getOverdrawColor</span>(<span class="number">2</span>), SkXfermode::kSrcOver_Mode);</span><br><span class="line"></span><br><span class="line">        <span class="comment">// 3x overdraw</span></span><br><span class="line">        mCaches.stencil.<span class="built_in">enableDebugTest</span>(<span class="number">4</span>);</span><br><span class="line">        <span class="built_in">drawColor</span>(mCaches.<span class="built_in">getOverdrawColor</span>(<span class="number">3</span>), SkXfermode::kSrcOver_Mode);</span><br><span class="line"></span><br><span class="line">        <span class="comment">// 4x overdraw and higher</span></span><br><span class="line">        mCaches.stencil.<span class="built_in">enableDebugTest</span>(<span class="number">4</span>, <span class="literal">true</span>);</span><br><span class="line">        <span class="built_in">drawColor</span>(mCaches.<span class="built_in">getOverdrawColor</span>(<span class="number">4</span>), SkXfermode::kSrcOver_Mode);</span><br><span class="line"></span><br><span class="line">        mCaches.stencil.<span class="built_in">disable</span>();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="type">void</span> <span class="title">OpenGLRenderer::countOverdraw</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    <span class="type">size_t</span> count = mWidth * mHeight;</span><br><span class="line">    <span class="type">uint32_t</span>* buffer = <span class="keyword">new</span> <span class="type">uint32_t</span>[count];</span><br><span class="line">    <span class="built_in">glReadPixels</span>(<span class="number">0</span>, <span class="number">0</span>, mWidth, mHeight, GL_RGBA, GL_UNSIGNED_BYTE, &amp;buffer[<span class="number">0</span>]);</span><br><span class="line"></span><br><span class="line">    <span class="type">size_t</span> total = <span class="number">0</span>;</span><br><span class="line">    <span class="keyword">for</span> (<span class="type">size_t</span> i = <span class="number">0</span>; i &lt; count; i++) &#123;</span><br><span class="line">        total += buffer[i] &amp; <span class="number">0xff</span>;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    mOverdraw = total / <span class="built_in">float</span>(count);</span><br><span class="line"></span><br><span class="line">    <span class="keyword">delete</span>[] buffer;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
-<p>还有QA可能用得到的一个指标：OverDraw数值，这个的源码位置在Framework&#x2F;base&#x2F;core&#x2F;java&#x2F;android&#x2F;view&#x2F;HardwareRender.java中(5.0中去掉了这个数值的显示)</p>
-<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title function_">debugOverdraw</span><span class="params">(View.AttachInfo attachInfo, Rect dirty,</span></span><br><span class="line"><span class="params">                HardwareCanvas canvas, DisplayList displayList)</span> &#123;</span><br><span class="line"></span><br><span class="line">            <span class="keyword">if</span> (mDebugOverdraw == OVERDRAW_TYPE_COUNT) &#123;</span><br><span class="line">                <span class="keyword">if</span> (mDebugOverdrawLayer == <span class="literal">null</span>) &#123;</span><br><span class="line">                    mDebugOverdrawLayer = createHardwareLayer(mWidth, mHeight, <span class="literal">true</span>);</span><br><span class="line">                &#125; <span class="keyword">else</span> <span class="keyword">if</span> (mDebugOverdrawLayer.getWidth() != mWidth ||</span><br><span class="line">                        mDebugOverdrawLayer.getHeight() != mHeight) &#123;</span><br><span class="line">                    mDebugOverdrawLayer.resize(mWidth, mHeight);</span><br><span class="line">                &#125;</span><br><span class="line"></span><br><span class="line">                <span class="keyword">if</span> (!mDebugOverdrawLayer.isValid()) &#123;</span><br><span class="line">                    mDebugOverdraw = -<span class="number">1</span>;</span><br><span class="line">                    <span class="keyword">return</span>;</span><br><span class="line">                &#125;</span><br><span class="line"></span><br><span class="line">                <span class="type">HardwareCanvas</span> <span class="variable">layerCanvas</span> <span class="operator">=</span> mDebugOverdrawLayer.start(canvas, dirty);</span><br><span class="line">                countOverdraw(layerCanvas);</span><br><span class="line">                <span class="keyword">final</span> <span class="type">int</span> <span class="variable">restoreCount</span> <span class="operator">=</span> layerCanvas.save();</span><br><span class="line">                layerCanvas.drawDisplayList(displayList, <span class="literal">null</span>, DisplayList.FLAG_CLIP_CHILDREN);</span><br><span class="line">                layerCanvas.restoreToCount(restoreCount);</span><br><span class="line">                mDebugOverdrawLayer.end(canvas);</span><br><span class="line"></span><br><span class="line">                <span class="type">float</span> <span class="variable">overdraw</span> <span class="operator">=</span> getOverdraw(layerCanvas);</span><br><span class="line">                <span class="type">DisplayMetrics</span> <span class="variable">metrics</span> <span class="operator">=</span> attachInfo.mRootView.getResources().getDisplayMetrics();</span><br><span class="line"></span><br><span class="line">                drawOverdrawCounter(canvas, overdraw, metrics.density);</span><br><span class="line">            &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title function_">drawOverdrawCounter</span><span class="params">(HardwareCanvas canvas, <span class="type">float</span> overdraw, <span class="type">float</span> density)</span> &#123;</span><br><span class="line">            <span class="keyword">final</span> <span class="type">String</span> <span class="variable">text</span> <span class="operator">=</span> String.format(\<span class="string">&quot;%.2fx\&quot;, overdraw);</span></span><br><span class="line"><span class="string">            final Paint paint = setupPaint(density);</span></span><br><span class="line"><span class="string">            // HSBtoColor will clamp the values in the 0..1 range</span></span><br><span class="line"><span class="string">            paint.setColor(Color.HSBtoColor(0.28f - 0.28f * overdraw / 3.5f, 0.8f, 1.0f));</span></span><br><span class="line"><span class="string"></span></span><br><span class="line"><span class="string">            canvas.drawText(text, density * 4.0f, mHeight - paint.getFontMetrics().bottom, paint);</span></span><br><span class="line"><span class="string">&#125;</span></span><br></pre></td></tr></table></figure>
+<p><code>glReadPixels()</code> 是这个旧调试计数实现的一部分，不是应用应在每帧额外执行的优化步骤，也不代表 GPU 毫秒耗时。</p>
+<p>原文提到的数值叠层位于同一标签的 <a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/base/+/android-4.4.4_r2/core/java/android/view/HardwareRenderer.java">frameworks&#x2F;base&#x2F;core&#x2F;java&#x2F;android&#x2F;view&#x2F;HardwareRenderer.java</a>。下面保留 <code>debugOverdraw()</code> &#x2F; <code>drawOverdrawCounter()</code> 节选；AOSP <code>android-5.0.0_r1</code> 的该文件已没有这两个方法，不能在当前系统照搬这个入口：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title function_">debugOverdraw</span><span class="params">(View.AttachInfo attachInfo, Rect dirty,</span></span><br><span class="line"><span class="params">                HardwareCanvas canvas, DisplayList displayList)</span> &#123;</span><br><span class="line"></span><br><span class="line">            <span class="keyword">if</span> (mDebugOverdraw == OVERDRAW_TYPE_COUNT) &#123;</span><br><span class="line">                <span class="keyword">if</span> (mDebugOverdrawLayer == <span class="literal">null</span>) &#123;</span><br><span class="line">                    mDebugOverdrawLayer = createHardwareLayer(mWidth, mHeight, <span class="literal">true</span>);</span><br><span class="line">                &#125; <span class="keyword">else</span> <span class="keyword">if</span> (mDebugOverdrawLayer.getWidth() != mWidth ||</span><br><span class="line">                        mDebugOverdrawLayer.getHeight() != mHeight) &#123;</span><br><span class="line">                    mDebugOverdrawLayer.resize(mWidth, mHeight);</span><br><span class="line">                &#125;</span><br><span class="line"></span><br><span class="line">                <span class="keyword">if</span> (!mDebugOverdrawLayer.isValid()) &#123;</span><br><span class="line">                    mDebugOverdraw = -<span class="number">1</span>;</span><br><span class="line">                    <span class="keyword">return</span>;</span><br><span class="line">                &#125;</span><br><span class="line"></span><br><span class="line">                <span class="type">HardwareCanvas</span> <span class="variable">layerCanvas</span> <span class="operator">=</span> mDebugOverdrawLayer.start(canvas, dirty);</span><br><span class="line">                countOverdraw(layerCanvas);</span><br><span class="line">                <span class="keyword">final</span> <span class="type">int</span> <span class="variable">restoreCount</span> <span class="operator">=</span> layerCanvas.save();</span><br><span class="line">                layerCanvas.drawDisplayList(displayList, <span class="literal">null</span>, DisplayList.FLAG_CLIP_CHILDREN);</span><br><span class="line">                layerCanvas.restoreToCount(restoreCount);</span><br><span class="line">                mDebugOverdrawLayer.end(canvas);</span><br><span class="line"></span><br><span class="line">                <span class="type">float</span> <span class="variable">overdraw</span> <span class="operator">=</span> getOverdraw(layerCanvas);</span><br><span class="line">                <span class="type">DisplayMetrics</span> <span class="variable">metrics</span> <span class="operator">=</span> attachInfo.mRootView.getResources().getDisplayMetrics();</span><br><span class="line"></span><br><span class="line">                drawOverdrawCounter(canvas, overdraw, metrics.density);</span><br><span class="line">            &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title function_">drawOverdrawCounter</span><span class="params">(HardwareCanvas canvas, <span class="type">float</span> overdraw, <span class="type">float</span> density)</span> &#123;</span><br><span class="line">            <span class="keyword">final</span> <span class="type">String</span> <span class="variable">text</span> <span class="operator">=</span> String.format(<span class="string">&quot;%.2fx&quot;</span>, overdraw);</span><br><span class="line">            <span class="keyword">final</span> <span class="type">Paint</span> <span class="variable">paint</span> <span class="operator">=</span> setupPaint(density);</span><br><span class="line">            <span class="comment">// HSBtoColor will clamp the values in the 0..1 range</span></span><br><span class="line">            paint.setColor(Color.HSBtoColor(<span class="number">0.28f</span> - <span class="number">0.28f</span> * overdraw / <span class="number">3.5f</span>, <span class="number">0.8f</span>, <span class="number">1.0f</span>));</span><br><span class="line"></span><br><span class="line">            canvas.drawText(text, density * <span class="number">4.0f</span>, mHeight - paint.getFontMetrics().bottom, paint);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
 
+<p>这两段代码说明 Android 4.4.4 的实现，不能作为现代 HWUI 源码路径。以 AOSP Android 16 的 <code>android-16.0.0_r1</code> 为例，调试过度绘制已经由 <a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/libs/hwui/pipeline/skia/SkiaPipeline.cpp">SkiaPipeline.cpp</a> 中的 <code>Properties::debugOverdraw</code> 分支调用 <code>renderOverdraw()</code>。阅读设备源码时先固定对应标签，再追踪实际渲染后端。</p>
 <h2 id="参考文章"><a href="#参考文章" class="headerlink" title="参考文章"></a>参考文章</h2><ol>
-<li><a target="_blank" rel="noopener" href="http://www.curious-creature.org/2012/12/01/android-performance-case-study/">优化过程</a></li>
+<li><a target="_blank" rel="noopener" href="http://www.curious-creature.org/2012/12/01/android-performance-case-study/">原优化案例</a>（历史参考，本次未能重新访问）</li>
 <li><a target="_blank" rel="noopener" href="http://blog.csdn.net/yihongyuelan/article/details/12169647">反编译并添加gpu显示</a></li>
-<li><a target="_blank" rel="noopener" href="http://developer.android.com/training/improving-layouts/optimizing-layout.html#Inspect">http://developer.android.com/training/improving-layouts/optimizing-layout.html#Inspect</a></li>
-<li><a target="_blank" rel="noopener" href="http://developer.android.com/training/improving-layouts/reusing-layouts.html">http://developer.android.com/training/improving-layouts/reusing-layouts.html </a></li>
-<li><a target="_blank" rel="noopener" href="http://developer.android.com/training/improving-layouts/loading-ondemand.html">http://developer.android.com/training/improving-layouts/loading-ondemand.html</a></li>
-<li><a target="_blank" rel="noopener" href="http://developer.android.com/training/improving-layouts/smooth-scrolling.html">http://developer.android.com/training/improving-layouts/smooth-scrolling.html </a></li>
-<li><a target="_blank" rel="noopener" href="http://developer.android.com/tools/help/hierarchy-viewer.html">http://developer.android.com/tools/help/hierarchy-viewer.html</a></li>
-<li><a target="_blank" rel="noopener" href="http://tools.android.com/tips/lint">http://tools.android.com/tips/lint</a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.android.com/develop/ui/views/layout/improving-layouts/optimizing-layouts">https://developer.android.com/develop/ui/views/layout/improving-layouts/optimizing-layouts</a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.android.com/develop/ui/views/layout/improving-layouts/reusing-layouts">https://developer.android.com/develop/ui/views/layout/improving-layouts/reusing-layouts </a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.android.com/develop/ui/views/layout/improving-layouts/loading-ondemand">https://developer.android.com/develop/ui/views/layout/improving-layouts/loading-ondemand</a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.android.com/develop/ui/views/layout/recyclerview">RecyclerView 文档（原 Smooth Scrolling 链接已重定向至此）</a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.android.com/studio/profile/hierarchy-viewer">https://developer.android.com/studio/profile/hierarchy-viewer</a></li>
+<li><a target="_blank" rel="noopener" href="https://developer.android.com/studio/write/lint">https://developer.android.com/studio/write/lint</a></li>
 </ol>
 <h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p>
 <ol>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li>
 <li><a href="https://androidperformance.com/2019/12/01/BlogMap/">本博客内容导航</a> ：个人博客内容的一个导航。</li>
 <li><a href="https://androidperformance.com/2018/05/07/Android-performance-optimization-skills-and-tools/">个人整理和搜集的优秀博客文章 - Android 性能优化必知必会</a> ：欢迎大家自荐和推荐 （微信私聊即可）</li>
-<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a> ： 欢迎加入，多谢支持～</li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a>：付费社群已于 2026 年停止运营，不再招收新成员；此处保留历史介绍。</li>
 </ol>
 <blockquote>
 <p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p>
@@ -439,18 +410,18 @@ loading="lazy"             decoding="async"
     </article>
     <!-- license -->
         <div class="license-wrapper">
-            <p>Author：<a href="https://androidperformance.com">Gracker</a>
-            <p>Link：<a href="https://androidperformance.com/2014/10/20/android-performance-optimization-overdraw-1/">https://androidperformance.com/2014/10/20/android-performance-optimization-overdraw-1/</a>
-            <p>Publish date：<a href="https://androidperformance.com/2014/10/20/android-performance-optimization-overdraw-1/">October 20th 2014, 11:19:23 pm</a>
-            <p>Update date：<a href="https://androidperformance.com/2014/10/20/android-performance-optimization-overdraw-1/">June 2nd 2026, 11:40:34 pm</a>
-            <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
+            <p>原文作者：<a href="https://androidperformance.com">Gracker</a>
+            <p>原文链接：<a href="https://androidperformance.com/2014/10/20/android-performance-optimization-overdraw-1/">https://androidperformance.com/2014/10/20/android-performance-optimization-overdraw-1/</a>
+            <p>发表日期：<a href="https://androidperformance.com/2014/10/20/android-performance-optimization-overdraw-1/">October 20th 2014, 11:19:23 pm</a>
+            <p>更新日期：<a href="https://androidperformance.com/2014/10/20/android-performance-optimization-overdraw-1/">November 2nd 2026, 11:46:02 pm</a>
+            <p>版权声明：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     <!-- paginator -->
     <ul class="post-paginator">
         <li class="next">
                 <div class="nextSlogan">Next Post</div>
-                <a href="/2015/01/13/android-performance-optimization-overdraw-2/" title="Android 性能优化之过渡绘制 - 实战篇">
-                    <div class="nextTitle">Android 性能优化之过渡绘制 - 实战篇</div>
+                <a href="/2015/01/13/android-performance-optimization-overdraw-2/" title="Android 性能优化之过度绘制 - 实战篇">
+                    <div class="nextTitle">Android 性能优化之过度绘制 - 实战篇</div>
                 </a>
         </li>
         <li class="previous">
@@ -519,7 +490,7 @@ loading="lazy"             decoding="async"
                 <div class="toc-catalog">
                     <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
                 </div>
-                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%BF%87%E6%B8%A1%E7%BB%98%E5%88%B6%E6%A6%82%E5%BF%B5"><span class="toc-number">1.</span> <span class="toc-text">过渡绘制概念</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%BF%87%E6%B8%A1%E7%BB%98%E5%88%B6%E7%9A%84%E5%8E%9F%E5%9B%A0"><span class="toc-number">2.</span> <span class="toc-text">过渡绘制的原因</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%BF%87%E6%B8%A1%E7%BB%98%E5%88%B6%E5%92%8C%E4%B8%8D%E5%90%88%E7%90%86%E7%9A%84xml%E5%B8%83%E5%B1%80%E7%9A%84%E5%BD%B1%E5%93%8D"><span class="toc-number">3.</span> <span class="toc-text">过渡绘制和不合理的xml布局的影响</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%BF%87%E6%B8%A1%E7%BB%98%E5%88%B6%E7%9A%84%E4%B8%80%E4%BA%9B%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5"><span class="toc-number">4.</span> <span class="toc-text">过渡绘制的一些基本概念:</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BC%98%E5%8C%96%E5%B7%A5%E5%85%B7%E4%BB%8B%E7%BB%8D"><span class="toc-number">5.</span> <span class="toc-text">优化工具介绍</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%B8%83%E5%B1%80%E4%BC%98%E5%8C%96%E5%BB%BA%E8%AE%AE"><span class="toc-number">6.</span> <span class="toc-text">布局优化建议</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%BA%90%E7%A0%81%E7%9B%B8%E5%85%B3"><span class="toc-number">7.</span> <span class="toc-text">源码相关</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E6%96%87%E7%AB%A0"><span class="toc-number">8.</span> <span class="toc-text">参考文章</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number"></span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%BF%87%E5%BA%A6%E7%BB%98%E5%88%B6%E6%A6%82%E5%BF%B5"><span class="toc-number">1.</span> <span class="toc-text">过度绘制概念</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%BF%87%E5%BA%A6%E7%BB%98%E5%88%B6%E7%9A%84%E5%8E%9F%E5%9B%A0"><span class="toc-number">2.</span> <span class="toc-text">过度绘制的原因</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%BF%87%E5%BA%A6%E7%BB%98%E5%88%B6%E5%92%8C%E4%B8%8D%E5%90%88%E7%90%86%E7%9A%84-XML-%E5%B8%83%E5%B1%80%E7%9A%84%E5%BD%B1%E5%93%8D"><span class="toc-number">3.</span> <span class="toc-text">过度绘制和不合理的 XML 布局的影响</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E8%BF%87%E5%BA%A6%E7%BB%98%E5%88%B6%E7%9A%84%E4%B8%80%E4%BA%9B%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5"><span class="toc-number">4.</span> <span class="toc-text">过度绘制的一些基本概念</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BC%98%E5%8C%96%E5%B7%A5%E5%85%B7%E4%BB%8B%E7%BB%8D"><span class="toc-number">5.</span> <span class="toc-text">优化工具介绍</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#1-Lint-%E5%B7%A5%E5%85%B7"><span class="toc-number">5.1.</span> <span class="toc-text">1. Lint 工具</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-Lint-%E5%B8%83%E5%B1%80%E5%BB%BA%E8%AE%AE%E5%8F%8A%E8%BE%B9%E7%95%8C"><span class="toc-number">5.2.</span> <span class="toc-text">2. Lint 布局建议及边界</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-Hierarchy-Viewer-%E4%B8%8E-Layout-Inspector"><span class="toc-number">5.3.</span> <span class="toc-text">3. Hierarchy Viewer 与 Layout Inspector</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%B8%83%E5%B1%80%E4%BC%98%E5%8C%96%E5%BB%BA%E8%AE%AE"><span class="toc-number">6.</span> <span class="toc-text">布局优化建议</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%BA%90%E7%A0%81%E7%9B%B8%E5%85%B3"><span class="toc-number">7.</span> <span class="toc-text">源码相关</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E6%96%87%E7%AB%A0"><span class="toc-number">8.</span> <span class="toc-text">参考文章</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number"></span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a>
             </div>
         <!-- sidebar -->
         <div class="sidebar sidebar-hide">
@@ -670,14 +641,19 @@ loading="lazy"             decoding="async"
         
         
         
+        
     <div class="total-and-search">
         <div class="total-archive">
-        Total : 139
+        Total : 140
         </div>
     </div>
     <div class="post-archive">
             <div class="archive-year"> 2026 </div>
             <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/06</span>
+            <a class="archive-post-title" href="/2026/10/06/SmartPerfetto-v1.15.1-Release-Notes/">SmartPerfetto v1.15.1 更新说明</a>
+        </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/19</span>
             <a class="archive-post-title" href="/2026/09/19/SmartPerfetto-v1.12.0-Release-Notes/">SmartPerfetto v1.12.0 更新说明</a>
@@ -864,11 +840,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/07</span>
-            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
+            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/07</span>
-            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/03</span>
@@ -1221,7 +1197,7 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/04</span>
-            <a class="archive-post-title" href="/2015/02/04/build-rom-for-nexus5/">为 Nexus5 编译 AndroidL 固件</a>
+            <a class="archive-post-title" href="/2015/02/04/build-rom-for-nexus5/">为 Nexus 5 编译 Android Lollipop 固件</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/30</span>
@@ -1233,14 +1209,14 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/13</span>
-            <a class="archive-post-title" href="/2015/01/13/android-performance-optimization-overdraw-2/">Android 性能优化之过渡绘制 - 实战篇</a>
+            <a class="archive-post-title" href="/2015/01/13/android-performance-optimization-overdraw-2/">Android 性能优化之过度绘制 - 实战篇</a>
         </li>
                 </ul>
             <div class="archive-year"> 2014 </div>
             <ul class="year-list">
         <li class="archive-post-item">
             <span class="archive-post-date">10/20</span>
-            <a class="archive-post-title" href="/2014/10/20/android-performance-optimization-overdraw-1/">Android 性能优化之过渡绘制 - 理论篇</a>
+            <a class="archive-post-title" href="/2014/10/20/android-performance-optimization-overdraw-1/">Android 性能优化之过度绘制 - 理论篇</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">06/03</span>
@@ -1276,25 +1252,9 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-tags">
     <div class="sidebar-tags-name">
-            <span class="sidebar-tag-name" data-tags="年度推荐">
-                <span class="iconfont-archer">&#xe606;</span>
-                年度推荐
-            </span>
-            <span class="sidebar-tag-name" data-tags="Startup">
-                <span class="iconfont-archer">&#xe606;</span>
-                Startup
-            </span>
-            <span class="sidebar-tag-name" data-tags="Memory">
-                <span class="iconfont-archer">&#xe606;</span>
-                Memory
-            </span>
             <span class="sidebar-tag-name" data-tags="Android">
                 <span class="iconfont-archer">&#xe606;</span>
                 Android
-            </span>
-            <span class="sidebar-tag-name" data-tags="Jank">
-                <span class="iconfont-archer">&#xe606;</span>
-                Jank
             </span>
             <span class="sidebar-tag-name" data-tags="Perfetto">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1304,6 +1264,14 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Systrace
             </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
             <span class="sidebar-tag-name" data-tags="年终总结">
                 <span class="iconfont-archer">&#xe606;</span>
                 年终总结
@@ -1311,6 +1279,14 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="知识星球">
                 <span class="iconfont-archer">&#xe606;</span>
                 知识星球
+            </span>
+            <span class="sidebar-tag-name" data-tags="年度推荐">
+                <span class="iconfont-archer">&#xe606;</span>
+                年度推荐
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
             </span>
             <span class="sidebar-tag-name" data-tags="Performance">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1336,6 +1312,18 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 随笔
             </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
             <span class="sidebar-tag-name" data-tags="Agent OS">
                 <span class="iconfont-archer">&#xe606;</span>
                 Agent OS
@@ -1351,18 +1339,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Mobile OS">
                 <span class="iconfont-archer">&#xe606;</span>
                 Mobile OS
-            </span>
-            <span class="sidebar-tag-name" data-tags="ANR">
-                <span class="iconfont-archer">&#xe606;</span>
-                ANR
-            </span>
-            <span class="sidebar-tag-name" data-tags="Tools">
-                <span class="iconfont-archer">&#xe606;</span>
-                Tools
-            </span>
-            <span class="sidebar-tag-name" data-tags="RenderThread">
-                <span class="iconfont-archer">&#xe606;</span>
-                RenderThread
             </span>
             <span class="sidebar-tag-name" data-tags="Linux">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1380,6 +1356,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 性能优化
             </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
             <span class="sidebar-tag-name" data-tags="线程优化">
                 <span class="iconfont-archer">&#xe606;</span>
                 线程优化
@@ -1387,10 +1367,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="卡顿优化">
                 <span class="iconfont-archer">&#xe606;</span>
                 卡顿优化
-            </span>
-            <span class="sidebar-tag-name" data-tags="电量优化">
-                <span class="iconfont-archer">&#xe606;</span>
-                电量优化
             </span>
             <span class="sidebar-tag-name" data-tags="ANR分析">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1400,9 +1376,9 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 页面响应
             </span>
-            <span class="sidebar-tag-name" data-tags="Binder">
+            <span class="sidebar-tag-name" data-tags="电量优化">
                 <span class="iconfont-archer">&#xe606;</span>
-                Binder
+                电量优化
             </span>
             <span class="sidebar-tag-name" data-tags="SQL">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1432,6 +1408,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 heapprofd
             </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
             <span class="sidebar-tag-name" data-tags="GPU">
                 <span class="iconfont-archer">&#xe606;</span>
                 GPU
@@ -1447,10 +1427,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Audio">
                 <span class="iconfont-archer">&#xe606;</span>
                 Audio
-            </span>
-            <span class="sidebar-tag-name" data-tags="Field">
-                <span class="iconfont-archer">&#xe606;</span>
-                Field
             </span>
             <span class="sidebar-tag-name" data-tags="Input">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1468,25 +1444,33 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 DelayLoad
             </span>
-            <span class="sidebar-tag-name" data-tags="程序员">
-                <span class="iconfont-archer">&#xe606;</span>
-                程序员
-            </span>
             <span class="sidebar-tag-name" data-tags="HashMap">
                 <span class="iconfont-archer">&#xe606;</span>
                 HashMap
             </span>
-            <span class="sidebar-tag-name" data-tags="Singleton">
+            <span class="sidebar-tag-name" data-tags="程序员">
                 <span class="iconfont-archer">&#xe606;</span>
-                Singleton
+                程序员
             </span>
             <span class="sidebar-tag-name" data-tags="Nexus">
                 <span class="iconfont-archer">&#xe606;</span>
                 Nexus
             </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
             <span class="sidebar-tag-name" data-tags="OpenClaw">
                 <span class="iconfont-archer">&#xe606;</span>
                 OpenClaw
+            </span>
+            <span class="sidebar-tag-name" data-tags="效率工具">
+                <span class="iconfont-archer">&#xe606;</span>
+                效率工具
+            </span>
+            <span class="sidebar-tag-name" data-tags="本地模型">
+                <span class="iconfont-archer">&#xe606;</span>
+                本地模型
             </span>
             <span class="sidebar-tag-name" data-tags="AI Agent">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1504,14 +1488,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Android Performance
             </span>
-            <span class="sidebar-tag-name" data-tags="效率工具">
-                <span class="iconfont-archer">&#xe606;</span>
-                效率工具
-            </span>
-            <span class="sidebar-tag-name" data-tags="本地模型">
-                <span class="iconfont-archer">&#xe606;</span>
-                本地模型
-            </span>
             <span class="sidebar-tag-name" data-tags="Gracker">
                 <span class="iconfont-archer">&#xe606;</span>
                 Gracker
@@ -1519,10 +1495,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="设计规范">
                 <span class="iconfont-archer">&#xe606;</span>
                 设计规范
-            </span>
-            <span class="sidebar-tag-name" data-tags="Compose">
-                <span class="iconfont-archer">&#xe606;</span>
-                Compose
             </span>
             <span class="sidebar-tag-name" data-tags="Kotlin">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1536,6 +1508,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 卡顿
             </span>
+            <span class="sidebar-tag-name" data-tags="Overdraw">
+                <span class="iconfont-archer">&#xe606;</span>
+                Overdraw
+            </span>
             <span class="sidebar-tag-name" data-tags="读书笔记">
                 <span class="iconfont-archer">&#xe606;</span>
                 读书笔记
@@ -1544,10 +1520,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 程序员的修炼
             </span>
-            <span class="sidebar-tag-name" data-tags="测试">
-                <span class="iconfont-archer">&#xe606;</span>
-                测试
-            </span>
             <span class="sidebar-tag-name" data-tags="设计原则">
                 <span class="iconfont-archer">&#xe606;</span>
                 设计原则
@@ -1555,6 +1527,10 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="了解你的用户">
                 <span class="iconfont-archer">&#xe606;</span>
                 了解你的用户
+            </span>
+            <span class="sidebar-tag-name" data-tags="测试">
+                <span class="iconfont-archer">&#xe606;</span>
+                测试
             </span>
             <span class="sidebar-tag-name" data-tags="互联网那些事">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1606,21 +1582,21 @@ loading="lazy"             decoding="async"
             <span class="iconfont-archer">&#xe60a;</span>
             随笔
         </span>
-        <span class="sidebar-category-name" data-categories="读书笔记">
-            <span class="iconfont-archer">&#xe60a;</span>
-            读书笔记
-        </span>
         <span class="sidebar-category-name" data-categories="Android">
             <span class="iconfont-archer">&#xe60a;</span>
             Android
         </span>
-        <span class="sidebar-category-name" data-categories="AI">
+        <span class="sidebar-category-name" data-categories="读书笔记">
             <span class="iconfont-archer">&#xe60a;</span>
-            AI
+            读书笔记
         </span>
         <span class="sidebar-category-name" data-categories="Java">
             <span class="iconfont-archer">&#xe60a;</span>
             Java
+        </span>
+        <span class="sidebar-category-name" data-categories="AI">
+            <span class="iconfont-archer">&#xe60a;</span>
+            AI
         </span>
         <span class="sidebar-category-name" data-categories="Android性能优化">
             <span class="iconfont-archer">&#xe60a;</span>

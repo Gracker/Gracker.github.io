@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh,en">
+<html lang="zh-CN">
     <!-- title -->
             <!-- keywords -->
 
@@ -11,13 +11,13 @@
                     <meta name="copyright" content="Gracker">
                       <meta name="keywords" content="Android,Performance,AndroidPerformance,性能,优化,性能优化,Perf,Flutter,Linux,LinuxPerformance,AndroidFramework,Framework,Android Performance,Flutter,Kotlin,Memory,内存,流畅性,卡顿,响应速度,Jank,Smooth,Android Framework,ANR,Crash,Dalvik,ART,Jetpack,Compose,启动优化,Startup,Perfetto,Systrace,RenderThread,Java">
                           <meta name="description" content="Focus On Android Performance">
-                          <meta name="description" content="本文是 Systrace 系列文章的第四篇，主要是对 SystemServer 进行简单介绍，介绍了 SystemServer 中几个比较重要的线程，由于 Input 和 Binder 比较重要，所以单独拿出来讲，在这里就没有再涉及到。 本系列的目的是通过 Systrace 这个工具，从另外一个角度来看待 Android 系统整体的运行，同时也从另外一个角度来对 Framework 进行学习。也许">
+                          <meta name="description" content="2026-10-13 技术更新：保留原有历史截图和代码。文中代码片段已对照 AOSP android-10.0.0_r1，现代差异以 android-16.0.0_r1 为例；这不表示原截图运行的就是这些版本，原始 Trace、ROM 和构建信息并未附上。窗口动画归属、StartingWindow 与线程相互影响的旧说法已在下文修正。  本文是 Systrace 系列文章的第四篇，主要是对 Sy">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Android Systrace 基础知识 - SystemServer 解读">
 <meta property="og:url" content="https://androidperformance.com/2019/06/29/Android-Systrace-SystemServer/index.html">
 <meta property="og:site_name" content="Android Performance">
-<meta property="og:description" content="本文是 Systrace 系列文章的第四篇，主要是对 SystemServer 进行简单介绍，介绍了 SystemServer 中几个比较重要的线程，由于 Input 和 Binder 比较重要，所以单独拿出来讲，在这里就没有再涉及到。 本系列的目的是通过 Systrace 这个工具，从另外一个角度来看待 Android 系统整体的运行，同时也从另外一个角度来对 Framework 进行学习。也许">
-<meta property="og:locale">
+<meta property="og:description" content="2026-10-13 技术更新：保留原有历史截图和代码。文中代码片段已对照 AOSP android-10.0.0_r1，现代差异以 android-16.0.0_r1 为例；这不表示原截图运行的就是这些版本，原始 Trace、ROM 和构建信息并未附上。窗口动画归属、StartingWindow 与线程相互影响的旧说法已在下文修正。  本文是 Systrace 系列文章的第四篇，主要是对 Sy">
+<meta property="og:locale" content="zh_CN">
 <meta property="og:image" content="https://androidperformance.com/images/15811380751710.jpg">
 <meta property="og:image" content="https://androidperformance.com/images/15811380510520.jpg">
 <meta property="og:image" content="https://androidperformance.com/images/15811383348116.jpg">
@@ -41,12 +41,12 @@
 <meta property="og:image" content="https://androidperformance.com/images/15808262588087.jpg">
 <meta property="og:image" content="https://androidperformance.com/images/WechatIMG581.webp">
 <meta property="article:published_time" content="2019-06-29T09:52:52.000Z">
-<meta property="article:modified_time" content="2026-09-19T12:42:43.035Z">
+<meta property="article:modified_time" content="2026-10-15T14:04:16.668Z">
 <meta property="article:author" content="Gracker">
-<meta property="article:tag" content="Startup">
 <meta property="article:tag" content="Android">
-<meta property="article:tag" content="Jank">
 <meta property="article:tag" content="Systrace">
+<meta property="article:tag" content="Startup">
+<meta property="article:tag" content="Jank">
 <meta property="article:tag" content="Performance">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:image" content="https://androidperformance.com/images/15811380751710.jpg">
@@ -116,11 +116,14 @@
                                     <link rel="preload" href="/lib/jquery.min.js" as="script">
                                     <link rel="preload" href="/scripts/main.js" as="script">
                                     <!-- algolia -->
-                                                    <!-- Hreflang Tags -->
-                                                    
-                                                      <link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2019/06/29/Android-Systrace-SystemServer/" />
-                                                      <link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2019/06/29/Android-Systrace-SystemServer/" />
-                                                      <link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2019/06/29/Android-Systrace-SystemServer/" />
+                                                    <!-- Language alternatives share the same route contract as the header. -->
+
+
+<link rel="alternate" hreflang="zh-CN" href="https://androidperformance.com/2019/06/29/Android-Systrace-SystemServer/" />
+
+<link rel="alternate" hreflang="en" href="https://androidperformance.com/en/2019/06/29/Android-Systrace-SystemServer/" />
+
+<link rel="alternate" hreflang="x-default" href="https://androidperformance.com/en/2019/06/29/Android-Systrace-SystemServer/" />
                   <meta name="generator" content="Hexo 6.3.0"><link rel="alternate" href="/atom.xml" title="Android Performance" type="application/atom+xml">
 </head>
 
@@ -148,35 +151,10 @@
         <span class="header-theme-btn header-element" role="button" aria-label="Theme" data-tooltip="Theme">
             <span aria-hidden="true">&#9680;</span>
         </span>
-        <!-- language transition button -->
-        <span class="header-lang-btn header-element" data-tooltip="Language">
-            <a href="javascript:void(0)" onclick="toggleLanguage()" class="lang-text" aria-label="Language">EN</a>
-            <script>
-                // Update language button text based on current path
-                (function() {
-                    var path = window.location.pathname;
-                    var isEn = /^\/en(\/|$)/.test(path);
-                    var langBtn = document.querySelector('.header-lang-btn .lang-text');
-                    if (langBtn) {
-                        langBtn.textContent = isEn ? 'CN' : 'EN';
-                    }
-                })();
-                
-                function toggleLanguage() {
-                    var path = window.location.pathname;
-                    var isEn = /^\/en(\/|$)/.test(path);
-
-                    if (isEn) {
-                        var newPath = path.replace(/^\/en(\/|$)/, '/');
-                        if (newPath === '') newPath = '/';
-                        window.location.href = newPath;
-                    } else {
-                        var suffix = path;
-                        if (suffix === '/') suffix = '';
-                        window.location.href = '/en' + suffix;
-                    }
-                }
-            </script>
+        <!-- A real link works without JavaScript and supports opening a new tab. -->
+        
+        <span class="header-lang-btn header-element" data-tooltip="Read in English">
+            <a href="/en/2019/06/29/Android-Systrace-SystemServer/" class="lang-text" aria-label="Read in English">EN</a>
         </span>
         <!-- home button -->
         <span class="home-link header-element">
@@ -214,12 +192,6 @@
             title="Wechat"
             alt="Wechat"
             src="/assets/donate-wechat.webp"
-        ></img>
-        <img
-            class="donate-popup__content-qrCode"
-            title="Alipay"
-            alt="Alipay"
-            src="/assets/donate-alipay.png"
         ></img>
     </div>
 </div>
@@ -275,16 +247,16 @@ loading="lazy"             decoding="async"
                 Android
             </span>
         </span>
-        <a class="post-tag" href="javascript:void(0);" data-tags="Startup">Startup</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Android">Android</a>
-        <a class="post-tag" href="javascript:void(0);" data-tags="Jank">Jank</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Systrace">Systrace</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Startup">Startup</a>
+        <a class="post-tag" href="javascript:void(0);" data-tags="Jank">Jank</a>
         <a class="post-tag" href="javascript:void(0);" data-tags="Performance">Performance</a>
 </div>
 
                 <!-- 文章字数统计 -->
                     <div class="post-intro-read">
-                        <span>Word count: <span class="post-count word-count">2.2k</span>Reading time: <span class="post-count reading-time">8 min</span></span>
+                        <span>字数统计: <span class="post-count word-count">3.7k</span>阅读时长: <span class="post-count reading-time">14 min</span></span>
                     </div>
                 <div class="post-intro-meta">
                     <!-- 撰写日期 -->
@@ -350,7 +322,10 @@ loading="lazy"             decoding="async"
             <div class="container container-unloaded">
                 <main class="main post-page">
     <article class="article-entry">
-        <p>本文是 Systrace 系列文章的第四篇，主要是对 SystemServer 进行简单介绍，介绍了 SystemServer 中几个比较重要的线程，由于 Input 和 Binder 比较重要，所以单独拿出来讲，在这里就没有再涉及到。</p>
+        <blockquote>
+<p><strong>2026-10-13 技术更新</strong>：保留原有历史截图和代码。文中代码片段已对照 AOSP <code>android-10.0.0_r1</code>，现代差异以 <code>android-16.0.0_r1</code> 为例；这不表示原截图运行的就是这些版本，原始 Trace、ROM 和构建信息并未附上。窗口动画归属、StartingWindow 与线程相互影响的旧说法已在下文修正。</p>
+</blockquote>
+<p>本文是 Systrace 系列文章的第四篇，主要是对 SystemServer 进行简单介绍，介绍了 SystemServer 中几个比较重要的线程，由于 Input 和 Binder 比较重要，所以单独拿出来讲，在这里就没有再涉及到。</p>
 <p>本系列的目的是通过 Systrace 这个工具，从另外一个角度来看待 Android 系统整体的运行，同时也从另外一个角度来对 Framework 进行学习。也许你看了很多讲 Framework 的文章，但是总是记不住代码，或者不清楚其运行的流程，也许从 Systrace 这个图形化的角度，你可以理解的更深入一些。</p>
 <span id="more"></span>
 
@@ -363,6 +338,8 @@ loading="lazy"             decoding="async"
 <li><a href="#Input">Input</a></li>
 <li><a href="#Binder">Binder</a></li>
 <li><a href="#HandlerThread">HandlerThread</a></li>
+<li><a href="#ServiceThread">ServiceThread</a></li>
+<li><a href="#%E7%8E%B0%E4%BB%A3-Android-%E7%9A%84%E5%AF%B9%E5%BA%94%E5%85%B3%E7%B3%BB">现代 Android 的对应关系</a></li>
 <li><a href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2">关于我 &amp;&amp; 博客</a></li>
 </ul>
 <p><a id="series"></a></p>
@@ -390,47 +367,94 @@ loading="lazy"             decoding="async"
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2022/03/13/android-systrace-cpu-state-sleep/">Systrace 线程 CPU 运行状态分析技巧 - Sleep 和 Uninterruptible Sleep 篇</a></li>
 </ol>
 <p><a id="content"></a></p>
-<h1 id="正文"><a href="#正文" class="headerlink" title="正文"></a>正文</h1><p>这篇 SystemServer 文章现在应该和 <a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/">Perfetto 10：Binder 调度与锁竞争</a> 一起读。旧 Systrace 里看 SystemServer，重点是窗口动画、Input、AMS&#x2F;WMS、Binder 调用、锁竞争等长 Slice；Perfetto 里仍然看这些问题，但要同时看 SystemServer 线程、Binder 线程池、调用端 App 线程状态、CPU 调度和锁等待证据。</p>
-<p>新的分析流程是：先找到被 App 等待的 SystemServer 调用，再看 SystemServer 对应线程是在 Running、Runnable、Sleep 还是等锁；如果是 Binder 调用，还要看 Binder 线程池是否排队、调用端是否被同步 Binder 阻塞、CPU 是否被别的高优先级线程占满。这样可以把“SystemServer 慢”拆成窗口动画执行慢、AMS&#x2F;WMS 持锁、Binder 远端慢、CPU 调度慢等具体原因。</p>
+<h1 id="正文"><a href="#正文" class="headerlink" title="正文"></a>正文</h1><p>先区分进程、服务和线程：<code>system_server</code> 承载 AMS、ATMS、WMS 等服务，一个服务的工作可以分布在 Binder 线程和多个 Handler 线程上，并不是“一项服务对应一个线程”。这里的 <code>android.ui</code> 是系统服务使用的线程，不是应用自己的主线程；SurfaceFlinger 则是另一个进程。</p>
+<p>这篇 SystemServer 文章现在应该和 <a target="_blank" rel="noopener" href="https://www.androidperformance.com/2025/11/16/Android-Perfetto-10-Binder/">Perfetto 10：Binder 调度与锁竞争</a> 一起读。旧 Systrace 里看 SystemServer，重点是窗口动画、Input、AMS&#x2F;WMS、Binder 调用、锁竞争等长 Slice；Perfetto 里仍然看这些问题，但要同时看 SystemServer 线程、Binder 线程池、调用端 App 线程状态、CPU 调度和锁等待证据。</p>
+<p>如果问题表现为 App 等待系统调用，先定位对应的 SystemServer 请求，再看服务端线程是在 Running（执行）、Runnable（等待 CPU），还是睡眠&#x2F;阻塞。等锁需要额外证据；对于 Binder 调用，还要检查线程池排队、同步回复等待以及调度和唤醒延迟。这样可以把“SystemServer 慢”拆成窗口动画执行慢、AMS&#x2F;WMS 持锁、Binder 远端慢、CPU 调度慢等具体原因。</p>
 <p><a id="wm-anim"></a></p>
-<h2 id="窗口动画"><a href="#窗口动画" class="headerlink" title="窗口动画"></a>窗口动画</h2><p>Systrace 中的 SystemServer 一个比较重要的地方就是窗口动画，由于窗口归 SystemServer 来管，那么窗口动画也就是由 SystemServer 来进行统一的处理，其中涉及到两个比较重要的线程，Android.Anim 和 Android.Anim.if 这两个线程，这两个线程的基本知识在下面有讲。</p>
-<p>这里我们以<strong>应用启动</strong>为例，查看窗口时如何在两个线程之间进行切换(Android P 里面，应用的启动动画由 Launcher 和应用自己的第一帧组成，之前是在 SystemServer 里面的，现在多任务的动画为了性能部分移到了 Launcher 去实现)</p>
-<p>首先我们点击图标启动应用的时候，由于 App 还在启动，Launcher 首先启动一个 StartingWindow，等 App 的第一帧绘制好了之后，再切换到 App 的窗口动画</p>
+<h2 id="窗口动画"><a href="#窗口动画" class="headerlink" title="窗口动画"></a>窗口动画</h2><p>窗口动画是观察 <code>system_server</code> 的一个入口，但窗口管理、动画计算、应用绘制和最终合成不是同一件事。历史实现中常见 <code>android.anim</code> 与 <code>android.anim.lf</code> 两条线程；后者是小写字母 l、f，不是 <code>Android.Anim.if</code>。部分转场可以由 Launcher 等远端实现参与，不能据此认为所有动画都在这两条线程上执行。</p>
+<p>以点击桌面图标为例，Launcher 发起启动并可能参与动画；系统窗口管理决定是否显示 StartingWindow。AOSP Android 10 的 <a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/base/+/android-10.0.0_r1/services/core/java/com/android/server/wm/AppWindowToken.java">AppWindowToken</a> 负责相关判断并调度 starting surface 创建，并非 Launcher 自行创建应用的 StartingWindow。应用首帧、starting surface 移除和转场播放之间有同步条件，不能简化为所有设备都固定经历“Launcher 动画结束后，切换到 App 窗口动画”。</p>
+<p>下面保留历史案例。前两图分别是 Launcher3（PID 2089）和 Contacts（PID 26196），选区都是 253.986 ms，用来对照 Launcher 动画与应用启动工作；这个选区本身不等于完整启动耗时或输入到首帧延迟。</p>
 <p>Launcher 动画<br><img src="/images/15811380751710.jpg" alt="-w1019"></p>
 <p>此时对应的，App 正在启动<br><img src="/images/15811380510520.jpg" alt="-w1025"></p>
-<p>从上图可以看到，应用第一帧已经准备好了，接下来看对应的 SystemServer ，可以看到应用启动第一帧绘制完成后，动画切换到 App 的 Window 动画</p>
+<p>Contacts 图能看到 activityStart、activityResume 和 Choreographer#doFrame 等阶段。下图继续展示 android.anim 与 android.anim.lf 的活动；图内“应用启动完成&#x2F;切换”的标注保留为当时案例的示意，不能仅凭这几张裁图确认首帧已经物理呈现，也不能推广为所有转场的固定交接流程。</p>
 <p><img src="/images/15811383348116.jpg" alt="-w1236"></p>
 <p><a id="ams"></a></p>
-<h2 id="ActivityManagerService"><a href="#ActivityManagerService" class="headerlink" title="ActivityManagerService"></a>ActivityManagerService</h2><p>AMS 和 WMS 算是 SystemServer 中最繁忙的两个 Service 了，与 AMS 相关的 Trace 一般会用 TRACE_TAG_ACTIVITY_MANAGER 这个 TAG，在 Systrace 中的名字是 ActivityManager</p>
-<p>下面是启动一个新的进程的时候，AMS 的输出<br><img src="/images/15808922537197.jpg" alt="-w826"></p>
-<p>在进程和四大组件的各种场景一般都会有对应的 Trace 点来记录，比如大家熟悉的 ActivityStart、ActivityResume、activityStop 等，这些 Trace 点有一些在应用进程，有一些在 SystemServer 进程，所以大家在看 Activity 相关的代码逻辑的时候，需要不断在这两个进程之间进行切换，这样才能从一个整体的角度来看应用的状态变化和 SystemServer 在其中起到的作用。<br><img src="/images/15808919921881.jpg" alt="-w660"></p>
+<h2 id="ActivityManagerService"><a href="#ActivityManagerService" class="headerlink" title="ActivityManagerService"></a>ActivityManagerService</h2><p>AMS 和 WMS 是常见分析入口，但“最繁忙”取决于场景。Activity&#x2F;进程管理相关埋点常用 <code>TRACE_TAG_ACTIVITY_MANAGER</code>，atrace 类别名是 <code>am</code>；旧图的 ActivityManager 轨道不表示这些工作只发生在一个名为 AMS 的线程上。Android 10 已有独立的 <a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/base/+/android-10.0.0_r1/services/core/java/com/android/server/wm/ActivityTaskManagerService.java">ActivityTaskManagerService</a> 管理 Activity 及任务等容器，不能把新版 Activity 管理全部归为 AMS。</p>
+<p>下面是历史图中的 <code>Start proc: sample.tencent.matrix</code>：Wall Duration 为 14.962 ms，CPU Duration 为 0.678 ms。它是该片段的记录，不是应用完整冷启动时间，也不是说 CPU 执行了 14.962 ms。<br><img src="/images/15808922537197.jpg" alt="-w826"></p>
+<p>在进程和四大组件的各种场景一般都会有对应的 Trace 点来记录，比如大家熟悉的 activityStart、activityResume、activityStop 等，这些 Trace 点有一些在应用进程，有一些在 SystemServer 进程，所以大家在看 Activity 相关的代码逻辑的时候，需要不断在这两个进程之间进行切换，这样才能从一个整体的角度来看应用的状态变化和 SystemServer 在其中起到的作用。<br><img src="/images/15808919921881.jpg" alt="-w660"></p>
 <p><a id="wms"></a></p>
-<h2 id="WindowManagerService"><a href="#WindowManagerService" class="headerlink" title="WindowManagerService"></a>WindowManagerService</h2><p>与 WMS 相关的 Trace 一般会用 TRACE_TAG_WINDOW_MANAGER 这个 TAG，在 Systrace 中 WindowManagerService 在 SystemServer 中多在对应的 Binder 中出现，比如下面应用启动的时候，relayoutWindow 的 Trace 输出</p>
+<h2 id="WindowManagerService"><a href="#WindowManagerService" class="headerlink" title="WindowManagerService"></a>WindowManagerService</h2><p>WMS 埋点常用 <code>TRACE_TAG_WINDOW_MANAGER</code>，atrace 类别名是 <code>wm</code>。应用通过 Binder 请求窗口操作时，服务端入口可出现在 system_server 的 Binder 线程上；布局、动画或后续任务也可能转到 Handler 线程执行。下图展示 Binder:925_9 上的 relayoutWindow，不能据此把 WMS 等同于 Binder 线程池。</p>
 <p><img src="/images/15808923853151.jpg" alt="-w957"></p>
-<p>在 Window 的各种场景一般都会有对应的 Trace 点来记录，比如大家熟悉的 relayoutWIndow、performLayout、prepareToDisplay 等<br><img src="/images/15808918520410.jpg" alt="-w659"></p>
+<p>在 Window 的各种场景一般都会有对应的 Trace 点来记录，比如大家熟悉的 relayoutWindow、performLayout、prepareToDisplay 等<br><img src="/images/15808918520410.jpg" alt="-w659"></p>
 <p><a id="input"></a></p>
-<h2 id="Input"><a href="#Input" class="headerlink" title="Input"></a>Input</h2><p>Input 是 SystemServer 线程里面非常重要的一部分，主要是由 InputReader 和 InputDispatcher 这两个 Native 线程组成，关于这一部分在 <a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/11/04/Android-Systrace-Input/">Systrace 基础知识 - Input 解读</a> 里面已经详细讲过，这里就不再详细讲了</p>
+<h2 id="Input"><a href="#Input" class="headerlink" title="Input"></a>Input</h2><p>输入系统涉及设备读取、事件分发、窗口路由和应用消费等环节。InputReader 和 InputDispatcher 是 system_server 中两条重要的 Native 线程，但不是整条输入链路的全部。关于这一部分在 <a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/11/04/Android-Systrace-Input/">Systrace 基础知识 - Input 解读</a> 里面已经详细讲过，这里就不再详细讲了</p>
 <p><img src="/images/15808245020456.jpg" alt="-w725"></p>
 <p><a id="binder"></a></p>
-<h2 id="Binder"><a href="#Binder" class="headerlink" title="Binder"></a>Binder</h2><p>SystemServer 由于提供大量的基础服务，所以进程间的通信非常繁忙，且大部分通信都是通过 Binder ，所以 Binder 在 SystemServer 中的作用非常关键，很多时候当后台有大量的 App 存在的时候，SystemServer 就会由于 Binder 通信和锁竞争，导致系统或者 App 卡顿。关于这一部分在 <a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/12/06/Android-Systrace-Binder/">Binder 和锁竞争解读</a> 里面已经详细讲过，这里就不再详细讲了</p>
+<h2 id="Binder"><a href="#Binder" class="headerlink" title="Binder"></a>Binder</h2><p>system_server 提供许多 Binder 服务。同步 Binder 等待、线程池排队和共享锁竞争都可能扩大响应时间，但后台应用数量本身不是根因证据。<code>oneway</code> 不等待同步回复，也仍有排队与执行成本。应沿具体调用寻找对端和持锁者，不能看到 Binder 线程多就判定系统卡顿。关于这一部分在 <a target="_blank" rel="noopener" href="https://www.androidperformance.com/2019/12/06/Android-Systrace-Binder/">Binder 和锁竞争解读</a> 里面已经详细讲过，这里就不再详细讲了</p>
 <p><img src="/images/15808245356047.jpg" alt="-w1028"></p>
 <p><a id="handlerthreads"></a></p>
-<h2 id="HandlerThread"><a href="#HandlerThread" class="headerlink" title="HandlerThread"></a>HandlerThread</h2><h3 id="BackgroundThread"><a href="#BackgroundThread" class="headerlink" title="BackgroundThread"></a>BackgroundThread</h3><p>com&#x2F;android&#x2F;internal&#x2F;os&#x2F;BackgroundThread.java</p>
+<h2 id="HandlerThread"><a href="#HandlerThread" class="headerlink" title="HandlerThread"></a>HandlerThread</h2><p>以下构造器和两个业务片段对照 AOSP <code>android-10.0.0_r1</code>。它们是 Framework 内部实现，不是应用可依赖的公开 API；截图里的搜索结果只代表当时源码，不是各版本完整调用清单。</p>
+<h3 id="BackgroundThread"><a href="#BackgroundThread" class="headerlink" title="BackgroundThread"></a>BackgroundThread</h3><p>com&#x2F;android&#x2F;internal&#x2F;os&#x2F;BackgroundThread.java</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="title function_">BackgroundThread</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="built_in">super</span>(<span class="string">&quot;android.bg&quot;</span>, android.os.Process.THREAD_PRIORITY_BACKGROUND);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
 <p>Systrace 中的 BackgroundThread<br><img src="/images/15808252037825.jpg" alt="-w1082"></p>
-<p>BackgroundThread 在系统中使用比较多，许多对性能没有要求的任务，一般都会放到 BackgroundThread 中去执行</p>
+<p>BackgroundThread 是每个使用它的进程中的共享单例 HandlerThread，适合可延后的后台任务，不是“对性能完全没有要求”。同一个队列里一项耗时任务仍会拖延后续任务；识别时也要看 PID，不能仅凭 android.bg 这个名字认定它来自 system_server。</p>
 <p><img src="/images/15808271946061.jpg" alt="-w654"></p>
-<h2 id="ServiceThread"><a href="#ServiceThread" class="headerlink" title="ServiceThread"></a>ServiceThread</h2><p>ServiceThread 继承自 HandlerThread ，下面介绍的几个工作线程都是继承自 ServiceThread ，分别实现不同的功能，根据线程功能不同，其线程优先级也不同：UIThread、IoThread、DisplayThread、AnimationThread、FgThread、SurfaceAnimationThread</p>
-<p>每个 Thread 都有自己的 Looper 、Thread 和 MessageQueue，互相不会影响。Android 系统根据功能，会使用不同的 Thread 来完成。</p>
+<h2 id="ServiceThread"><a href="#ServiceThread" class="headerlink" title="ServiceThread"></a>ServiceThread</h2><p><a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/base/+/android-10.0.0_r1/services/core/java/com/android/server/ServiceThread.java">ServiceThread</a> 继承自 HandlerThread。下面的 UiThread、IoThread、DisplayThread、AnimationThread、FgThread 和 SurfaceAnimationThread 分别承担不同工作，并设置了相应的初始优先级。</p>
+<p>每个已启动的 HandlerThread 有自己的 Looper&#x2F;MessageQueue，通常串行分发该队列中的任务。这可以分开排队，但不能隔离共享锁、同步 Binder、CPU 竞争或跨线程等待，因此仍会互相影响。ServiceThread 的 <code>allowIo=false</code> 在这个版本中初始化 StrictMode 线程策略，并不是内核层禁止所有 I&#x2F;O；<code>allowIo=true</code> 也不代表任务自动变成异步或并行。</p>
+<p>构造器中的 priority 是 Android&#x2F;Linux nice 优先级，不是 <code>java.lang.Thread</code> 的 1—10 优先级。按 Android 10 的 <a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/base/+/android-10.0.0_r1/core/java/android/os/Process.java">Process 常量</a>，数值越小通常优先级越高；线程组&#x2F;cpuset、调度策略及后续 boost 也会影响实际运行，构造器值不等于运行期间永远不变。</p>
+<table>
+<thead>
+<tr>
+<th>线程名</th>
+<th>构造器优先级</th>
+<th>阅读时的边界</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>android.bg</td>
+<td>BACKGROUND &#x3D; 10</td>
+<td>可延后任务，共享串行队列</td>
+</tr>
+<tr>
+<td>android.ui</td>
+<td>FOREGROUND &#x3D; -2</td>
+<td>系统服务 UI 线程，非 App 主线程</td>
+</tr>
+<tr>
+<td>android.io</td>
+<td>DEFAULT &#x3D; 0</td>
+<td>I&#x2F;O 相关工作，非并发线程池</td>
+</tr>
+<tr>
+<td>android.display</td>
+<td>DISPLAY + 1 &#x3D; -3</td>
+<td>比 -4 的默认动画优先级低一级，非 SurfaceFlinger</td>
+</tr>
+<tr>
+<td>android.anim</td>
+<td>DISPLAY &#x3D; -4</td>
+<td>历史 WindowAnimator 等工作</td>
+</tr>
+<tr>
+<td>android.fg</td>
+<td>DEFAULT &#x3D; 0</td>
+<td>名称不表示 nice 为 FOREGROUND</td>
+</tr>
+<tr>
+<td>android.anim.lf</td>
+<td>DISPLAY &#x3D; -4</td>
+<td>部分 Surface 动画，仍可能等待或竞争</td>
+</tr>
+</tbody></table>
 <h3 id="UiThread"><a href="#UiThread" class="headerlink" title="UiThread"></a>UiThread</h3><p>com&#x2F;android&#x2F;server&#x2F;UiThread.java</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="title function_">UiThread</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="built_in">super</span>(<span class="string">&quot;android.ui&quot;</span>, Process.THREAD_PRIORITY_FOREGROUND, <span class="literal">false</span> <span class="comment">/*allowIo*/</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
-<p>Systrace 中的 UiThread<br><img src="/images/15808252975757.jpg" alt="-w1049"></p>
-<p>UiThread 被使用的地方如下，具体的功能可以自己去源码里面查看，关键字是 UiThread.get()<br><img src="/images/15808258949148.jpg" alt="-w650"></p>
+<p>Systrace 中的 UiThread。下面的 UiHandler 片段 Wall Duration 为 39.383 ms，内部能看到 monitor contention；Self Time 0.194 ms 不是整段 CPU 时间，不能据总跨度直接认定 UI 线程一直在执行。<br><img src="/images/15808252975757.jpg" alt="-w1049"></p>
+<p>UiThread 是系统服务共享的 UI 工作线程，既不是 system_server 主线程，也不是任意 App 的主线程。下面的搜索图包含 AMS、PreBootBroadcaster 和 ATMS 的调用点；同一 Looper 上的多个服务任务仍需串行处理。具体功能可以按相应版本搜索 UiThread.get()。<br><img src="/images/15808258949148.jpg" alt="-w650"></p>
 <h3 id="IoThread"><a href="#IoThread" class="headerlink" title="IoThread"></a>IoThread</h3><p>com&#x2F;android&#x2F;server&#x2F;IoThread.java</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="title function_">IoThread</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="built_in">super</span>(<span class="string">&quot;android.io&quot;</span>, android.os.Process.THREAD_PRIORITY_DEFAULT, <span class="literal">true</span> <span class="comment">/*allowIo*/</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-<p>IoThread 被使用的地方如下，具体的功能可以自己去源码里面查看，关键字是 IoThread.get()<br><img src="/images/15808257964346.jpg" alt="-w654"></p>
+<p>IoThread 用来承载相应服务的 I&#x2F;O 相关任务，但它仍是一条串行 HandlerThread，不是无限并发 I&#x2F;O 池。下面是历史调用点，具体版本可搜索 IoThread.get()。<br><img src="/images/15808257964346.jpg" alt="-w654"></p>
 <h3 id="DisplayThread"><a href="#DisplayThread" class="headerlink" title="DisplayThread"></a>DisplayThread</h3><p>com&#x2F;android&#x2F;server&#x2F;DisplayThread.java</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="title function_">DisplayThread</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="comment">// DisplayThread runs important stuff, but these are not as important as things running in</span></span><br><span class="line">    <span class="comment">// AnimationThread. Thus, set the priority to one lower.</span></span><br><span class="line">    <span class="built_in">super</span>(<span class="string">&quot;android.display&quot;</span>, Process.THREAD_PRIORITY_DISPLAY + <span class="number">1</span>, <span class="literal">false</span> <span class="comment">/*allowIo*/</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
@@ -440,29 +464,39 @@ loading="lazy"             decoding="async"
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="title function_">AnimationThread</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="built_in">super</span>(<span class="string">&quot;android.anim&quot;</span>, THREAD_PRIORITY_DISPLAY, <span class="literal">false</span> <span class="comment">/*allowIo*/</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
 <p>Systrace 中的 AnimationThread<br><img src="/images/15808255124784.jpg" alt="-w902"></p>
-<p>AnimationThread 在源码中的使用，可以看到 WindowAnimator 的动画执行也是在 AnimationThread 线程中的，Android P 增加了一个 SurfaceAnimationThread 来分担 AnimationThread 的部分工作，来提高 WindowAnimation 的动画性能</p>
+<p>Android 10 的 WindowAnimator 在 AnimationThread 上创建 Choreographer 并调度帧回调，相关路径仍会访问 WMS 全局锁。Android 9 &#x2F; P 中已经存在 SurfaceAnimationThread，把部分 Surface 动画工作放到另一线程处理；它不保证所有窗口动画都免于锁竞争或不再卡顿。</p>
 <p><img src="/images/15808260775808.jpg" alt="-w657"></p>
 <h3 id="FgThread"><a href="#FgThread" class="headerlink" title="FgThread"></a>FgThread</h3><p>com&#x2F;android&#x2F;server&#x2F;FgThread.java</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="title function_">FgThread</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="built_in">super</span>(<span class="string">&quot;android.fg&quot;</span>, android.os.Process.THREAD_PRIORITY_DEFAULT, <span class="literal">true</span> <span class="comment">/*allowIo*/</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
 <p>Systrace 中的 FgThread<br><img src="/images/15808253825450.jpg" alt="-w1018"></p>
-<p>FgThread 在源码中的使用，可以自己搜一下，下面是具体的使用的一个例子</p>
+<p>FgThread 用于不适合落入后台调度限制的串行任务，名称中的 fg 不意味着其 nice 值就是 THREAD_PRIORITY_FOREGROUND：下面构造器使用的是 DEFAULT。以下 UserController 片段来自 Android 10，目的是将用户密钥清理与相关解锁流程串行化，避免数据损坏；这里的 mLock 检查之后已释放锁，再调用 lockUserKey。</p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line">FgThread.getHandler().post(() -&gt; &#123;</span><br><span class="line">    <span class="keyword">synchronized</span> (mLock) &#123;</span><br><span class="line">        <span class="keyword">if</span> (mStartedUsers.get(userIdToLockF) != <span class="literal">null</span>) &#123;</span><br><span class="line">            Slog.w(TAG, <span class="string">&quot;User was restarted, skipping key eviction&quot;</span>);</span><br><span class="line">            <span class="keyword">return</span>;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">try</span> &#123;</span><br><span class="line">        mInjector.getStorageManager().lockUserKey(userIdToLockF);</span><br><span class="line">    &#125; <span class="keyword">catch</span> (RemoteException re) &#123;</span><br><span class="line">        <span class="keyword">throw</span> re.rethrowAsRuntimeException();</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">if</span> (userIdToLockF == userId) &#123;</span><br><span class="line">        <span class="keyword">for</span> (<span class="keyword">final</span> KeyEvictedCallback callback : keyEvictedCallbacks) &#123;</span><br><span class="line">            callback.keyEvicted(userId);</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;);</span><br></pre></td></tr></table></figure>
 
-<h3 id="SurfaceAnimationThread"><a href="#SurfaceAnimationThread" class="headerlink" title="SurfaceAnimationThread"></a>SurfaceAnimationThread</h3><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">com/android/server/wm/SurfaceAnimationThread.java</span><br><span class="line"><span class="keyword">private</span> <span class="title function_">SurfaceAnimationThread</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="built_in">super</span>(<span class="string">&quot;android.anim.lf&quot;</span>, THREAD_PRIORITY_DISPLAY, <span class="literal">false</span> <span class="comment">/*allowIo*/</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h3 id="SurfaceAnimationThread"><a href="#SurfaceAnimationThread" class="headerlink" title="SurfaceAnimationThread"></a>SurfaceAnimationThread</h3><p><code>com/android/server/wm/SurfaceAnimationThread.java</code></p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="title function_">SurfaceAnimationThread</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="built_in">super</span>(<span class="string">&quot;android.anim.lf&quot;</span>, THREAD_PRIORITY_DISPLAY, <span class="literal">false</span> <span class="comment">/*allowIo*/</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
 <p>Systrace 中的 SurfaceAnimationThread<br><img src="/images/15808254715766.jpg" alt="-w1148"></p>
 <p>SurfaceAnimationThread 的名字叫 android.anim.lf ， 与 android.anim 有区别，<br><img src="/images/15808262588087.jpg" alt="-w657"></p>
-<p>这个 Thread 主要是执行窗口动画，用于分担 android.anim 线程的一部分动画工作，减少由于锁导致的窗口动画卡顿问题，具体的内容可以看这篇文章：<a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/44864987">Android P——LockFreeAnimation</a></p>
+<p>该线程执行部分 Surface 动画工作，减少对 android.anim&#x2F;WMS 路径的依赖。“LockFreeAnimation”不能理解为代码完全没有锁：Android 10 的 SurfaceAnimationRunner 仍有 mLock 和 mCancelLock，且结束回调会回到 AnimationThread。历史延伸阅读：<a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/44864987">Android P——LockFreeAnimation</a></p>
 <figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line">SurfaceAnimationRunner(<span class="meta">@Nullable</span> AnimationFrameCallbackProvider callbackProvider,</span><br><span class="line">        AnimatorFactory animatorFactory, Transaction frameTransaction,</span><br><span class="line">        PowerManagerInternal powerManagerInternal) &#123;</span><br><span class="line">    SurfaceAnimationThread.getHandler().runWithScissors(() -&gt; mChoreographer = getSfInstance(),</span><br><span class="line">            <span class="number">0</span> <span class="comment">/* timeout */</span>);</span><br><span class="line">    mFrameTransaction = frameTransaction;</span><br><span class="line">    mAnimationHandler = <span class="keyword">new</span> <span class="title class_">AnimationHandler</span>();</span><br><span class="line">    mAnimationHandler.setProvider(callbackProvider != <span class="literal">null</span></span><br><span class="line">            ? callbackProvider</span><br><span class="line">            : <span class="keyword">new</span> <span class="title class_">SfVsyncFrameCallbackProvider</span>(mChoreographer));</span><br><span class="line">    mAnimatorFactory = animatorFactory != <span class="literal">null</span></span><br><span class="line">            ? animatorFactory</span><br><span class="line">            : SfValueAnimator::<span class="keyword">new</span>;</span><br><span class="line">    mPowerManagerInternal = powerManagerInternal;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
 
+<p>上面的 SurfaceAnimationRunner 构造器通过 <code>runWithScissors</code> 在 android.anim.lf 上取得该线程的 Choreographer。<code>getSfInstance()</code> 表示这里使用 SF Vsync 来源的 Choreographer，不表示 Java 动画代码跑进了 SurfaceFlinger 进程；它最终仍需提交 SurfaceControl 事务，由显示链路处理。</p>
+<h2 id="现代-Android-的对应关系"><a href="#现代-Android-的对应关系" class="headerlink" title="现代 Android 的对应关系"></a>现代 Android 的对应关系</h2><p>以 AOSP <code>android-16.0.0_r1</code> 为例，文中这些线程类仍存在，构造器的基本命名&#x2F;优先级也仍可对照；但不能只凭线程名推断整套窗口动画架构没有变化。<code>ServiceThread</code> 与 <code>FgThread</code> 的源码已在 <code>core/java/com/android/server/</code>，其余相关类仍需按各自路径查找。</p>
+<ul>
+<li><strong>Activity 与窗口管理</strong>：结合 AMS、ATMS、WMS 的具体入口和调用线程，不按服务名猜线程。用 trace 中的 PID&#x2F;TID 和 Binder 关联确认请求、等待和返回。</li>
+<li><strong>StartingWindow</strong>：Android 16 的 <a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/services/core/java/com/android/server/wm/StartingSurfaceController.java">StartingSurfaceController</a> 通过 TaskOrganizerController 请求 starting window，不沿用“Launcher 自行创建”的解释。</li>
+<li><strong>转场动画</strong>：启用 Shell transitions 时，<a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/services/core/java/com/android/server/wm/TransitionController.java">TransitionController</a> 与 WM Shell 的 <a target="_blank" rel="noopener" href="https://android.googlesource.com/platform/frameworks/base/+/android-16.0.0_r1/libs/WindowManager/Shell/src/com/android/wm/shell/transition/Transitions.java">Transitions</a> 协作，并可交给远端处理。要查看实际的 Shell&#x2F;Launcher&#x2F;SystemUI 进程及其线程，不能只盯 system_server 的 android.anim.lf。</li>
+<li><strong>图形状态与时序</strong>：Perfetto 用于关联调度、Binder 和已采集的帧数据；需要确认窗口&#x2F;layer、事务、转场参与者时，可配合 <a target="_blank" rel="noopener" href="https://source.android.com/docs/core/graphics/winscope/overview">Winscope</a>。相应数据源和权限需要单独配置，旧截图不会自动获得这些信息。</li>
+</ul>
+<p>判断瓶颈时分清 Wall Duration、CPU Duration 与 Self Time：前者是片段跨度，CPU 时间要依调度数据统计，Self Time 通常是扣除嵌套片段后的跨度。三者不能互换。找到等待者后还要找实际持锁者或 Binder 对端；只看到长片段、Sleep 或一组后台应用，都不足以确认根因。</p>
 <p><a id="about"></a></p>
 <h1 id="关于我-amp-amp-博客"><a href="#关于我-amp-amp-博客" class="headerlink" title="关于我 &amp;&amp; 博客"></a>关于我 &amp;&amp; 博客</h1><p>下面是个人的介绍和相关的链接，期望与同行的各位多多交流，三人行，则必有我师!</p>
 <ol>
 <li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/about/">博主个人介绍</a> ：里面有个人的微信和微信群链接。</li>
 <li><a href="https://androidperformance.com/2019/12/01/BlogMap/">本博客内容导航</a> ：个人博客内容的一个导航。</li>
 <li><a href="https://androidperformance.com/2018/05/07/Android-performance-optimization-skills-and-tools/">个人整理和搜集的优秀博客文章 - Android 性能优化必知必会</a> ：欢迎大家自荐和推荐 （微信私聊即可）</li>
-<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a> ： 欢迎加入，多谢支持～</li>
+<li><a target="_blank" rel="noopener" href="https://www.androidperformance.com/2023/12/30/the-performance/">Android性能优化知识星球</a>：付费社群已于 2026 年停止运营，不再招收新成员；此处保留历史介绍。</li>
 </ol>
 <blockquote>
 <p><strong>一个人可以走的更快 , 一群人可以走的更远</strong></p>
@@ -472,11 +506,11 @@ loading="lazy"             decoding="async"
     </article>
     <!-- license -->
         <div class="license-wrapper">
-            <p>Author：<a href="https://androidperformance.com">Gracker</a>
-            <p>Link：<a href="https://androidperformance.com/2019/06/29/Android-Systrace-SystemServer/">https://androidperformance.com/2019/06/29/Android-Systrace-SystemServer/</a>
-            <p>Publish date：<a href="https://androidperformance.com/2019/06/29/Android-Systrace-SystemServer/">June 29th 2019, 5:52:52 pm</a>
-            <p>Update date：<a href="https://androidperformance.com/2019/06/29/Android-Systrace-SystemServer/">September 19th 2026, 8:42:43 pm</a>
-            <p>License：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
+            <p>原文作者：<a href="https://androidperformance.com">Gracker</a>
+            <p>原文链接：<a href="https://androidperformance.com/2019/06/29/Android-Systrace-SystemServer/">https://androidperformance.com/2019/06/29/Android-Systrace-SystemServer/</a>
+            <p>发表日期：<a href="https://androidperformance.com/2019/06/29/Android-Systrace-SystemServer/">June 29th 2019, 5:52:52 pm</a>
+            <p>更新日期：<a href="https://androidperformance.com/2019/06/29/Android-Systrace-SystemServer/">October 15th 2026, 10:04:16 pm</a>
+            <p>版权声明：本文采用<a rel="license noopener" target="_blank" href="http://creativecommons.org/licenses/by-nc/4.0/">知识共享署名-非商业性使用 4.0 国际许可协议</a>进行许可</p>
         </div>
     <!-- paginator -->
     <ul class="post-paginator">
@@ -552,7 +586,7 @@ loading="lazy"             decoding="async"
                 <div class="toc-catalog">
                     <span class="iconfont-archer catalog-icon">&#xe613;</span><span>CATALOG</span>
                 </div>
-                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%9C%AC%E6%96%87%E7%9B%AE%E5%BD%95"><span class="toc-number">1.</span> <span class="toc-text">本文目录</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0%E7%9B%AE%E5%BD%95"><span class="toc-number"></span> <span class="toc-text">系列文章目录</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E6%AD%A3%E6%96%87"><span class="toc-number"></span> <span class="toc-text">正文</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%AA%97%E5%8F%A3%E5%8A%A8%E7%94%BB"><span class="toc-number">1.</span> <span class="toc-text">窗口动画</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#ActivityManagerService"><span class="toc-number">2.</span> <span class="toc-text">ActivityManagerService</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#WindowManagerService"><span class="toc-number">3.</span> <span class="toc-text">WindowManagerService</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Input"><span class="toc-number">4.</span> <span class="toc-text">Input</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Binder"><span class="toc-number">5.</span> <span class="toc-text">Binder</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#HandlerThread"><span class="toc-number">6.</span> <span class="toc-text">HandlerThread</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#BackgroundThread"><span class="toc-number">6.1.</span> <span class="toc-text">BackgroundThread</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#ServiceThread"><span class="toc-number">7.</span> <span class="toc-text">ServiceThread</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#UiThread"><span class="toc-number">7.1.</span> <span class="toc-text">UiThread</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#IoThread"><span class="toc-number">7.2.</span> <span class="toc-text">IoThread</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#DisplayThread"><span class="toc-number">7.3.</span> <span class="toc-text">DisplayThread</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#AnimationThread"><span class="toc-number">7.4.</span> <span class="toc-text">AnimationThread</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#FgThread"><span class="toc-number">7.5.</span> <span class="toc-text">FgThread</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#SurfaceAnimationThread"><span class="toc-number">7.6.</span> <span class="toc-text">SurfaceAnimationThread</span></a></li></ol></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number"></span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a>
+                <ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E6%9C%AC%E6%96%87%E7%9B%AE%E5%BD%95"><span class="toc-number">1.</span> <span class="toc-text">本文目录</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%B3%BB%E5%88%97%E6%96%87%E7%AB%A0%E7%9B%AE%E5%BD%95"><span class="toc-number"></span> <span class="toc-text">系列文章目录</span></a></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E6%AD%A3%E6%96%87"><span class="toc-number"></span> <span class="toc-text">正文</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%AA%97%E5%8F%A3%E5%8A%A8%E7%94%BB"><span class="toc-number">1.</span> <span class="toc-text">窗口动画</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#ActivityManagerService"><span class="toc-number">2.</span> <span class="toc-text">ActivityManagerService</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#WindowManagerService"><span class="toc-number">3.</span> <span class="toc-text">WindowManagerService</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Input"><span class="toc-number">4.</span> <span class="toc-text">Input</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#Binder"><span class="toc-number">5.</span> <span class="toc-text">Binder</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#HandlerThread"><span class="toc-number">6.</span> <span class="toc-text">HandlerThread</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#BackgroundThread"><span class="toc-number">6.1.</span> <span class="toc-text">BackgroundThread</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#ServiceThread"><span class="toc-number">7.</span> <span class="toc-text">ServiceThread</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#UiThread"><span class="toc-number">7.1.</span> <span class="toc-text">UiThread</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#IoThread"><span class="toc-number">7.2.</span> <span class="toc-text">IoThread</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#DisplayThread"><span class="toc-number">7.3.</span> <span class="toc-text">DisplayThread</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#AnimationThread"><span class="toc-number">7.4.</span> <span class="toc-text">AnimationThread</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#FgThread"><span class="toc-number">7.5.</span> <span class="toc-text">FgThread</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#SurfaceAnimationThread"><span class="toc-number">7.6.</span> <span class="toc-text">SurfaceAnimationThread</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%8E%B0%E4%BB%A3-Android-%E7%9A%84%E5%AF%B9%E5%BA%94%E5%85%B3%E7%B3%BB"><span class="toc-number">8.</span> <span class="toc-text">现代 Android 的对应关系</span></a></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E6%88%91-amp-amp-%E5%8D%9A%E5%AE%A2"><span class="toc-number"></span> <span class="toc-text">关于我 &amp;&amp; 博客</span></a>
             </div>
         <!-- sidebar -->
         <div class="sidebar sidebar-hide">
@@ -703,14 +737,19 @@ loading="lazy"             decoding="async"
         
         
         
+        
     <div class="total-and-search">
         <div class="total-archive">
-        Total : 139
+        Total : 140
         </div>
     </div>
     <div class="post-archive">
             <div class="archive-year"> 2026 </div>
             <ul class="year-list">
+        <li class="archive-post-item">
+            <span class="archive-post-date">10/06</span>
+            <a class="archive-post-title" href="/2026/10/06/SmartPerfetto-v1.15.1-Release-Notes/">SmartPerfetto v1.15.1 更新说明</a>
+        </li>
         <li class="archive-post-item">
             <span class="archive-post-date">09/19</span>
             <a class="archive-post-title" href="/2026/09/19/SmartPerfetto-v1.12.0-Release-Notes/">SmartPerfetto v1.12.0 更新说明</a>
@@ -897,11 +936,11 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/07</span>
-            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
+            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/07</span>
-            <a class="archive-post-title" href="/2022/01/07/Techniques-Philosophy-and-Tools-for-Android-Performance-Optimization/">Techniques, Philosophy, and Tools for Android Performance Optimization</a>
+            <a class="archive-post-title" href="/2022/01/07/The-Performace-1-Performance-Tools/">Android 性能优化的术、道、器</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/03</span>
@@ -1254,7 +1293,7 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">02/04</span>
-            <a class="archive-post-title" href="/2015/02/04/build-rom-for-nexus5/">为 Nexus5 编译 AndroidL 固件</a>
+            <a class="archive-post-title" href="/2015/02/04/build-rom-for-nexus5/">为 Nexus 5 编译 Android Lollipop 固件</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/30</span>
@@ -1266,14 +1305,14 @@ loading="lazy"             decoding="async"
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">01/13</span>
-            <a class="archive-post-title" href="/2015/01/13/android-performance-optimization-overdraw-2/">Android 性能优化之过渡绘制 - 实战篇</a>
+            <a class="archive-post-title" href="/2015/01/13/android-performance-optimization-overdraw-2/">Android 性能优化之过度绘制 - 实战篇</a>
         </li>
                 </ul>
             <div class="archive-year"> 2014 </div>
             <ul class="year-list">
         <li class="archive-post-item">
             <span class="archive-post-date">10/20</span>
-            <a class="archive-post-title" href="/2014/10/20/android-performance-optimization-overdraw-1/">Android 性能优化之过渡绘制 - 理论篇</a>
+            <a class="archive-post-title" href="/2014/10/20/android-performance-optimization-overdraw-1/">Android 性能优化之过度绘制 - 理论篇</a>
         </li>
         <li class="archive-post-item">
             <span class="archive-post-date">06/03</span>
@@ -1309,25 +1348,9 @@ loading="lazy"             decoding="async"
 
         <div class="sidebar-panel-tags">
     <div class="sidebar-tags-name">
-            <span class="sidebar-tag-name" data-tags="年度推荐">
-                <span class="iconfont-archer">&#xe606;</span>
-                年度推荐
-            </span>
-            <span class="sidebar-tag-name" data-tags="Startup">
-                <span class="iconfont-archer">&#xe606;</span>
-                Startup
-            </span>
-            <span class="sidebar-tag-name" data-tags="Memory">
-                <span class="iconfont-archer">&#xe606;</span>
-                Memory
-            </span>
             <span class="sidebar-tag-name" data-tags="Android">
                 <span class="iconfont-archer">&#xe606;</span>
                 Android
-            </span>
-            <span class="sidebar-tag-name" data-tags="Jank">
-                <span class="iconfont-archer">&#xe606;</span>
-                Jank
             </span>
             <span class="sidebar-tag-name" data-tags="Perfetto">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1337,6 +1360,14 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Systrace
             </span>
+            <span class="sidebar-tag-name" data-tags="Startup">
+                <span class="iconfont-archer">&#xe606;</span>
+                Startup
+            </span>
+            <span class="sidebar-tag-name" data-tags="Jank">
+                <span class="iconfont-archer">&#xe606;</span>
+                Jank
+            </span>
             <span class="sidebar-tag-name" data-tags="年终总结">
                 <span class="iconfont-archer">&#xe606;</span>
                 年终总结
@@ -1344,6 +1375,14 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="知识星球">
                 <span class="iconfont-archer">&#xe606;</span>
                 知识星球
+            </span>
+            <span class="sidebar-tag-name" data-tags="年度推荐">
+                <span class="iconfont-archer">&#xe606;</span>
+                年度推荐
+            </span>
+            <span class="sidebar-tag-name" data-tags="Memory">
+                <span class="iconfont-archer">&#xe606;</span>
+                Memory
             </span>
             <span class="sidebar-tag-name" data-tags="Performance">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1369,6 +1408,18 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 随笔
             </span>
+            <span class="sidebar-tag-name" data-tags="ANR">
+                <span class="iconfont-archer">&#xe606;</span>
+                ANR
+            </span>
+            <span class="sidebar-tag-name" data-tags="RenderThread">
+                <span class="iconfont-archer">&#xe606;</span>
+                RenderThread
+            </span>
+            <span class="sidebar-tag-name" data-tags="Tools">
+                <span class="iconfont-archer">&#xe606;</span>
+                Tools
+            </span>
             <span class="sidebar-tag-name" data-tags="Agent OS">
                 <span class="iconfont-archer">&#xe606;</span>
                 Agent OS
@@ -1384,18 +1435,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Mobile OS">
                 <span class="iconfont-archer">&#xe606;</span>
                 Mobile OS
-            </span>
-            <span class="sidebar-tag-name" data-tags="ANR">
-                <span class="iconfont-archer">&#xe606;</span>
-                ANR
-            </span>
-            <span class="sidebar-tag-name" data-tags="Tools">
-                <span class="iconfont-archer">&#xe606;</span>
-                Tools
-            </span>
-            <span class="sidebar-tag-name" data-tags="RenderThread">
-                <span class="iconfont-archer">&#xe606;</span>
-                RenderThread
             </span>
             <span class="sidebar-tag-name" data-tags="Linux">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1413,6 +1452,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 性能优化
             </span>
+            <span class="sidebar-tag-name" data-tags="Binder">
+                <span class="iconfont-archer">&#xe606;</span>
+                Binder
+            </span>
             <span class="sidebar-tag-name" data-tags="线程优化">
                 <span class="iconfont-archer">&#xe606;</span>
                 线程优化
@@ -1420,10 +1463,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="卡顿优化">
                 <span class="iconfont-archer">&#xe606;</span>
                 卡顿优化
-            </span>
-            <span class="sidebar-tag-name" data-tags="电量优化">
-                <span class="iconfont-archer">&#xe606;</span>
-                电量优化
             </span>
             <span class="sidebar-tag-name" data-tags="ANR分析">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1433,9 +1472,9 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 页面响应
             </span>
-            <span class="sidebar-tag-name" data-tags="Binder">
+            <span class="sidebar-tag-name" data-tags="电量优化">
                 <span class="iconfont-archer">&#xe606;</span>
-                Binder
+                电量优化
             </span>
             <span class="sidebar-tag-name" data-tags="SQL">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1465,6 +1504,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 heapprofd
             </span>
+            <span class="sidebar-tag-name" data-tags="Field">
+                <span class="iconfont-archer">&#xe606;</span>
+                Field
+            </span>
             <span class="sidebar-tag-name" data-tags="GPU">
                 <span class="iconfont-archer">&#xe606;</span>
                 GPU
@@ -1480,10 +1523,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="Audio">
                 <span class="iconfont-archer">&#xe606;</span>
                 Audio
-            </span>
-            <span class="sidebar-tag-name" data-tags="Field">
-                <span class="iconfont-archer">&#xe606;</span>
-                Field
             </span>
             <span class="sidebar-tag-name" data-tags="Input">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1501,25 +1540,33 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 DelayLoad
             </span>
-            <span class="sidebar-tag-name" data-tags="程序员">
-                <span class="iconfont-archer">&#xe606;</span>
-                程序员
-            </span>
             <span class="sidebar-tag-name" data-tags="HashMap">
                 <span class="iconfont-archer">&#xe606;</span>
                 HashMap
             </span>
-            <span class="sidebar-tag-name" data-tags="Singleton">
+            <span class="sidebar-tag-name" data-tags="程序员">
                 <span class="iconfont-archer">&#xe606;</span>
-                Singleton
+                程序员
             </span>
             <span class="sidebar-tag-name" data-tags="Nexus">
                 <span class="iconfont-archer">&#xe606;</span>
                 Nexus
             </span>
+            <span class="sidebar-tag-name" data-tags="Singleton">
+                <span class="iconfont-archer">&#xe606;</span>
+                Singleton
+            </span>
             <span class="sidebar-tag-name" data-tags="OpenClaw">
                 <span class="iconfont-archer">&#xe606;</span>
                 OpenClaw
+            </span>
+            <span class="sidebar-tag-name" data-tags="效率工具">
+                <span class="iconfont-archer">&#xe606;</span>
+                效率工具
+            </span>
+            <span class="sidebar-tag-name" data-tags="本地模型">
+                <span class="iconfont-archer">&#xe606;</span>
+                本地模型
             </span>
             <span class="sidebar-tag-name" data-tags="AI Agent">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1537,14 +1584,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 Android Performance
             </span>
-            <span class="sidebar-tag-name" data-tags="效率工具">
-                <span class="iconfont-archer">&#xe606;</span>
-                效率工具
-            </span>
-            <span class="sidebar-tag-name" data-tags="本地模型">
-                <span class="iconfont-archer">&#xe606;</span>
-                本地模型
-            </span>
             <span class="sidebar-tag-name" data-tags="Gracker">
                 <span class="iconfont-archer">&#xe606;</span>
                 Gracker
@@ -1552,10 +1591,6 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="设计规范">
                 <span class="iconfont-archer">&#xe606;</span>
                 设计规范
-            </span>
-            <span class="sidebar-tag-name" data-tags="Compose">
-                <span class="iconfont-archer">&#xe606;</span>
-                Compose
             </span>
             <span class="sidebar-tag-name" data-tags="Kotlin">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1569,6 +1604,10 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 卡顿
             </span>
+            <span class="sidebar-tag-name" data-tags="Overdraw">
+                <span class="iconfont-archer">&#xe606;</span>
+                Overdraw
+            </span>
             <span class="sidebar-tag-name" data-tags="读书笔记">
                 <span class="iconfont-archer">&#xe606;</span>
                 读书笔记
@@ -1577,10 +1616,6 @@ loading="lazy"             decoding="async"
                 <span class="iconfont-archer">&#xe606;</span>
                 程序员的修炼
             </span>
-            <span class="sidebar-tag-name" data-tags="测试">
-                <span class="iconfont-archer">&#xe606;</span>
-                测试
-            </span>
             <span class="sidebar-tag-name" data-tags="设计原则">
                 <span class="iconfont-archer">&#xe606;</span>
                 设计原则
@@ -1588,6 +1623,10 @@ loading="lazy"             decoding="async"
             <span class="sidebar-tag-name" data-tags="了解你的用户">
                 <span class="iconfont-archer">&#xe606;</span>
                 了解你的用户
+            </span>
+            <span class="sidebar-tag-name" data-tags="测试">
+                <span class="iconfont-archer">&#xe606;</span>
+                测试
             </span>
             <span class="sidebar-tag-name" data-tags="互联网那些事">
                 <span class="iconfont-archer">&#xe606;</span>
@@ -1639,21 +1678,21 @@ loading="lazy"             decoding="async"
             <span class="iconfont-archer">&#xe60a;</span>
             随笔
         </span>
-        <span class="sidebar-category-name" data-categories="读书笔记">
-            <span class="iconfont-archer">&#xe60a;</span>
-            读书笔记
-        </span>
         <span class="sidebar-category-name" data-categories="Android">
             <span class="iconfont-archer">&#xe60a;</span>
             Android
         </span>
-        <span class="sidebar-category-name" data-categories="AI">
+        <span class="sidebar-category-name" data-categories="读书笔记">
             <span class="iconfont-archer">&#xe60a;</span>
-            AI
+            读书笔记
         </span>
         <span class="sidebar-category-name" data-categories="Java">
             <span class="iconfont-archer">&#xe60a;</span>
             Java
+        </span>
+        <span class="sidebar-category-name" data-categories="AI">
+            <span class="iconfont-archer">&#xe60a;</span>
+            AI
         </span>
         <span class="sidebar-category-name" data-categories="Android性能优化">
             <span class="iconfont-archer">&#xe60a;</span>

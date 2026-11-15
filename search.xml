@@ -4,6 +4,41 @@
   
     
     <entry>
+      <title>SmartPerfetto 1.19.0：换过分析引擎之后，这次更新了什么</title>
+      <link href="/2026/11/15/SmartPerfetto-v1.19.0-Release-Notes/"/>
+      <url>/2026/11/15/SmartPerfetto-v1.19.0-Release-Notes/</url>
+      
+        <content type="html"><![CDATA[<p><strong>SmartPerfetto 1.19.0 已发布。</strong> 相比上一篇更新记录覆盖的 1.15.1，这段时间最大的变化是分析引擎统一到 Pi Agent Core；同时升级了 Perfetto、补了新的数据分析能力，也围绕 TraceDemo 的多轮测试修了不少实际问题。</p><p>先把这次值得关注的内容列出来：</p><ul><li><strong>分析引擎统一</strong>：从多套 Agent runtime 转向默认使用 Pi Agent Core，Web、CLI、API 共用取证与交付能力；旧的模型声明与 claim-verification 流程已移除。</li><li><strong>分析过程更好用</strong>：分析中途可以补充上下文，源码选择按会话保存；长会话的证据回读、预算收尾、连接中断和错误提示都有修复。</li><li><strong>能读到的证据更多</strong>：Perfetto 升到 v59.1，增加进程生命周期、JobScheduler 等观察；Bitmap、Doze、CPU PMU、相机和渲染分析也有更新。</li><li><strong>多轮验证留下了具体结果</strong>：合成样本、真实 trace、定向复测和最终发布包分别验证。哪些完成了，哪些只测了部分，后面会展开。</li><li><strong>不想装完整产品，也可以用 Perfetto-Skills</strong>：把独立 Skill 装进自己的 Codex、Claude Code 或 OpenCode，在已有 Agent 环境里分析 trace。</li></ul><p><a href="https://github.com/Gracker/SmartPerfetto/releases/tag/v1.19.0">下载 1.19.0</a> · <a href="https://github.com/Gracker/SmartPerfetto">SmartPerfetto</a> · <a href="https://github.com/Gracker/Perfetto-Skills">Perfetto-Skills</a></p><p><img src="/images/SmartPerfetto-v1.19.0-Release-Notes/cover.png" alt="SmartPerfetto 1.19.0 发布封面"></p><p>这是一篇独立更新，接着<a href="https://www.androidperformance.com/2026/10/06/SmartPerfetto-v1.15.1-Release-Notes/">上一篇更新记录</a>往后写，范围是 <strong>1.16.0 到 1.19.0</strong>。尤其要说明：Pi 成为默认引擎发生在 1.18.0，1.19.0 是这次迁移之后继续补能力、修问题的一版。</p><span id="more"></span><h2 id="先看版本：这一个多月改到了哪里"><a href="#先看版本：这一个多月改到了哪里" class="headerlink" title="先看版本：这一个多月改到了哪里"></a>先看版本：这一个多月改到了哪里</h2><table><thead><tr><th>版本</th><th>这次文章要交代的变化</th></tr></thead><tbody><tr><td>1.16.0—1.16.2</td><td>强化单位、证据与答案交付；修复 HTML 报告的完整内容、离线交互和身份恢复。期间还在维护声明与语义核验流程，后续于 1.18.0 移除</td></tr><tr><td>1.16.3—1.16.4</td><td>修复历史消息渲染、闲置 trace processor 回收、CPU&#x2F;FPS 目标身份；整理 AI Assistant 的停靠、缩放、窄面板和主题表现</td></tr><tr><td>1.17.0</td><td>Perfetto UI、Wasm、trace processor 与 SQL 知识同步到 v59.1；补充进程启动&#x2F;退出和 JobScheduler 等证据</td></tr><tr><td>1.18.0</td><td>默认引擎切换到 Pi Agent Core；支持运行中补充信息；移除 OpenCode&#x2F;Qoder 执行引擎和模型声明核验流程</td></tr><tr><td>1.18.1</td><td>源码选择按会话保存；可主动导入本机 Claude Code&#x2F;Codex 的网关配置；npm 包携带 Node 24 的 SQLite 原生绑定</td></tr><tr><td>1.19.0</td><td>Bitmap、Doze、PMU 能力，以及相机&#x2F;渲染证据改进；继续修复 Pi 预算、工具结果、SQL 指导、身份诊断和 CLI 报告交付</td></tr></tbody></table><p>完整列表见 <a href="https://github.com/Gracker/SmartPerfetto/blob/v1.19.0/CHANGELOG.md">1.19.0 Changelog</a>。我下面主要讲用户能感受到的变化，以及为什么要这样改。</p><h2 id="新架构：统一模型循环，把分析能力留在产品里"><a href="#新架构：统一模型循环，把分析能力留在产品里" class="headerlink" title="新架构：统一模型循环，把分析能力留在产品里"></a>新架构：统一模型循环，把分析能力留在产品里</h2><p>一次 trace 分析包含不少不同性质的工作。模型要理解问题、决定接下来查什么；Skill 和 SQL 要实际取数；进程身份、时间窗口和数据来源要保持一致；最终还要把结论、HTML 报告和会话结果交付出来。</p><p>之前同时维护多套模型 SDK&#x2F;runtime，这些工作需要跨不同执行方式接起来。现在默认由 <strong>Pi Agent Core 负责模型请求和工具循环</strong>，SmartPerfetto 继续拥有策略、工具、Skill、SQL、身份与权限、报告和会话。Web、CLI 和 API 使用同一套后端分析能力。</p><p><a href="/images/SmartPerfetto-v1.19.0-Release-Notes/architecture.png"><img src="/images/SmartPerfetto-v1.19.0-Release-Notes/architecture.png" alt="从多运行时到 Pi Agent Core 的架构变化"></a></p><p><em>图中展示默认执行路径的变化。1.19.0 仍保留旧 Claude&#x2F;OpenAI 引擎的隐藏回退；它们不再是日常配置界面的可选项。</em></p><p>Provider 仍决定 API、endpoint、模型和凭据。切换引擎时，已有配置需要保留原来的请求目标；恢复旧会话，也不能因为后来换了 active provider，就把会话悄悄发到另一家服务。无法迁移的旧配置会明确报错。源码授权、进程身份和 trace 归属检查也继续由产品控制。</p><p>Pi 在这里不会自动获得任意文件和 shell 权限。SmartPerfetto 使用的是自己的分析工具集合，源码读取仍需要对应授权。具体模块关系见<a href="https://github.com/Gracker/SmartPerfetto/blob/v1.19.0/docs/architecture/agent-runtime.md">当前 runtime 架构</a>。</p><h3 id="这次还撤掉了一套曾经投入很多精力的流程"><a href="#这次还撤掉了一套曾经投入很多精力的流程" class="headerlink" title="这次还撤掉了一套曾经投入很多精力的流程"></a>这次还撤掉了一套曾经投入很多精力的流程</h3><p>如果看过上一篇文章，会记得当时花了很多篇幅讲“答案声明与核验”：模型需要把结论和证据关系按特定格式声明，产品再解析、修复和核验。</p><p>1.16.x 还在继续修这套流程，包括声明格式、预算耗尽后的恢复和不完整引用。但真实模型运行里，声明、修复和最终正文之间仍然有交付摩擦；1.17.0 的发布记录也明确保留了启动、滑动探索运行未完成报告的限制。到了 1.18.0，<strong>运行时模型声明与 claim-verification 流程被移除</strong>。</p><p>当前方向是把可确定的工作放到取证阶段：Skill&#x2F;SQL 给出数据，生产者尽量说明单位、范围和语义，模型据此组织调查和解释。后端依然要守住身份、授权、预算和交付合同，但不能把“生成了一篇报告”包装成“每句话都完成了因果证明”。</p><p>我觉得这段取舍值得单独留下来。更新记录如果只写新增了什么，读者就会误以为旧文中的核验能力一直累加到现在；实际上这里发生过一次明确的架构调整。</p><h2 id="分析中途补信息，长调查也能继续看证据"><a href="#分析中途补信息，长调查也能继续看证据" class="headerlink" title="分析中途补信息，长调查也能继续看证据"></a>分析中途补信息，长调查也能继续看证据</h2><p>分析已经开始后，用户常常才想起一条关键信息，比如“只看第二次启动”“这个进程刚刚重启过”。现在可以在运行中补充上下文，界面会显示这条补充是排队、已送达，还是未能应用。它不保证回溯修改已经完成的分析步骤，但用户能知道信息有没有进入本次运行。</p><p>源码选择也改成按会话保存，新会话从最近一次选择开始。用户主动发起时，可以导入本机 Claude Code&#x2F;Codex 的第三方网关配置；导入只读指定配置文件，并通过系统对话框确认。<strong>这不等于 Claude Code 订阅登录就能直接配置 SmartPerfetto</strong>，仍需要有效的 API 凭据。</p><p>长调查里，证据管理也影响体验。模型可能先查一个总览，几十次工具调用后又要回看最早的几行。我们扩大了有上限的工件工作集，同时限制直接送进模型上下文的行数，保留按需分页和回读的入口。这样能减少过早驱逐证据造成的中断，同时控制上下文体积。缓存依然有容量与生命周期限制。</p><p>Pi 的预算收尾和连接恢复也做了多轮修复：轮数或上下文接近上限时给最终结论留出空间；对可重试的服务错误和空闲流中断按次数、时间、轮次及已知费用约束恢复；保留已经完成的工具结果。费用上限只对有已知定价的模型有效，不能把它理解为对所有第三方网关都生效的硬性账单保证。</p><h2 id="新的分析能力，先说清能看到什么"><a href="#新的分析能力，先说清能看到什么" class="headerlink" title="新的分析能力，先说清能看到什么"></a>新的分析能力，先说清能看到什么</h2><h3 id="Perfetto-v59-1、进程生命周期与后台任务"><a href="#Perfetto-v59-1、进程生命周期与后台任务" class="headerlink" title="Perfetto v59.1、进程生命周期与后台任务"></a>Perfetto v59.1、进程生命周期与后台任务</h3><p>1.17.0 同步了 Perfetto v59.1，包括 UI&#x2F;Wasm、固定版本 trace processor 和生成的 SQL 知识。上游的 FrameTimeline 图层分组、堆视图导航和 CPU 时间等变化也进入产品。</p><p>分析侧增加了进程启动上下文、启动延迟、退出原因和状态转换；JobScheduler 同时利用 framework track events 与已有 ATrace 视图。缺少等待时长、取消任务或归属信息时，会保留对应限制，不能把未知直接写成零。</p><h3 id="Bitmap、Doze、CPU-PMU"><a href="#Bitmap、Doze、CPU-PMU" class="headerlink" title="Bitmap、Doze、CPU PMU"></a>Bitmap、Doze、CPU PMU</h3><p>Bitmap 分析补了进程内已记录对象的 live set 形态、大小分布和大对象。排查图片内存时，可以从“占用比较多”继续看具体分布。不过，记录到的 Bitmap 对象与整个进程内存是不同口径。</p><p>Doze 分析增加 light&#x2F;deep idle 的状态标签和转换时间线。快速切换值得继续调查，但单凭“切换频繁”不能证明异常耗电。</p><p>CPU PMU 分析增加计数器增量、事件比值和可用的进程归属信息，前提是 trace 录到了所需计数器。没有采集的硬件事件不会在升级后凭空出现，归属不足时也不能硬算到某个应用头上。</p><h3 id="相机、渲染和显示之间的区别"><a href="#相机、渲染和显示之间的区别" class="headerlink" title="相机、渲染和显示之间的区别"></a>相机、渲染和显示之间的区别</h3><p>相机分析开始更明确地测量观察到的帧节拍，并统一 SurfaceFlinger 绑定判断。Buffer&#x2F;Transaction 分析区分帧生产、事务活动和呈现证据；WebView、React Native、浏览器合成等路径有各自的条件。</p><p>这一点对“看起来有渲染活动，所以画面肯定显示了”的推断很重要。生产端活动只能支持对应阶段的观察，要确认显示，还需要绑定和呈现证据。产品中的渲染解释也改为维护中的教学卡，和管线目录一起校验。</p><h2 id="TraceDemo-跑了几轮，具体修到了什么"><a href="#TraceDemo-跑了几轮，具体修到了什么" class="headerlink" title="TraceDemo 跑了几轮，具体修到了什么"></a>TraceDemo 跑了几轮，具体修到了什么</h2><p>测试里发现的问题，很多不表现为“完全跑不起来”。模型可能已经交付了报告，但中间绕了弯路：回读证据失败、把发现工具当成 Skill 调用、参数猜错、身份拒绝原因被长结果挤掉，或者 SQL 用了不存在的列。</p><p>这些问题直接影响一次调查能否顺利推进，所以我们保留了不同轮次的账本和定向复测。表中的 P1–P5 是五项过程修复，F1–F6 是 fresh50 调查后归纳的六项诊断与调用问题。</p><p><a href="/images/SmartPerfetto-v1.19.0-Release-Notes/validation.png"><img src="/images/SmartPerfetto-v1.19.0-Release-Notes/validation.png" alt="TraceDemo 多轮调查与最终发布验证结果"></a></p><p><em>不同批次使用不同代码修订和样本。图中的完成数不是诊断准确率，定向复测也不等于重新跑完整批次。</em></p><table><thead><tr><th>记录</th><th>观察与结果</th><th>能说明的范围</th></tr></thead><tbody><tr><td>fixround88</td><td>88 个合成样本记录为完成</td><td>暴露分析过程中的工具使用问题；没有逐句重算所有结论</td></tr><tr><td>P1–P5 定向复测</td><td>9&#x2F;9 交付完成，对应用例的目标错误串消失</td><td>仍有 15 次自由 SQL 失败并恢复，不能写成全部工具零失败</td></tr><tr><td>unseen30</td><td>原批次 29 成功、1 失败；汇总证据为 27 个原始完成 + 3 个隔离回放</td><td>一次并发资产修改导致 dist 与运行时资产不一致；原 29&#x2F;1 账本保留</td></tr><tr><td>fresh50</td><td>49 条批量记录 + 1 条独立 smoke 完成</td><td>发生在 F1–F6 修复之前；修复后没有重跑完整 50 例</td></tr><tr><td>fresh50 修复验证</td><td>相机、thermal 自然复跑，加受控诊断探针</td><td>验证对应修复，不代表对所有场景的整体收益</td></tr></tbody></table><p>这些数据来自 TraceDemo runner 产物及 SmartPerfetto 的本地验证记录。可公开复核的发布信息见 <a href="https://github.com/Gracker/SmartPerfetto/releases/tag/v1.19.0">1.19.0 Release</a>；完整 trace 与本地会话不作为本文附件发布。</p><h3 id="几个实际例子"><a href="#几个实际例子" class="headerlink" title="几个实际例子"></a>几个实际例子</h3><p><strong>错误信息要让人知道错在哪里。</strong> 一次身份拒绝的关键原因，曾被很长的参数合同挤出结果摘要。现在优先保留安全的原因和下一步动作。SQL 日志也可以给出受限制的缺表、缺列、缺函数标识和查询哈希，帮助诊断，同时避免输出整段原始 SQL。</p><p><strong>模型的 SQL 先验也会过时。</strong> <code>sched.is_idle</code> 就是一个具体例子：正确做法是通过 thread join 使用 <code>thread.is_idle</code>。我们补了按内置 schema 核对过的核心列速查、slice&#x2F;thread 关联和窗口函数指导。相机单例复跑里 SQL 失败从 3 次变成 1 次，但两次查询总数不同，一个样本不够证明普遍降低了多少百分比。</p><p><strong>大数时间戳需要明确单位。</strong> thermal 案例曾出现错误秒量级。现在只从单位明确为 ns、可以精确处理的值派生秒预览，保留原始单元格和时钟起点。定向检查中的 <code>394361.352 s → 394406.092 s</code> 对应 <code>44.74 s</code>。当时记录中的另一处频率单位标签问题仍未解决，不能一起算作修好。</p><p><strong>证据不足时，计划要解释缺什么。</strong> 阶段反馈会列出缺失调用、已成功调用和带真实 tool-call ID 的失败调用。模型可以补查，或引用失败说明无法取证；这不会自动把未解决的调查项变成成功。</p><p>语义复核也留下了边界：多个并行线程的 CPU 时间相加，不能直接证明端到端关键路径；SurfaceFlinger 走 HWC，也不能推出全局 GPU 工作都来自目标应用。我希望读者能看到这些问题的存在，而不是只看到一串绿色完成标记。</p><h3 id="最终发布包又单独验了一遍"><a href="#最终发布包又单独验了一遍" class="headerlink" title="最终发布包又单独验了一遍"></a>最终发布包又单独验了一遍</h3><p>1.19.0 的完整 <code>verify:pr</code> 通过，包含 <strong>405 项 corpus 期望、2013 项 SQL 合同执行、6&#x2F;6 场景 trace 回归</strong>。</p><p>2013 中有正常生产路径、强制上下文、隔离探针和精确 UPID 绑定；只有部分包含正向语义断言，不能把它们当成 2013 个真实模型案例。SQL 覆盖为 0 skipped &#x2F; 0 unavailable，其他测试保留既有 skip。</p><p>交付也分别验收了：<a href="https://github.com/Gracker/SmartPerfetto/actions/runs/43671278321">Windows&#x2F;macOS&#x2F;Linux 最终归档原生 smoke</a>、<a href="https://github.com/Gracker/SmartPerfetto/actions/runs/43672114189">npm Trusted Publishing 与公共安装</a>、<a href="https://github.com/Gracker/SmartPerfetto/actions/runs/43670413886">Docker 双架构构建</a>。</p><p>macOS 包完成 Developer ID 签名、公证和 staple；npm 在无凭证、禁用 install scripts 的环境中检查了原生 SQLite 和真实 trace 查询；Docker 的版本、latest、SHA tag 指向同一份双架构 manifest。</p><h2 id="已经在用自己的-Agent？直接装-Perfetto-Skills"><a href="#已经在用自己的-Agent？直接装-Perfetto-Skills" class="headerlink" title="已经在用自己的 Agent？直接装 Perfetto-Skills"></a>已经在用自己的 Agent？直接装 Perfetto-Skills</h2><p>不想运行 SmartPerfetto 的完整界面和后端，也完全可以。<strong>Perfetto-Skills 是独立的 Agent Skill</strong>，面向有文件与终端能力的 Agent，提供分析工作流、SQL、证据规则和确定性 runner。</p><p><a href="/images/SmartPerfetto-v1.19.0-Release-Notes/choices.png"><img src="/images/SmartPerfetto-v1.19.0-Release-Notes/choices.png" alt="SmartPerfetto 和 Perfetto-Skills 的独立使用路径"></a></p><table><thead><tr><th>你希望怎样工作</th><th>更适合的入口</th></tr></thead><tbody><tr><td>打开 trace，在界面里调查、保存会话、导出报告、做比较</td><td>SmartPerfetto</td></tr><tr><td>在现有 Codex、Claude Code 或 OpenCode 里，让 Agent 按方法分析本地 trace</td><td>Perfetto-Skills</td></tr></tbody></table><p>它不需要 SmartPerfetto backend、Provider runtime、UI 或 MCP 服务。公开的 SQL 和方法资产通过固定提交同步，同时有自己的原生代码、独立真实 trace fixture 和完整门禁。这次来源固定到 1.19.0，公开仓库提交为 <a href="https://github.com/Gracker/Perfetto-Skills/commit/070053917e36c3e8537586062d437adf56b1f610"><code>070053917</code></a>，完整门禁记录为 514 tests、1 skipped。</p><p>按仓库当前 README 的安装方式，在项目目录中执行：</p><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">npx skills@1.5.16 add Gracker/Perfetto-Skills \</span><br><span class="line">  --skill perfetto-performance-analysis \</span><br><span class="line">  -a codex -a claude-code -a opencode -y</span><br></pre></td></tr></table></figure><p>只保留你使用的 <code>-a</code> 即可；需要用户级安装时添加 <code>-g</code>。运行脚本需要 Python 3.11+，首次使用按 Skill 指引准备固定版本 trace processor。上面的 <code>skills</code> CLI 是方便安装的生态工具，并非 Agent Skills 规范本身要求的安装器。</p><p>可以从这样一个问题开始：</p><blockquote><p>使用 perfetto-performance-analysis 分析这个 trace 中目标应用的启动。先确认进程实例和时间窗口，再列出关键证据、无法确认的原因，以及建议补采的数据。</p></blockquote><p>SmartPerfetto 移除的是自身内嵌的 OpenCode 执行引擎；<strong>在独立 OpenCode 中使用 Perfetto-Skills 仍是另一条使用路径</strong>。另外，这个项目也不是 Google 官方 Perfetto Skill：它提供自己的领域工作流与执行器，官方 Skill 是独立的上游选择。安装与使用细节见 <a href="https://github.com/Gracker/Perfetto-Skills#install">Perfetto-Skills README</a>。</p><p>这里仍有同样的限制：SQL 能执行，不等于某个因果结论已验证；本地有 trace，也不代表可以忽略发送给模型服务的数据范围。Agent 的文件权限与 Provider 数据策略需要由使用者管理。</p><h2 id="下载与升级"><a href="#下载与升级" class="headerlink" title="下载与升级"></a>下载与升级</h2><p><a href="https://github.com/Gracker/SmartPerfetto/releases/tag/v1.19.0">GitHub Release</a> 提供 Windows x64、macOS arm64、Linux x64 免安装包，自带运行时。npm CLI 需要 Node.js 24：</p><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">npm install -g @gracker/smartperfetto@1.19.0</span><br><span class="line">smp --version</span><br><span class="line">smp doctor --format json</span><br></pre></td></tr></table></figure><p>没有配置 Provider 时，doctor 会指出 AI runtime 未就绪，需要补齐凭据。Docker 可使用 <code>w553000664/smartperfetto:1.19.0</code>，<code>latest</code> 也已更新；它不读取宿主机 Claude Code 登录态。</p><p>这次发布整理没有新增历史数据回填。旧 Provider 按现有迁移规则处理，已经退役且无法映射的配置需要重新填写有效 endpoint；过往 trace 没采集到的 PMU、堆对象或呈现信息，升级也无法补出来。最终版本没有重新跑所有真实 Provider 的全量验收，文中的历史 GLM&#x2F;DeepSeek 测试范围不能推广到所有模型与云服务。</p><p>这次我想记录下来的，既有新引擎和新能力，也有测试中那些看似细小、却会打断调查的问题。你想用完整分析产品，就下载 SmartPerfetto；希望继续留在自己的 Agent 工作环境里，就试试 Perfetto-Skills。</p>]]></content>
+      
+      
+      <categories>
+          
+          <category> Android </category>
+          
+      </categories>
+      
+      
+        <tags>
+            
+            <tag> Android </tag>
+            
+            <tag> Perfetto </tag>
+            
+            <tag> Performance </tag>
+            
+            <tag> Open Source </tag>
+            
+            <tag> AI Agent </tag>
+            
+            <tag> SmartPerfetto </tag>
+            
+        </tags>
+      
+    </entry>
+    
+    
+    
+    <entry>
       <title>我给自己做了一个健康 App，做了一年</title>
       <link href="/2026/11/11/100Years-Health-App-One-Year/"/>
       <url>/2026/11/11/100Years-Health-App-One-Year/</url>
@@ -288,9 +323,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -457,9 +492,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> AI </tag>
+            
+            <tag> Android </tag>
             
             <tag> Agent OS </tag>
             
@@ -733,9 +768,9 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Perfetto </tag>
             
@@ -768,9 +803,9 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Perfetto </tag>
             
@@ -803,9 +838,9 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Perfetto </tag>
             
@@ -836,9 +871,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -869,11 +904,11 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> ANR </tag>
             
@@ -902,11 +937,11 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Systrace </tag>
             
@@ -935,11 +970,11 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -968,9 +1003,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -1001,9 +1036,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -1034,9 +1069,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -1127,9 +1162,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> iOS </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -1160,15 +1195,15 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
-            <tag> Java </tag>
-            
             <tag> RenderThread </tag>
+            
+            <tag> Java </tag>
             
         </tags>
       
@@ -1193,9 +1228,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Systrace </tag>
             
@@ -1226,9 +1261,9 @@
             
             <tag> Android </tag>
             
-            <tag> 知识星球 </tag>
-            
             <tag> Systrace </tag>
+            
+            <tag> 知识星球 </tag>
             
             <tag> Performance </tag>
             
@@ -1257,9 +1292,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -1290,11 +1325,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Memory </tag>
             
             <tag> Android </tag>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -1323,9 +1358,9 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Perfetto </tag>
             
@@ -1383,9 +1418,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Framework </tag>
             
@@ -1412,11 +1447,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Perfetto </tag>
             
@@ -1445,9 +1480,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -1478,9 +1513,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Linux </tag>
             
@@ -1507,9 +1542,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -1540,9 +1575,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -1573,9 +1608,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -1606,9 +1641,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -1639,9 +1674,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -1672,9 +1707,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -1705,9 +1740,9 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Java </tag>
             
@@ -1765,11 +1800,11 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
         </tags>
       
@@ -1794,11 +1829,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -1827,9 +1862,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -1858,9 +1893,9 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
         </tags>
       
@@ -1885,11 +1920,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -1918,11 +1953,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -1951,11 +1986,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -2015,11 +2050,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -2048,11 +2083,11 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -2081,11 +2116,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -2114,11 +2149,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -2147,9 +2182,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Systrace </tag>
             
@@ -2180,11 +2215,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -2213,13 +2248,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Linux </tag>
             
@@ -2246,13 +2281,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -2279,11 +2314,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Memory </tag>
             
             <tag> Android </tag>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -2312,11 +2347,11 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Systrace </tag>
             
@@ -2345,11 +2380,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Memory </tag>
             
             <tag> Android </tag>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -2378,9 +2413,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Systrace </tag>
             
@@ -2444,11 +2479,11 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Systrace </tag>
             
@@ -2477,11 +2512,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -2510,9 +2545,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -2543,11 +2578,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Startup </tag>
             
             <tag> Android </tag>
             
-            <tag> Startup </tag>
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -2576,9 +2611,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Perfetto </tag>
             
@@ -2609,13 +2644,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -2667,9 +2702,9 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Systrace </tag>
             
@@ -2700,11 +2735,11 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> 年度推荐 </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Linux </tag>
             
@@ -2731,11 +2766,11 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Framework </tag>
             
@@ -2951,9 +2986,9 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
             <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> 读书笔记 </tag>
             
@@ -3009,13 +3044,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Process </tag>
             
@@ -3042,13 +3077,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> RenderThread </tag>
             
@@ -3075,9 +3110,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Systrace </tag>
             
@@ -3108,13 +3143,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -3141,13 +3176,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> 年度推荐 </tag>
             
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
         </tags>
       
@@ -3251,11 +3286,11 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -3282,9 +3317,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -3313,13 +3348,13 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
-            <tag> Java </tag>
+            <tag> Android </tag>
             
             <tag> RenderThread </tag>
+            
+            <tag> Java </tag>
             
             <tag> DelayLoad </tag>
             
@@ -3346,15 +3381,15 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Systrace </tag>
             
-            <tag> Java </tag>
-            
             <tag> RenderThread </tag>
+            
+            <tag> Java </tag>
             
         </tags>
       
@@ -3408,11 +3443,11 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3441,13 +3476,13 @@
       
         <tags>
             
-            <tag> Jank </tag>
-            
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
+            
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -3474,11 +3509,11 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3507,9 +3542,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3540,9 +3575,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
+            
+            <tag> Android </tag>
             
             <tag> Java </tag>
             
@@ -3600,11 +3635,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Memory </tag>
             
             <tag> Android </tag>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -3633,11 +3668,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Memory </tag>
             
             <tag> Android </tag>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -3666,9 +3701,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3699,11 +3734,11 @@
       
         <tags>
             
-            <tag> Jank </tag>
+            <tag> Memory </tag>
             
             <tag> Android </tag>
             
-            <tag> Memory </tag>
+            <tag> Jank </tag>
             
             <tag> Performance </tag>
             
@@ -3732,9 +3767,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3765,15 +3800,15 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
-            <tag> Linux </tag>
-            
             <tag> Java </tag>
+            
+            <tag> Linux </tag>
             
         </tags>
       
@@ -3798,9 +3833,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3831,9 +3866,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3864,9 +3899,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Performance </tag>
             
@@ -3920,9 +3955,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
         </tags>
       
@@ -3995,9 +4030,9 @@
             
             <tag> Systrace </tag>
             
-            <tag> Linux </tag>
-            
             <tag> RenderThread </tag>
+            
+            <tag> Linux </tag>
             
         </tags>
       
@@ -4132,9 +4167,9 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
         </tags>
       
@@ -4159,11 +4194,11 @@
       
         <tags>
             
-            <tag> Android </tag>
-            
             <tag> Startup </tag>
             
             <tag> Memory </tag>
+            
+            <tag> Android </tag>
             
             <tag> Java </tag>
             
